@@ -286,6 +286,25 @@ int main() {
     CHECK(cmo::StampMatches(stampA, stampB));
     CHECK(!cmo::StampMatches(stampA, stampC));
 
+    std::vector<std::wstring> configuredTypes{L"TXT", L".PNG", L" .Zip ", L"txt", L""};
+    std::vector<std::wstring> warmTypes = cmo::BuildWarmupTypes(configuredTypes);
+    CHECK(warmTypes.size() == 8);
+    CHECK_EQ(warmTypes[0], std::wstring(L"*"));
+    CHECK_EQ(warmTypes[1], std::wstring(L"Directory"));
+    CHECK_EQ(warmTypes[2], std::wstring(L"Directory\\Background"));
+    CHECK_EQ(warmTypes[3], std::wstring(L"Desktop"));
+    CHECK_EQ(warmTypes[4], std::wstring(L"Drive"));
+    CHECK_EQ(warmTypes[5], std::wstring(L".txt"));
+    CHECK_EQ(warmTypes[6], std::wstring(L".png"));
+    CHECK_EQ(warmTypes[7], std::wstring(L".zip"));
+
+    cmo::Warmup warmupState;
+    CHECK(!warmupState.IsPaused());
+    warmupState.SetMenuOpen(true);
+    CHECK(warmupState.IsPaused());
+    warmupState.SetMenuOpen(false);
+    CHECK(!warmupState.IsPaused());
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

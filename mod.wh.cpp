@@ -57,6 +57,7 @@ Design document: `docs/superpowers/specs/2026-10-04-context-menu-overhaul-design
 
 #include <windhawk_utils.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <cstring>
@@ -1556,8 +1557,268 @@ std::optional<uint32_t> ShowNativeReplay(const PendingCapture& capture, HWND own
 }  // namespace cmo
 
 // ===========================================================================
-// [CMO:Warmup] Background cache warm-up. (Task 8)
+// [CMO:Warmup] Background cache warm-up.
 // ===========================================================================
+namespace cmo {
+
+std::vector<std::wstring> BuildWarmupTypes(
+    std::span<const std::wstring> configuredExtensions) {
+    std::vector<std::wstring> types;
+
+    auto addUnique = [&](std::wstring value) {
+        if (std::find(types.begin(), types.end(), value) == types.end()) {
+            types.push_back(std::move(value));
+        }
+    };
+
+    addUnique(L"*");
+    addUnique(L"Directory");
+    addUnique(L"Directory\\Background");
+    addUnique(L"Desktop");
+    addUnique(L"Drive");
+
+    for (const std::wstring& raw : configuredExtensions) {
+        const size_t begin = raw.find_first_not_of(L" \t");
+        if (begin == std::wstring::npos) {
+            continue;
+        }
+        const size_t end = raw.find_last_not_of(L" \t");
+        std::wstring extension = raw.substr(begin, end - begin + 1);
+        if (extension.empty()) {
+            continue;
+        }
+        if (extension[0] != L'.') {
+            extension.insert(extension.begin(), L'.');
+        }
+        CharLowerBuffW(extension.data(), static_cast<DWORD>(extension.size()));
+        addUnique(std::move(extension));
+    }
+    return types;
+}
+
+// Creates a shell context menu object for a path on the warm-up thread.
+IContextMenu* CreateContextMenuForPath(const std::wstring& path, bool background) {
+    PIDLIST_ABSOLUTE absolute = nullptr;
+    if (FAILED(SHParseDisplayName(path.c_str(), nullptr, &absolute, 0, nullptr)) ||
+        !absolute) {
+        return nullptr;
+    }
+
+    IContextMenu* menu = nullptr;
+    if (background) {
+        DEFCONTEXTMENU dcm = {};
+        dcm.pidlFolder = absolute;
+        dcm.cidl = 0;
+        SHCreateDefaultContextMenu(&dcm, IID_IContextMenu, (void**)&menu);
+    } else {
+        IShellFolder* parent = nullptr;
+        PCUITEMID_CHILD child = ILFindLastID(absolute);
+        if (SUCCEEDED(SHBindToParent(absolute, IID_IShellFolder, (void**)&parent, &child)) &&
+            parent) {
+            parent->GetUIObjectOf(nullptr, 1, &child, IID_IContextMenu, nullptr,
+                                  (void**)&menu);
+            parent->Release();
+        }
+    }
+
+    CoTaskMemFree(absolute);
+    return menu;
+}
+
+class Warmup {
+public:
+    void Start() {
+        if (thread_) {
+            return;
+        }
+        stopEvent_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        resumeEvent_ = CreateEventW(nullptr, TRUE, TRUE, nullptr);
+        if (!stopEvent_ || !resumeEvent_) {
+            if (stopEvent_) CloseHandle(stopEvent_);
+            if (resumeEvent_) CloseHandle(resumeEvent_);
+            stopEvent_ = nullptr;
+            resumeEvent_ = nullptr;
+            return;
+        }
+
+        thread_ = CreateThread(nullptr, 0, &Warmup::ThreadProc, this, 0, nullptr);
+        if (thread_) {
+            SetThreadPriority(thread_, THREAD_PRIORITY_BELOW_NORMAL);
+        } else {
+            CloseHandle(stopEvent_);
+            CloseHandle(resumeEvent_);
+            stopEvent_ = nullptr;
+            resumeEvent_ = nullptr;
+        }
+    }
+
+    void Stop() {
+        if (stopEvent_) {
+            SetEvent(stopEvent_);
+        }
+        if (thread_) {
+            WaitForSingleObject(thread_, 5000);
+            CloseHandle(thread_);
+            thread_ = nullptr;
+        }
+        if (stopEvent_) {
+            CloseHandle(stopEvent_);
+            stopEvent_ = nullptr;
+        }
+        if (resumeEvent_) {
+            CloseHandle(resumeEvent_);
+            resumeEvent_ = nullptr;
+        }
+    }
+
+    // Pauses warm-up between contexts while a menu is open.
+    void SetMenuOpen(bool open) {
+        paused_.store(open);
+        if (resumeEvent_) {
+            if (open) {
+                ResetEvent(resumeEvent_);
+            } else {
+                SetEvent(resumeEvent_);
+            }
+        }
+    }
+
+    bool IsPaused() const { return paused_.load(); }
+
+private:
+    static DWORD WINAPI ThreadProc(LPVOID param) {
+        static_cast<Warmup*>(param)->Run();
+        return 0;
+    }
+
+    void Run() {
+        const int delaySeconds =
+            g_settings.warmupDelaySeconds > 0 ? g_settings.warmupDelaySeconds : 0;
+        if (WaitForSingleObject(stopEvent_, static_cast<DWORD>(delaySeconds) * 1000) ==
+            WAIT_OBJECT_0) {
+            return;
+        }
+
+        std::vector<std::wstring> configured;
+        for (int i = 0;; ++i) {
+            PCWSTR value = Wh_GetStringSetting(L"warmupExtensions[%d]", i);
+            const bool empty = !value || !value[0];
+            if (!empty) {
+                configured.emplace_back(value);
+            }
+            Wh_FreeStringSetting(value);
+            if (empty) {
+                break;
+            }
+        }
+        const std::vector<std::wstring> types = BuildWarmupTypes(configured);
+
+        wchar_t storagePath[MAX_PATH] = {};
+        if (!Wh_GetModStoragePath(storagePath, ARRAYSIZE(storagePath))) {
+            return;
+        }
+        const std::wstring warmupDir = std::wstring(storagePath) + L"\\warmup";
+        CreateDirectoryW(storagePath, nullptr);
+        CreateDirectoryW(warmupDir.c_str(), nullptr);
+
+        const bool comInitialized =
+            SUCCEEDED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED));
+
+        for (const std::wstring& type : types) {
+            if (WaitForSingleObject(stopEvent_, 0) == WAIT_OBJECT_0) {
+                break;
+            }
+            WaitForSingleObject(resumeEvent_, INFINITE);
+            if (WaitForSingleObject(stopEvent_, 0) == WAIT_OBJECT_0) {
+                break;
+            }
+            WarmOneType(type, warmupDir);
+            Sleep(50);
+        }
+
+        if (comInitialized) {
+            CoUninitialize();
+        }
+        Wh_Log(L"Warm-up finished");
+    }
+
+    void WarmOneType(const std::wstring& type, const std::wstring& warmupDir) {
+        if (type == L"*") {
+            const std::wstring path = warmupDir + L"\\warmup";
+            EnsureScratchFile(path);
+            WarmPath(path, false,
+                     ContextSignature{Scope::Files, L"*", Shape::Single, Variant::Normal});
+        } else if (type == L"Directory") {
+            const std::wstring path = warmupDir + L"\\warmup-folder";
+            CreateDirectoryW(path.c_str(), nullptr);
+            WarmPath(path, false, ContextSignature{Scope::Folders, L"*", Shape::Single,
+                                                   Variant::Normal});
+        } else if (type == L"Directory\\Background") {
+            const std::wstring path = warmupDir + L"\\warmup-folder";
+            CreateDirectoryW(path.c_str(), nullptr);
+            WarmPath(path, true, ContextSignature{Scope::Background, L"*", Shape::Single,
+                                                  Variant::Normal});
+        } else if (type == L"Drive") {
+            wchar_t windowsDir[MAX_PATH] = {};
+            if (GetWindowsDirectoryW(windowsDir, ARRAYSIZE(windowsDir))) {
+                const std::wstring drive(windowsDir, 3);  // "C:\"
+                WarmPath(drive, false, ContextSignature{Scope::Drive, L"*", Shape::Single,
+                                                        Variant::Normal});
+            }
+        } else if (type == L"Desktop") {
+            wchar_t desktopPath[MAX_PATH] = {};
+            if (SUCCEEDED(SHGetFolderPathW(nullptr, CSIDL_DESKTOP, nullptr, 0,
+                                           desktopPath))) {
+                WarmPath(desktopPath, false,
+                         ContextSignature{Scope::Desktop, L"*", Shape::Single,
+                                          Variant::Normal});
+            }
+        } else {
+            const std::wstring path = warmupDir + L"\\warmup" + type;
+            EnsureScratchFile(path);
+            WarmPath(path, false,
+                     ContextSignature{Scope::Files, type, Shape::Single, Variant::Normal});
+        }
+    }
+
+    static void EnsureScratchFile(const std::wstring& path) {
+        HANDLE file = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_ALWAYS,
+                                  FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (file != INVALID_HANDLE_VALUE) {
+            CloseHandle(file);
+        }
+    }
+
+    void WarmPath(const std::wstring& path, bool background,
+                  const ContextSignature& signature) {
+        IContextMenu* menu = CreateContextMenuForPath(path, background);
+        if (!menu) {
+            Wh_Log(L"Warm-up: no context menu for %s", path.c_str());
+            return;
+        }
+
+        HMENU offscreen = CreatePopupMenu();
+        if (offscreen) {
+            ReplayInto(menu, offscreen, 0, 1, 0x7FFF, CMF_NORMAL);
+            MenuModel model = BuildModelFromHMenu(offscreen, 1, signature, menu);
+            DestroyMenu(offscreen);
+            if (!model.items.empty()) {
+                g_cache.Put(std::move(model));
+                g_cache.MaybeSave(CacheFilePath());
+            }
+        }
+        menu->Release();
+    }
+
+    HANDLE thread_ = nullptr;
+    HANDLE stopEvent_ = nullptr;
+    HANDLE resumeEvent_ = nullptr;
+    std::atomic<bool> paused_{false};
+};
+
+inline Warmup g_warmup;
+
+}  // namespace cmo
 
 // ===========================================================================
 // [CMO:Invalidation] Cache invalidation on handler registration changes.
@@ -1703,6 +1964,7 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
     MenuModel model = cached ? MergeCoreWithCached(BuildCoreFileModel(paths, shape), *cached)
                              : BuildCoreFileModel(paths, shape);
 
+    g_warmup.SetMenuOpen(true);
     std::optional<uint32_t> selection = NativeMenuView::Show(model, owner, pt);
     if (selection) {
         const MenuItem* item = FindById(model, *selection);
@@ -1731,6 +1993,7 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
 
     // Refresh the cache from the real population, off the interactive path.
     DiscoverIntoCache(capture.obj, capture, signature);
+    g_warmup.SetMenuOpen(false);
     return true;
 }
 
@@ -1922,6 +2185,7 @@ BOOL Wh_ModInit() {
         }
     }
     cmo::g_invalidation.Start();
+    cmo::g_warmup.Start();
 
     if (cmo::InstallPopulationHook()) {
         Wh_Log(L"Population hook installed");
@@ -1943,6 +2207,7 @@ void Wh_ModAfterInit() {
 
 void Wh_ModUninit() {
     Wh_Log(L"Context Menu Overhaul uninit");
+    cmo::g_warmup.Stop();
     cmo::g_invalidation.Stop();
 
     const std::wstring cachePath = cmo::CacheFilePath();

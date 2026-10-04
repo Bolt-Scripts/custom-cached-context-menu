@@ -60,7 +60,8 @@ untouched native menu, including extended verbs.
   value (matched by verb or display label), or — as a last resort — icon 0
   from a handler DLL matched by key name, file name, or version-info
   company/product name. Everything is composited over the themed menu
-  background; checked items keep the checkmark gutter.
+  background; checked items keep the checkmark gutter. New templates use the
+  shell's file-type icons, and the View modes use glyphs.
 - Warm-up models are provisional: they are shown instantly but never overwrite
   a live model, and are refreshed from the real context on first use.
 - On the first open of an uncached context, the menu shows the core commands
@@ -82,7 +83,8 @@ untouched native menu, including extended verbs.
 - "Sort by" / "Paste shortcut" fall back to the untouched native menu on
   builds where the shell object rejects those verbs. New is a real submenu
   built from the registry's ShellNew templates (Folder, Shortcut, and file
-  types), created directly without involving the shell's own New handler.
+  types with the shell's own type icons), created directly without involving
+  the shell's own New handler.
 - Rare entries whose labels cannot be read from the shell (dynamic or
   owner-drawn items) are hidden rather than shown blank, and submenus left
   empty are removed with them; each hidden item is logged as

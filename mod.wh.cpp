@@ -2,7 +2,7 @@
 // @id              context-menu-overhaul
 // @name            Context Menu Overhaul
 // @description     Replaces the Explorer context menu with an instantly-opening cached menu, then discovers and caches shell extension items asynchronously.
-// @version         0.3.17
+// @version         0.3.18
 // @include         explorer.exe
 // @architecture    x86-64
 // @compilerOptions -lole32 -lshlwapi -luuid -lcomctl32 -ladvapi32 -lgdi32 -luxtheme -lversion
@@ -690,10 +690,14 @@ std::vector<NewTemplate> EnumerateShellNewTemplates() {
             }
             std::wstring lower = ext;
             std::transform(lower.begin(), lower.end(), lower.begin(), towlower);
-            if (!seenExtensions.insert(lower).second) {
+            if (seenExtensions.count(lower)) {
                 continue;  // HKCU wins over HKLM
             }
+            const size_t before = templates.size();
             AddShellNewTemplate(root, ext, templates);
+            if (templates.size() > before) {
+                seenExtensions.insert(lower);
+            }
         }
         RegCloseKey(classes);
     }
@@ -772,12 +776,20 @@ void ResetNewTemplatesForTesting() {
 void BuildNewMenuChildren(std::vector<MenuItem>& children, uint32_t& nextId) {
     EnsureNewTemplates();
     for (size_t i = 0; i < g_newTemplates.size(); ++i) {
+        const NewTemplate& tmpl = g_newTemplates[i];
         MenuItem item{};
         item.id = nextId++;
         item.kind = ItemKind::Command;
         item.action = ActionKind::NewItem;
-        item.label = g_newTemplates[i].displayName;
+        item.label = tmpl.displayName;
         item.newIndex = static_cast<uint32_t>(i);
+        if (tmpl.kind == NewTemplate::Kind::Folder) {
+            item.iconRef = L"@ext:folder";
+        } else if (tmpl.kind == NewTemplate::Kind::Shortcut) {
+            item.iconRef = L"@ext:.lnk";
+        } else {
+            item.iconRef = L"@ext:" + tmpl.extension;
+        }
         children.push_back(std::move(item));
     }
 }
@@ -958,14 +970,19 @@ MenuModel BuildCoreModel(Scope scope, const std::vector<std::wstring>& paths, Sh
 
     if (scope == Scope::Background || scope == Scope::Desktop) {
         MenuItem& viewMenu = addSubmenu(L"View");
+        viewMenu.iconRef = L"@glyph:E890";
         viewMenu.children.push_back(makeViewAction(L"Large icons", L"viewlarge",
-                                                   ViewAction::ViewLargeIcons, kModelNone));
+                                                   ViewAction::ViewLargeIcons, kModelNone,
+                                                   L"@glyph:F0E2"));
         viewMenu.children.push_back(makeViewAction(L"Small icons", L"viewsmall",
-                                                   ViewAction::ViewSmallIcons, kModelNone));
+                                                   ViewAction::ViewSmallIcons, kModelNone,
+                                                   L"@glyph:E8A9"));
         viewMenu.children.push_back(makeViewAction(L"List", L"viewlist",
-                                                   ViewAction::ViewList, kModelNone));
+                                                   ViewAction::ViewList, kModelNone,
+                                                   L"@glyph:EA37"));
         viewMenu.children.push_back(makeViewAction(L"Details", L"viewdetails",
-                                                   ViewAction::ViewDetails, kModelNone));
+                                                   ViewAction::ViewDetails, kModelNone,
+                                                   L"@glyph:E9D5"));
 
         addCommand(L"Sort by", L"sortby");
         addViewAction(L"Refresh", L"refresh", ViewAction::Refresh, kModelNone,
@@ -4015,7 +4032,20 @@ private:
         }
 
         HBITMAP bitmap = nullptr;
-        if (ref.rfind(L"@glyph:", 0) == 0) {
+        if (ref.rfind(L"@ext:", 0) == 0) {
+            const std::wstring spec = ref.substr(5);
+            const bool isFolder = _wcsicmp(spec.c_str(), L"folder") == 0;
+            SHFILEINFOW info = {};
+            if (SHGetFileInfoW(isFolder ? L"folder" : spec.c_str(),
+                               isFolder ? FILE_ATTRIBUTE_DIRECTORY
+                                        : FILE_ATTRIBUTE_NORMAL,
+                               &info, sizeof(info),
+                               SHGFI_USEFILEATTRIBUTES | SHGFI_ICON | SHGFI_SMALLICON) &&
+                info.hIcon) {
+                bitmap = BitmapFromIcon(info.hIcon, sizePx);
+                DestroyIcon(info.hIcon);
+            }
+        } else if (ref.rfind(L"@glyph:", 0) == 0) {
             const wchar_t codepoint =
                 static_cast<wchar_t>(wcstoul(ref.c_str() + 7, nullptr, 16));
             std::vector<uint8_t> pixels;

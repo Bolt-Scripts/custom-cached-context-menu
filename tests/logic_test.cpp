@@ -1714,6 +1714,26 @@ int main() {
                            sizeof(dataBytes));
             RegCloseKey(key);
         }
+        // An HKCU extension key without ShellNew must not shadow the HKLM
+        // template for the same extension.
+        HKEY shadowKey = nullptr;
+        const bool shadowHkcuOk =
+            RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Classes\\.cmoshadow", 0,
+                            nullptr, 0, KEY_WRITE, nullptr, &shadowKey, nullptr) ==
+            ERROR_SUCCESS;
+        if (shadowHkcuOk) {
+            RegCloseKey(shadowKey);
+        }
+        const bool shadowHklmOk =
+            RegCreateKeyExW(HKEY_LOCAL_MACHINE,
+                            L"Software\\Classes\\.cmoshadow\\ShellNew", 0, nullptr, 0,
+                            KEY_WRITE, nullptr, &key, nullptr) == ERROR_SUCCESS;
+        if (shadowHklmOk) {
+            const wchar_t empty[] = L"";
+            RegSetValueExW(key, L"NullFile", 0, REG_SZ,
+                           reinterpret_cast<const BYTE*>(empty), sizeof(empty));
+            RegCloseKey(key);
+        }
 
         cmo::ResetNewTemplatesForTesting();
         cmo::EnsureNewTemplates();
@@ -1722,6 +1742,7 @@ int main() {
         CHECK(cmo::g_newTemplates[1].kind == cmo::NewTemplate::Kind::Shortcut);
         bool foundNull = false;
         bool foundData = false;
+        bool foundShadow = false;
         for (const cmo::NewTemplate& tmpl : cmo::g_newTemplates) {
             if (tmpl.extension == L".cmonull" &&
                 tmpl.kind == cmo::NewTemplate::Kind::NullFile) {
@@ -1731,9 +1752,14 @@ int main() {
                 tmpl.kind == cmo::NewTemplate::Kind::Data) {
                 foundData = true;
             }
+            if (tmpl.extension == L".cmoshadow" &&
+                tmpl.kind == cmo::NewTemplate::Kind::NullFile) {
+                foundShadow = true;
+            }
         }
         CHECK(foundNull);
         CHECK(foundData);
+        CHECK(foundShadow);
 
         // The core background model exposes New as a submenu with children.
         cmo::MenuModel background =
@@ -1753,15 +1779,55 @@ int main() {
             if (child.label == L"Folder" &&
                 child.action == cmo::ActionKind::NewItem) {
                 hasFolderChild = true;
+                CHECK(child.iconRef == L"@ext:folder");
+            }
+            if (child.label == L"Shortcut") {
+                CHECK(child.iconRef == L"@ext:.lnk");
+            }
+            if (child.newIndex < cmo::g_newTemplates.size()) {
+                const cmo::NewTemplate& tmpl = cmo::g_newTemplates[child.newIndex];
+                if (tmpl.kind != cmo::NewTemplate::Kind::Folder &&
+                    tmpl.kind != cmo::NewTemplate::Kind::Shortcut) {
+                    CHECK(child.iconRef == L"@ext:" + tmpl.extension);
+                }
             }
         }
         CHECK(hasFolderChild);
+
+        // View submenu carries invented glyphs.
+        const cmo::MenuItem* viewMenu = nullptr;
+        for (const cmo::MenuItem& item : background.items) {
+            if (item.label == L"View") {
+                viewMenu = &item;
+            }
+        }
+        CHECK(viewMenu != nullptr);
+        CHECK(viewMenu && viewMenu->iconRef == L"@glyph:E890");
+        bool hasLargeGlyph = false;
+        bool hasDetailsGlyph = false;
+        for (const cmo::MenuItem& child : viewMenu ? viewMenu->children
+                                                   : std::vector<cmo::MenuItem>{}) {
+            if (child.label == L"Large icons") {
+                hasLargeGlyph = child.iconRef == L"@glyph:F0E2";
+            }
+            if (child.label == L"Details") {
+                hasDetailsGlyph = child.iconRef == L"@glyph:E9D5";
+            }
+        }
+        CHECK(hasLargeGlyph);
+        CHECK(hasDetailsGlyph);
 
         if (nullKeyOk) {
             RegDeleteTreeW(HKEY_CURRENT_USER, L"Software\\Classes\\.cmonull");
         }
         if (dataKeyOk) {
             RegDeleteTreeW(HKEY_CURRENT_USER, L"Software\\Classes\\.cmodata");
+        }
+        if (shadowHkcuOk) {
+            RegDeleteTreeW(HKEY_CURRENT_USER, L"Software\\Classes\\.cmoshadow");
+        }
+        if (shadowHklmOk) {
+            RegDeleteTreeW(HKEY_LOCAL_MACHINE, L"Software\\Classes\\.cmoshadow");
         }
     }
 

@@ -23,6 +23,22 @@ static int g_failures = 0;
         }                                                                       \
     } while (0)
 
+static cmo::MenuItem MakeDeepItem(int depth) {
+    cmo::MenuItem item{};
+    item.id = 30000 + static_cast<uint32_t>(depth);
+    item.label = L"deep";
+    if (depth > 0) {
+        item.kind = cmo::ItemKind::Submenu;
+        item.action = cmo::ActionKind::Submenu;
+        item.children.push_back(MakeDeepItem(depth - 1));
+    } else {
+        item.kind = cmo::ItemKind::Command;
+        item.action = cmo::ActionKind::ShellVerb;
+        item.canonicalVerb = L"x";
+    }
+    return item;
+}
+
 int main() {
     CHECK_EQ(cmo::MakeExtensionKey(L"file.txt"), std::wstring(L".txt"));
     CHECK_EQ(cmo::MakeExtensionKey(L"FILE.TXT"), std::wstring(L".txt"));
@@ -66,22 +82,29 @@ int main() {
     capture.tick = 1000;
     capture.idCmdFirst = 11;
     queue.Push(capture);
-    cmo::PendingCapture* taken = queue.Take();
-    CHECK(taken != nullptr);
-    CHECK(taken && taken->idCmdFirst == 11);
-    CHECK(queue.Take() == nullptr);
+    cmo::PendingCapture taken{};
+    CHECK(queue.Take(taken));
+    CHECK(taken.idCmdFirst == 11);
+    CHECK(!queue.Take(taken));
+
+    // A taken capture stays stable when a new capture is pushed (reentrancy).
+    cmo::PendingCapture replacement{};
+    replacement.idCmdFirst = 22;
+    queue.Push(replacement);
+    CHECK(taken.idCmdFirst == 11);
 
     queue.Push(capture);
     queue.ExpireOlderThan(1200, 500);
-    CHECK(queue.Take() != nullptr);
+    cmo::PendingCapture fresh{};
+    CHECK(queue.Take(fresh));
 
     queue.Push(capture);
     queue.ExpireOlderThan(2000, 500);
-    CHECK(queue.Take() == nullptr);
+    CHECK(!queue.Take(fresh));
 
     queue.Push(capture);
     queue.Clear();
-    CHECK(queue.Take() == nullptr);
+    CHECK(!queue.Take(fresh));
 
     std::vector<std::wstring> onePath{L"a.txt"};
     cmo::MenuModel single = cmo::BuildCoreFileModel(onePath, cmo::Shape::Single);
@@ -93,17 +116,22 @@ int main() {
     std::vector<std::wstring> threePaths{L"a.txt", L"b.txt", L"c.txt"};
     cmo::MenuModel multi = cmo::BuildCoreFileModel(threePaths, cmo::Shape::Multi);
     bool foundOpenItems = false;
-    bool cutDisabled = false;
+    bool multiCutEnabled = false;
+    bool multiRenameDisabled = false;
     for (const cmo::MenuItem& item : multi.items) {
         if (item.label == L"Open 3 items") {
             foundOpenItems = true;
         }
-        if (item.label == L"Cut" && (item.flags & cmo::kModelDisabled)) {
-            cutDisabled = true;
+        if (item.label == L"Cut" && !(item.flags & cmo::kModelDisabled)) {
+            multiCutEnabled = true;
+        }
+        if (item.label == L"Rename" && (item.flags & cmo::kModelDisabled)) {
+            multiRenameDisabled = true;
         }
     }
     CHECK(foundOpenItems);
-    CHECK(cutDisabled);
+    CHECK(multiCutEnabled);
+    CHECK(multiRenameDisabled);
 
     std::vector<uint32_t> ids = cmo::FlattenIds(single);
     CHECK(ids.size() >= 10);
@@ -225,6 +253,8 @@ int main() {
     submenuChild.verbOffset = 42;
     submenuItem.children.push_back(submenuChild);
     roundTrip.items.insert(roundTrip.items.end() - 1, submenuItem);
+    roundTrip.handlerModules.push_back(L"cmo-test-storage\\fake-handler.dll");
+    roundTrip.sourceStamp = 42;
     serializeCache.Put(roundTrip);
 
     std::vector<uint8_t> serialized = serializeCache.Serialize();
@@ -232,10 +262,12 @@ int main() {
 
     cmo::Cache restoredCache;
     CHECK(cmo::Cache::Deserialize(serialized, restoredCache));
-    const cmo::MenuModel* restoredModel = restoredCache.Find(roundTrip.sig);
-    CHECK(restoredModel != nullptr);
+    std::optional<cmo::MenuModel> restoredModel = restoredCache.Find(roundTrip.sig);
+    CHECK(restoredModel.has_value());
     CHECK(restoredModel && restoredModel->items.size() == roundTrip.items.size());
     CHECK(restoredModel && restoredModel->items.back().label == L"Show more options");
+    CHECK(restoredModel && restoredModel->handlerModules.size() == 1);
+    CHECK(restoredModel && restoredModel->sourceStamp == 42);
     const cmo::MenuItem* restoredChild =
         restoredModel ? cmo::FindById(*restoredModel, 501) : nullptr;
     CHECK(restoredChild != nullptr);
@@ -243,7 +275,7 @@ int main() {
     CHECK(restoredChild && restoredChild->verbOffset == 42);
 
     std::vector<uint8_t> badVersion = serialized;
-    badVersion[4] = 3;
+    badVersion[4] = 4;
     cmo::Cache rejectedCache;
     CHECK(!cmo::Cache::Deserialize(badVersion, rejectedCache));
 
@@ -264,21 +296,65 @@ int main() {
     Sleep(20);
     lruCache.Put(lruB);
     Sleep(20);
-    CHECK(lruCache.Find(lruA.sig) != nullptr);
+    CHECK(lruCache.Find(lruA.sig).has_value());
     Sleep(20);
     lruCache.Put(lruC);
     CHECK(lruCache.Size() == 2);
-    CHECK(lruCache.Find(lruB.sig) == nullptr);
-    CHECK(lruCache.Find(lruA.sig) != nullptr);
-    CHECK(lruCache.Find(lruC.sig) != nullptr);
+    CHECK(!lruCache.Find(lruB.sig).has_value());
+    CHECK(lruCache.Find(lruA.sig).has_value());
+    CHECK(lruCache.Find(lruC.sig).has_value());
 
     CreateDirectoryW(L"cmo-test-storage", nullptr);
     std::wstring cachePath = L"cmo-test-storage\\cache-test.bin";
     CHECK(serializeCache.Save(cachePath));
     cmo::Cache diskCache;
     CHECK(diskCache.Load(cachePath));
-    CHECK(diskCache.Find(roundTrip.sig) != nullptr);
+    CHECK(diskCache.Find(roundTrip.sig).has_value());
     DeleteFileW(cachePath.c_str());
+
+    // Find returns an independent copy: a later Clear must not invalidate it.
+    std::optional<cmo::MenuModel> independent = diskCache.Find(roundTrip.sig);
+    CHECK(independent.has_value());
+    diskCache.Clear();
+    CHECK(independent.has_value() &&
+          independent->items.size() == roundTrip.items.size());
+
+    // A model nested deeper than the parser limit is rejected.
+    cmo::Cache deepCache;
+    cmo::MenuModel deepModel{};
+    deepModel.sig = cmo::ContextSignature{cmo::Scope::Files, L".deep",
+                                          cmo::Shape::Single, cmo::Variant::Normal};
+    deepModel.items.push_back(MakeDeepItem(20));
+    deepCache.Put(deepModel);
+    std::vector<uint8_t> deepBytes = deepCache.Serialize();
+    cmo::Cache deepRestored;
+    CHECK(!cmo::Cache::Deserialize(deepBytes, deepRestored));
+
+    // Module stamps change when a recorded handler file changes.
+    const std::wstring stampFile = L"cmo-test-storage\\stamp-test.bin";
+    {
+        HANDLE file = CreateFileW(stampFile.c_str(), GENERIC_WRITE, 0, nullptr,
+                                  CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (file != INVALID_HANDLE_VALUE) {
+            DWORD written = 0;
+            WriteFile(file, "a", 1, &written, nullptr);
+            CloseHandle(file);
+        }
+    }
+    const uint64_t stampBefore = cmo::ComputeModuleStamp({stampFile});
+    Sleep(30);
+    {
+        HANDLE file = CreateFileW(stampFile.c_str(), GENERIC_WRITE, 0, nullptr,
+                                  CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (file != INVALID_HANDLE_VALUE) {
+            DWORD written = 0;
+            WriteFile(file, "abcd", 4, &written, nullptr);
+            CloseHandle(file);
+        }
+    }
+    const uint64_t stampAfter = cmo::ComputeModuleStamp({stampFile});
+    CHECK(stampBefore != stampAfter);
+    DeleteFileW(stampFile.c_str());
 
     cmo::SourceStamp stampA{1, 2};
     cmo::SourceStamp stampB{1, 2};
@@ -304,6 +380,14 @@ int main() {
     CHECK(warmupState.IsPaused());
     warmupState.SetMenuOpen(false);
     CHECK(!warmupState.IsPaused());
+
+    // Stop must wake a paused worker and finish promptly.
+    cmo::Warmup warmupThread;
+    warmupThread.Start();
+    Sleep(30);
+    warmupThread.SetMenuOpen(true);
+    warmupThread.Stop();
+    CHECK(!warmupThread.IsPaused());
 
     CHECK(cmo::DecidePath(true, cmo::ShellViewKind::ShellDefView, true, true) ==
           cmo::MenuPath::NativeBypass);
@@ -374,6 +458,30 @@ int main() {
     }
     CHECK(hasPersonalize);
     CHECK(hasDisplaySettings);
+
+    CHECK(cmo::IsFilesystemContext(true, true));
+    CHECK(!cmo::IsFilesystemContext(false, true));
+    CHECK(!cmo::IsFilesystemContext(true, false));
+    CHECK(cmo::RefineScope(cmo::Scope::Files, true, false) == cmo::Scope::Folders);
+    CHECK(cmo::RefineScope(cmo::Scope::Files, false, true) == cmo::Scope::Drive);
+    CHECK(cmo::RefineScope(cmo::Scope::Files, false, false) == cmo::Scope::Files);
+    CHECK(cmo::RefineScope(cmo::Scope::Background, true, true) ==
+          cmo::Scope::Background);
+    CHECK(cmo::PathSetsEqual({L"a", L"b"}, {L"b", L"a"}));
+    CHECK(!cmo::PathSetsEqual({L"a"}, {L"b"}));
+    CHECK(!cmo::PathSetsEqual({L"a"}, {L"a", L"b"}));
+    CHECK(cmo::ShouldShowNativeReplay(cmo::kModelOwnerDraw));
+    CHECK(!cmo::ShouldShowNativeReplay(cmo::kModelNone));
+
+    cmo::MenuModel dottedFolder =
+        cmo::BuildCoreModel(cmo::Scope::Folders, {L"release.v1"}, cmo::Shape::Single);
+    CHECK_EQ(dottedFolder.sig.typeKey, std::wstring(L"*"));
+
+    // A failed menu construction is distinguishable from a dismissal.
+    bool showFailed = false;
+    auto showResult = cmo::NativeMenuView::Show(single, nullptr, POINT{0, 0}, &showFailed);
+    CHECK(!showResult.has_value());
+    CHECK(showFailed);
 
     std::wstring iconPath;
     int iconIndex = -1;

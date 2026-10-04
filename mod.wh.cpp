@@ -55,12 +55,14 @@ Design document: `docs/superpowers/specs/2026-10-04-context-menu-overhaul-design
 #include <shlwapi.h>
 #include <shobjidl.h>
 
+#include <tlhelp32.h>
 #include <windhawk_utils.h>
 
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <string>
@@ -221,6 +223,8 @@ struct MenuModel {
     ContextSignature sig;
     std::vector<MenuItem> items;
     uint32_t flags = kModelNone;
+    std::vector<std::wstring> handlerModules;
+    uint64_t sourceStamp = 0;
 };
 
 void FlattenIdsInto(const std::vector<MenuItem>& items, std::vector<uint32_t>& out) {
@@ -271,7 +275,9 @@ std::wstring FormatMultiLabel(std::wstring_view verb, size_t count) {
 // items are merged in later, and the native fallback stays last.
 MenuModel BuildCoreModel(Scope scope, const std::vector<std::wstring>& paths, Shape shape) {
     MenuModel model{};
-    model.sig = ContextSignature{scope, MakeTypeKey(paths), shape, Variant::Normal};
+    const std::wstring typeKey =
+        scope == Scope::Files ? MakeTypeKey(paths) : std::wstring(L"*");
+    model.sig = ContextSignature{scope, typeKey, shape, Variant::Normal};
 
     uint32_t nextId = 1;
     auto makeCommand = [&](std::wstring label, std::wstring verb, uint32_t flags) {
@@ -383,8 +389,8 @@ MenuModel BuildCoreModel(Scope scope, const std::vector<std::wstring>& paths, Sh
         addSeparator();
     }
 
-    addViewCommand(L"Cut", L"cut", kViewCmdCut, multiDisabled);
-    addViewCommand(L"Copy", L"copy", kViewCmdCopy, multiDisabled);
+    addViewCommand(L"Cut", L"cut", kViewCmdCut);
+    addViewCommand(L"Copy", L"copy", kViewCmdCopy);
     addViewCommand(L"Rename", L"rename", kViewCmdRename, multiDisabled);
     addCommand(L"Delete", L"delete");
     addSeparator();
@@ -463,7 +469,11 @@ MenuModel MergeCoreWithCached(const MenuModel& core, const MenuModel& cached) {
 namespace cmo {
 
 constexpr uint32_t kCacheMagic = 0x434F4D4F;  // "COMO"
-constexpr uint32_t kCacheVersion = 2;
+constexpr uint32_t kCacheVersion = 3;
+constexpr uint32_t kMaxCacheEntries = 1024;
+constexpr uint32_t kMaxModelItems = 4096;
+constexpr uint32_t kMaxMenuDepth = 16;
+constexpr uint32_t kMaxStringChars = 65536;
 
 std::wstring CacheFilePath() {
     wchar_t storagePath[MAX_PATH] = {};
@@ -484,6 +494,11 @@ void WriteU32(std::vector<uint8_t>& out, uint32_t value) {
     out.push_back(static_cast<uint8_t>((value >> 8) & 0xFF));
     out.push_back(static_cast<uint8_t>((value >> 16) & 0xFF));
     out.push_back(static_cast<uint8_t>((value >> 24) & 0xFF));
+}
+
+void WriteU64(std::vector<uint8_t>& out, uint64_t value) {
+    WriteU32(out, static_cast<uint32_t>(value & 0xFFFFFFFFu));
+    WriteU32(out, static_cast<uint32_t>(value >> 32));
 }
 
 void WriteString(std::vector<uint8_t>& out, const std::wstring& text) {
@@ -516,6 +531,20 @@ void WriteSignature(std::vector<uint8_t>& out, const ContextSignature& sig) {
     WriteU8(out, static_cast<uint8_t>(sig.variant));
 }
 
+void WriteModel(std::vector<uint8_t>& out, const MenuModel& model) {
+    WriteSignature(out, model.sig);
+    WriteU32(out, model.flags);
+    WriteU64(out, model.sourceStamp);
+    WriteU32(out, static_cast<uint32_t>(model.handlerModules.size()));
+    for (const std::wstring& module : model.handlerModules) {
+        WriteString(out, module);
+    }
+    WriteU32(out, static_cast<uint32_t>(model.items.size()));
+    for (const MenuItem& item : model.items) {
+        WriteItem(out, item);
+    }
+}
+
 uint32_t ReadU32At(std::span<const uint8_t> data, size_t offset) {
     return static_cast<uint32_t>(data[offset]) |
            (static_cast<uint32_t>(data[offset + 1]) << 8) |
@@ -532,6 +561,25 @@ uint32_t Crc32(std::span<const uint8_t> data) {
         }
     }
     return ~crc;
+}
+
+uint64_t ComputeModuleStamp(const std::vector<std::wstring>& modules) {
+    uint64_t stamp = 1469598103934665603ULL;
+    for (const std::wstring& path : modules) {
+        WIN32_FILE_ATTRIBUTE_DATA data = {};
+        if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &data)) {
+            continue;
+        }
+        const uint64_t size =
+            (static_cast<uint64_t>(data.nFileSizeHigh) << 32) | data.nFileSizeLow;
+        const uint64_t modified =
+            (static_cast<uint64_t>(data.ftLastWriteTime.dwHighDateTime) << 32) |
+            data.ftLastWriteTime.dwLowDateTime;
+        stamp = HashCombine(stamp, HashString(path));
+        stamp = HashCombine(stamp, size);
+        stamp = HashCombine(stamp, modified);
+    }
+    return stamp;
 }
 
 class Reader {
@@ -555,16 +603,30 @@ public:
         return true;
     }
 
+    bool ReadU64(uint64_t& value) {
+        uint32_t low = 0;
+        uint32_t high = 0;
+        if (!ReadU32(low) || !ReadU32(high)) {
+            return false;
+        }
+        value = (static_cast<uint64_t>(high) << 32) | low;
+        return true;
+    }
+
     bool ReadString(std::wstring& text) {
         uint32_t length = 0;
-        if (!ReadU32(length)) {
+        if (!ReadU32(length) || length > kMaxStringChars) {
             return false;
         }
         const size_t bytes = static_cast<size_t>(length) * sizeof(wchar_t);
         if (pos_ + bytes > data_.size()) {
             return false;
         }
-        text.assign(reinterpret_cast<const wchar_t*>(data_.data() + pos_), length);
+        // Copy into aligned storage; the serialized offset may be unaligned.
+        text.resize(length);
+        if (bytes > 0) {
+            memcpy(text.data(), data_.data() + pos_, bytes);
+        }
         pos_ += bytes;
         return true;
     }
@@ -583,7 +645,10 @@ public:
         return true;
     }
 
-    bool ReadItem(MenuItem& item) {
+    bool ReadItem(MenuItem& item, uint32_t depth = 0) {
+        if (depth > kMaxMenuDepth) {
+            return false;
+        }
         uint8_t kind = 0;
         uint8_t action = 0;
         uint32_t viewCommandId = 0;
@@ -600,10 +665,40 @@ public:
         item.viewCommandId = viewCommandId;
         for (uint32_t i = 0; i < childCount; ++i) {
             MenuItem child{};
-            if (!ReadItem(child)) {
+            if (!ReadItem(child, depth + 1)) {
                 return false;
             }
             item.children.push_back(std::move(child));
+        }
+        return true;
+    }
+
+    bool ReadModel(MenuModel& model) {
+        uint32_t modelFlags = 0;
+        uint32_t moduleCount = 0;
+        uint32_t itemCount = 0;
+        if (!ReadSignature(model.sig) || !ReadU32(modelFlags) ||
+            !ReadU64(model.sourceStamp) || !ReadU32(moduleCount) ||
+            moduleCount > kMaxCacheEntries) {
+            return false;
+        }
+        model.flags = modelFlags;
+        for (uint32_t i = 0; i < moduleCount; ++i) {
+            std::wstring module;
+            if (!ReadString(module)) {
+                return false;
+            }
+            model.handlerModules.push_back(std::move(module));
+        }
+        if (!ReadU32(itemCount) || itemCount > kMaxModelItems) {
+            return false;
+        }
+        for (uint32_t i = 0; i < itemCount; ++i) {
+            MenuItem item{};
+            if (!ReadItem(item)) {
+                return false;
+            }
+            model.items.push_back(std::move(item));
         }
         return true;
     }
@@ -617,102 +712,49 @@ private:
 
 class Cache {
 public:
-    const MenuModel* Find(const ContextSignature& signature) {
+    std::optional<MenuModel> Find(const ContextSignature& signature) {
+        std::lock_guard<std::mutex> lock(mutex_);
         auto it = entries_.find(signature.Hash());
         if (it == entries_.end()) {
-            return nullptr;
+            return std::nullopt;
         }
         it->second.lastUsed = GetTickCount64();
-        return &it->second.model;
+        return it->second.model;
     }
 
     void Put(MenuModel model) {
-        Entry entry{};
-        entry.model = std::move(model);
-        entry.lastUsed = GetTickCount64();
-        entries_[entry.model.sig.Hash()] = std::move(entry);
-        EvictIfNeeded();
-        dirty_ = true;
+        std::lock_guard<std::mutex> lock(mutex_);
+        PutLocked(std::move(model));
     }
 
     void Clear() {
+        std::lock_guard<std::mutex> lock(mutex_);
         entries_.clear();
         dirty_ = true;
     }
 
     void SetMaxEntries(size_t maxEntries) {
+        std::lock_guard<std::mutex> lock(mutex_);
         maxEntries_ = maxEntries;
-        EvictIfNeeded();
+        EvictIfNeededLocked();
     }
 
-    size_t Size() const { return entries_.size(); }
+    size_t Size() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return entries_.size();
+    }
 
     std::vector<uint8_t> Serialize() const {
-        std::vector<uint8_t> out;
-        WriteU32(out, kCacheMagic);
-        WriteU32(out, kCacheVersion);
-        WriteU32(out, static_cast<uint32_t>(entries_.size()));
-        for (const auto& pair : entries_) {
-            const Entry& entry = pair.second;
-            WriteSignature(out, entry.model.sig);
-            WriteU32(out, entry.model.flags);
-            WriteU32(out, static_cast<uint32_t>(entry.model.items.size()));
-            for (const MenuItem& item : entry.model.items) {
-                WriteItem(out, item);
-            }
-        }
-        WriteU32(out, Crc32(out));
-        return out;
+        std::lock_guard<std::mutex> lock(mutex_);
+        return SerializeLocked();
     }
 
     static bool Deserialize(std::span<const uint8_t> data, Cache& out) {
-        if (data.size() < 12) {
+        std::vector<MenuModel> models;
+        if (!DeserializeModels(data, models)) {
             return false;
         }
-        if (ReadU32At(data, 0) != kCacheMagic) {
-            return false;
-        }
-        if (ReadU32At(data, 4) != kCacheVersion) {
-            return false;
-        }
-
-        const size_t payloadSize = data.size() - 4;
-        if (ReadU32At(data, payloadSize) != Crc32(data.subspan(0, payloadSize))) {
-            return false;
-        }
-
-        Reader reader(data.subspan(0, payloadSize));
-        uint32_t magic = 0;
-        uint32_t version = 0;
-        uint32_t entryCount = 0;
-        if (!reader.ReadU32(magic) || !reader.ReadU32(version) ||
-            !reader.ReadU32(entryCount)) {
-            return false;
-        }
-
-        Cache result;
-        for (uint32_t i = 0; i < entryCount; ++i) {
-            ContextSignature sig{};
-            uint32_t modelFlags = 0;
-            uint32_t itemCount = 0;
-            if (!reader.ReadSignature(sig) || !reader.ReadU32(modelFlags) ||
-                !reader.ReadU32(itemCount)) {
-                return false;
-            }
-            MenuModel model{};
-            model.sig = sig;
-            model.flags = modelFlags;
-            for (uint32_t j = 0; j < itemCount; ++j) {
-                MenuItem item{};
-                if (!reader.ReadItem(item)) {
-                    return false;
-                }
-                model.items.push_back(std::move(item));
-            }
-            result.Put(std::move(model));
-        }
-
-        out = std::move(result);
+        out.ReplaceAll(std::move(models));
         return true;
     }
 
@@ -739,11 +781,11 @@ public:
             return false;
         }
 
-        Cache loaded;
-        if (!Deserialize(data, loaded)) {
+        std::vector<MenuModel> models;
+        if (!DeserializeModels(data, models)) {
             return false;
         }
-        *this = std::move(loaded);
+        ReplaceAll(std::move(models));
         return true;
     }
 
@@ -772,19 +814,53 @@ public:
             return false;
         }
 
+        std::lock_guard<std::mutex> lock(mutex_);
         dirty_ = false;
         lastSaveTick_ = GetTickCount64();
         return true;
     }
 
     bool MaybeSave(const std::wstring& path) {
-        if (!dirty_) {
-            return true;
-        }
-        if (GetTickCount64() - lastSaveTick_ < 5000) {
-            return true;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (!dirty_ || GetTickCount64() - lastSaveTick_ < 5000) {
+                return true;
+            }
         }
         return Save(path);
+    }
+
+    // Clears the cache when any recorded handler module changed on disk.
+    bool RevalidateStamps() {
+        struct Check {
+            uint64_t stamp;
+            std::vector<std::wstring> modules;
+        };
+        std::vector<Check> checks;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            for (const auto& pair : entries_) {
+                if (pair.second.model.handlerModules.empty()) {
+                    continue;
+                }
+                checks.push_back(
+                    {pair.second.model.sourceStamp, pair.second.model.handlerModules});
+            }
+        }
+
+        bool stale = false;
+        for (const Check& check : checks) {
+            if (ComputeModuleStamp(check.modules) != check.stamp) {
+                stale = true;
+                break;
+            }
+        }
+        if (stale) {
+            std::lock_guard<std::mutex> lock(mutex_);
+            entries_.clear();
+            dirty_ = true;
+        }
+        return stale;
     }
 
 private:
@@ -793,7 +869,29 @@ private:
         uint64_t lastUsed = 0;
     };
 
-    void EvictIfNeeded() {
+    void PutLocked(MenuModel model) {
+        Entry entry{};
+        entry.model = std::move(model);
+        entry.lastUsed = GetTickCount64();
+        entries_[entry.model.sig.Hash()] = std::move(entry);
+        EvictIfNeededLocked();
+        dirty_ = true;
+    }
+
+    void ReplaceAll(std::vector<MenuModel> models) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        entries_.clear();
+        for (MenuModel& model : models) {
+            Entry entry{};
+            entry.model = std::move(model);
+            entry.lastUsed = GetTickCount64();
+            entries_[entry.model.sig.Hash()] = std::move(entry);
+        }
+        EvictIfNeededLocked();
+        dirty_ = false;
+    }
+
+    void EvictIfNeededLocked() {
         while (entries_.size() > maxEntries_ && !entries_.empty()) {
             auto oldest = entries_.begin();
             for (auto it = entries_.begin(); it != entries_.end(); ++it) {
@@ -805,6 +903,58 @@ private:
         }
     }
 
+    std::vector<uint8_t> SerializeLocked() const {
+        std::vector<uint8_t> out;
+        WriteU32(out, kCacheMagic);
+        WriteU32(out, kCacheVersion);
+        WriteU32(out, static_cast<uint32_t>(entries_.size()));
+        for (const auto& pair : entries_) {
+            WriteModel(out, pair.second.model);
+        }
+        WriteU32(out, Crc32(out));
+        return out;
+    }
+
+    static bool DeserializeModels(std::span<const uint8_t> data,
+                                  std::vector<MenuModel>& out) {
+        if (data.size() < 12) {
+            return false;
+        }
+        if (ReadU32At(data, 0) != kCacheMagic) {
+            return false;
+        }
+        if (ReadU32At(data, 4) != kCacheVersion) {
+            return false;
+        }
+
+        const size_t payloadSize = data.size() - 4;
+        if (ReadU32At(data, payloadSize) != Crc32(data.subspan(0, payloadSize))) {
+            return false;
+        }
+
+        Reader reader(data.subspan(0, payloadSize));
+        uint32_t magic = 0;
+        uint32_t version = 0;
+        uint32_t entryCount = 0;
+        if (!reader.ReadU32(magic) || !reader.ReadU32(version) ||
+            !reader.ReadU32(entryCount) || entryCount > kMaxCacheEntries) {
+            return false;
+        }
+
+        std::vector<MenuModel> models;
+        for (uint32_t i = 0; i < entryCount; ++i) {
+            MenuModel model{};
+            if (!reader.ReadModel(model)) {
+                return false;
+            }
+            models.push_back(std::move(model));
+        }
+
+        out = std::move(models);
+        return true;
+    }
+
+    mutable std::mutex mutex_;
     std::unordered_map<uint64_t, Entry> entries_;
     size_t maxEntries_ = 256;
     bool dirty_ = false;
@@ -860,20 +1010,6 @@ inline Scope ScopeFromKind(ShellViewKind kind, bool background) {
     }
 }
 
-inline bool AllPathsAreDirectories(const std::vector<std::wstring>& paths) {
-    if (paths.empty()) {
-        return false;
-    }
-    for (const std::wstring& path : paths) {
-        const DWORD attributes = GetFileAttributesW(path.c_str());
-        if (attributes == INVALID_FILE_ATTRIBUTES ||
-            !(attributes & FILE_ATTRIBUTE_DIRECTORY)) {
-            return false;
-        }
-    }
-    return true;
-}
-
 inline bool AllPathsAreDrives(const std::vector<std::wstring>& paths) {
     if (paths.empty()) {
         return false;
@@ -885,6 +1021,40 @@ inline bool AllPathsAreDrives(const std::vector<std::wstring>& paths) {
         }
     }
     return true;
+}
+
+inline bool IsFilesystemContext(bool folderIsFilesystem, bool allItemsAreFilesystem) {
+    return folderIsFilesystem && allItemsAreFilesystem;
+}
+
+// Refines a files-scope selection using shell attributes: drive roots first,
+// then folders, otherwise files.
+inline Scope RefineScope(Scope scope, bool allFolders, bool allDrives) {
+    if (scope != Scope::Files) {
+        return scope;
+    }
+    if (allDrives) {
+        return Scope::Drive;
+    }
+    if (allFolders) {
+        return Scope::Folders;
+    }
+    return Scope::Files;
+}
+
+// True when two path sets contain the same items in any order.
+inline bool PathSetsEqual(std::vector<std::wstring> left,
+                          std::vector<std::wstring> right) {
+    if (left.size() != right.size()) {
+        return false;
+    }
+    std::sort(left.begin(), left.end());
+    std::sort(right.begin(), right.end());
+    return left == right;
+}
+
+inline bool ShouldShowNativeReplay(uint32_t modelFlags) {
+    return (modelFlags & kModelOwnerDraw) != 0;
 }
 
 inline bool IsDesktopRootWindow(HWND hwnd) {
@@ -948,14 +1118,16 @@ public:
         valid_ = true;
     }
 
-    // Returns the pending capture and transfers ownership of its COM
-    // reference to the caller. Returns nullptr when nothing is pending.
-    PendingCapture* Take() {
+    // Moves the pending capture out and transfers ownership of its COM
+    // reference to the caller. Returns false when nothing is pending.
+    bool Take(PendingCapture& out) {
         if (!valid_) {
-            return nullptr;
+            return false;
         }
+        out = capture_;
+        capture_ = {};
         valid_ = false;
-        return &capture_;
+        return true;
     }
 
     void Clear() {
@@ -991,10 +1163,9 @@ HRESULT STDMETHODCALLTYPE QueryContextMenu_Hook(IContextMenu* pThis, HMENU hmenu
                                                 UINT idCmdLast, UINT uFlags) {
     // A capture that never reached TrackPopupMenu* is stale; release it
     // before capturing the new one.
-    if (PendingCapture* previous = g_pending.Take()) {
-        if (previous->obj) {
-            previous->obj->Release();
-        }
+    PendingCapture previous{};
+    if (g_pending.Take(previous) && previous.obj) {
+        previous.obj->Release();
     }
 
     PendingCapture capture{};
@@ -1029,14 +1200,14 @@ void ReplayInto(IContextMenu* obj, HMENU hMenu, UINT indexMenu, UINT idCmdFirst,
 // Takes the pending capture (if any), replays the real population into the
 // caller's menu, and releases the captured object.
 bool ConsumePendingAndReplay(HWND owner, HMENU hMenu) {
-    PendingCapture* capture = g_pending.Take();
-    if (!capture) {
+    PendingCapture capture{};
+    if (!g_pending.Take(capture)) {
         return false;
     }
-    ReplayInto(capture->obj, hMenu, capture->indexMenu, capture->idCmdFirst,
-               capture->idCmdLast, capture->flags);
-    if (capture->obj) {
-        capture->obj->Release();
+    ReplayInto(capture.obj, hMenu, capture.indexMenu, capture.idCmdFirst,
+               capture.idCmdLast, capture.flags);
+    if (capture.obj) {
+        capture.obj->Release();
     }
     Wh_Log(L"Replayed native population for owner=%p", owner);
     return true;
@@ -1125,12 +1296,20 @@ MenuModel BuildModelFromHMenu(HMENU menu, UINT idCmdFirst,
 }
 
 // Runs the real population offscreen and refreshes the cache. Always called
-// after the interactive menu has closed, on the same UI thread.
+// after the interactive menu has closed, on the same UI thread. Persistence
+// happens later on the invalidation thread.
+std::vector<std::wstring> SnapshotLoadedModules();
+std::vector<std::wstring> DiffModules(const std::vector<std::wstring>& before,
+                                      const std::vector<std::wstring>& after);
+
 void DiscoverIntoCache(IContextMenu* context, const PendingCapture& capture,
                        const ContextSignature& signature) {
     if (!context) {
         return;
     }
+
+    const std::vector<std::wstring> modulesBefore = SnapshotLoadedModules();
+
     HMENU menu = CreatePopupMenu();
     if (!menu) {
         return;
@@ -1139,49 +1318,67 @@ void DiscoverIntoCache(IContextMenu* context, const PendingCapture& capture,
                capture.flags);
     MenuModel model = BuildModelFromHMenu(menu, capture.idCmdFirst, signature, context);
     DestroyMenu(menu);
+
+    model.handlerModules = DiffModules(modulesBefore, SnapshotLoadedModules());
+    model.sourceStamp = ComputeModuleStamp(model.handlerModules);
+
     Wh_Log(L"Discovered %zu menu items", model.items.size());
     g_cache.Put(std::move(model));
-    g_cache.MaybeSave(CacheFilePath());
 }
 
-// Enumerates the SendTo folder into the "Send to" submenu. Items execute the
-// shortcut with the selected paths as arguments.
-void BuildSendToSubmenu(MenuItem& parent) {
+// SendTo entries are built once (at mod init) and copied into the model at
+// open time, keeping the interactive path free of filesystem I/O.
+std::vector<MenuItem> g_sendToChildren;
+std::mutex g_sendToMutex;
+
+void RebuildSendToChildren() {
+    std::vector<MenuItem> children;
+
     PWSTR sendToPath = nullptr;
-    if (FAILED(SHGetKnownFolderPath(FOLDERID_SendTo, 0, nullptr, &sendToPath)) ||
-        !sendToPath) {
-        return;
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_SendTo, 0, nullptr, &sendToPath)) &&
+        sendToPath) {
+        const std::wstring directory(sendToPath);
+        const std::wstring pattern = directory + L"\\*.lnk";
+        WIN32_FIND_DATAW findData = {};
+        HANDLE find = FindFirstFileW(pattern.c_str(), &findData);
+        if (find != INVALID_HANDLE_VALUE) {
+            uint32_t nextChildId = 20000;
+            do {
+                if (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+                    continue;
+                }
+                std::wstring label = findData.cFileName;
+                const size_t dot = label.find_last_of(L'.');
+                if (dot != std::wstring::npos) {
+                    label.resize(dot);
+                }
+
+                MenuItem child{};
+                child.id = nextChildId++;
+                child.kind = ItemKind::Command;
+                child.action = ActionKind::ShellVerb;
+                child.canonicalVerb = L"sendto";
+                child.label = std::move(label);
+                child.targetPath = directory + L"\\" + findData.cFileName;
+                children.push_back(std::move(child));
+            } while (FindNextFileW(find, &findData));
+            FindClose(find);
+        }
+        CoTaskMemFree(sendToPath);
     }
 
-    const std::wstring directory(sendToPath);
-    const std::wstring pattern = directory + L"\\*.lnk";
-    WIN32_FIND_DATAW findData = {};
-    HANDLE find = FindFirstFileW(pattern.c_str(), &findData);
-    if (find != INVALID_HANDLE_VALUE) {
-        uint32_t nextChildId = 20000;
-        do {
-            if (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-                continue;
-            }
-            std::wstring label = findData.cFileName;
-            const size_t dot = label.find_last_of(L'.');
-            if (dot != std::wstring::npos) {
-                label.resize(dot);
-            }
+    std::lock_guard<std::mutex> lock(g_sendToMutex);
+    g_sendToChildren = std::move(children);
+}
 
-            MenuItem child{};
-            child.id = nextChildId++;
-            child.kind = ItemKind::Command;
-            child.action = ActionKind::ShellVerb;
-            child.canonicalVerb = L"sendto";
-            child.label = std::move(label);
-            child.targetPath = directory + L"\\" + findData.cFileName;
-            parent.children.push_back(std::move(child));
-        } while (FindNextFileW(find, &findData));
-        FindClose(find);
-    }
+std::vector<MenuItem> GetSendToChildren() {
+    std::lock_guard<std::mutex> lock(g_sendToMutex);
+    return g_sendToChildren;
+}
 
-    CoTaskMemFree(sendToPath);
+void InvalidateSendToChildren() {
+    std::lock_guard<std::mutex> lock(g_sendToMutex);
+    g_sendToChildren.clear();
 }
 
 // Creates a throwaway default context menu to read the shared vtable of
@@ -1361,10 +1558,17 @@ IShellBrowser* GetDesktopShellBrowser() {
     return browser;
 }
 
-std::vector<std::wstring> GetSelectedPathsFromShellBrowser(IShellBrowser* browser) {
+struct SelectionInfo {
     std::vector<std::wstring> paths;
+    bool folderIsFilesystem = false;
+    bool allItemsAreFilesystem = true;
+    bool allItemsAreFolders = false;
+};
+
+SelectionInfo GetSelectionFromShellBrowser(IShellBrowser* browser) {
+    SelectionInfo info;
     if (!browser) {
-        return paths;
+        return info;
     }
 
     IShellView* view = nullptr;
@@ -1375,19 +1579,40 @@ std::vector<std::wstring> GetSelectedPathsFromShellBrowser(IShellBrowser* browse
             IShellFolder* folder = nullptr;
             if (SUCCEEDED(folderView->GetFolder(IID_IShellFolder, (void**)&folder)) &&
                 folder) {
+                SFGAOF folderAttributes = SFGAO_FILESYSTEM;
+                info.folderIsFilesystem =
+                    SUCCEEDED(folder->GetAttributesOf(0, nullptr, &folderAttributes)) &&
+                    (folderAttributes & SFGAO_FILESYSTEM) != 0;
+
+                bool allFolders = true;
                 IEnumIDList* enumIds = nullptr;
                 if (SUCCEEDED(folderView->Items(SVGIO_SELECTION, IID_IEnumIDList,
                                                 (void**)&enumIds)) &&
                     enumIds) {
                     LPITEMIDLIST pidl = nullptr;
                     while (enumIds->Next(1, &pidl, nullptr) == S_OK) {
+                        SFGAOF itemAttributes = SFGAO_FILESYSTEM | SFGAO_FOLDER;
+                        PCUITEMID_CHILD child = pidl;
+                        if (SUCCEEDED(
+                                folder->GetAttributesOf(1, &child, &itemAttributes))) {
+                            if (!(itemAttributes & SFGAO_FILESYSTEM)) {
+                                info.allItemsAreFilesystem = false;
+                            }
+                            if (!(itemAttributes & SFGAO_FOLDER)) {
+                                allFolders = false;
+                            }
+                        } else {
+                            info.allItemsAreFilesystem = false;
+                            allFolders = false;
+                        }
+
                         STRRET strret = {};
                         if (SUCCEEDED(folder->GetDisplayNameOf(pidl, SHGDN_FORPARSING,
                                                                &strret))) {
                             LPWSTR path = nullptr;
                             if (SUCCEEDED(StrRetToStrW(&strret, pidl, &path)) && path) {
                                 if (path[0]) {
-                                    paths.emplace_back(path);
+                                    info.paths.emplace_back(path);
                                 }
                                 CoTaskMemFree(path);
                             }
@@ -1396,23 +1621,24 @@ std::vector<std::wstring> GetSelectedPathsFromShellBrowser(IShellBrowser* browse
                     }
                     enumIds->Release();
                 }
+                info.allItemsAreFolders = allFolders && !info.paths.empty();
                 folder->Release();
             }
             folderView->Release();
         }
         view->Release();
     }
-    return paths;
+    return info;
 }
 
-std::vector<std::wstring> GetSelectedPaths(HWND owner, ShellViewKind kind) {
+SelectionInfo GetSelection(HWND owner, ShellViewKind kind) {
     if (kind == ShellViewKind::Desktop) {
         IShellBrowser* browser = GetDesktopShellBrowser();
-        std::vector<std::wstring> paths = GetSelectedPathsFromShellBrowser(browser);
+        SelectionInfo info = GetSelectionFromShellBrowser(browser);
         if (browser) {
             browser->Release();
         }
-        return paths;
+        return info;
     }
 
     if (kind == ShellViewKind::ShellDefView) {
@@ -1423,12 +1649,42 @@ std::vector<std::wstring> GetSelectedPaths(HWND owner, ShellViewKind kind) {
         // CWM_GETISHELLBROWSER returns a borrowed pointer; hold a reference
         // for the duration of the lookup.
         browser->AddRef();
-        std::vector<std::wstring> paths = GetSelectedPathsFromShellBrowser(browser);
+        SelectionInfo info = GetSelectionFromShellBrowser(browser);
         browser->Release();
-        return paths;
+        return info;
     }
 
     return {};
+}
+
+std::vector<std::wstring> SnapshotLoadedModules() {
+    std::vector<std::wstring> modules;
+    HANDLE snapshot =
+        CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, GetCurrentProcessId());
+    if (snapshot == INVALID_HANDLE_VALUE) {
+        return modules;
+    }
+
+    MODULEENTRY32W entry = {};
+    entry.dwSize = sizeof(entry);
+    if (Module32FirstW(snapshot, &entry)) {
+        do {
+            modules.emplace_back(entry.szExePath);
+        } while (Module32NextW(snapshot, &entry));
+    }
+    CloseHandle(snapshot);
+    return modules;
+}
+
+std::vector<std::wstring> DiffModules(const std::vector<std::wstring>& before,
+                                      const std::vector<std::wstring>& after) {
+    std::vector<std::wstring> added;
+    for (const std::wstring& path : after) {
+        if (std::find(before.begin(), before.end(), path) == before.end()) {
+            added.push_back(path);
+        }
+    }
+    return added;
 }
 
 }  // namespace cmo
@@ -1677,17 +1933,31 @@ inline TrackPopupMenu_t TrackPopupMenu_Original = nullptr;
 
 class NativeMenuView {
 public:
-    static std::optional<uint32_t> Show(const MenuModel& model, HWND owner, POINT pt) {
+    static std::optional<uint32_t> Show(const MenuModel& model, HWND owner, POINT pt,
+                                        bool* creationFailed = nullptr) {
+        if (creationFailed) {
+            *creationFailed = false;
+        }
+
         HMENU menu = CreatePopupMenu();
         if (!menu) {
+            if (creationFailed) {
+                *creationFailed = true;
+            }
             return std::nullopt;
         }
         AppendItems(menu, model.items);
 
+        if (!TrackPopupMenuEx_Original) {
+            if (creationFailed) {
+                *creationFailed = true;
+            }
+            DestroyMenu(menu);
+            return std::nullopt;
+        }
+
         const UINT flags = TPM_RETURNCMD | TPM_NONOTIFY | TPM_LEFTALIGN | TPM_TOPALIGN;
-        int command = TrackPopupMenuEx_Original
-                          ? TrackPopupMenuEx_Original(menu, flags, pt.x, pt.y, owner, nullptr)
-                          : 0;
+        int command = TrackPopupMenuEx_Original(menu, flags, pt.x, pt.y, owner, nullptr);
         DestroyMenu(menu);
 
         if (command == 0) {
@@ -1989,18 +2259,33 @@ public:
         if (stopEvent_) {
             SetEvent(stopEvent_);
         }
-        if (thread_) {
-            WaitForSingleObject(thread_, 5000);
-            CloseHandle(thread_);
-            thread_ = nullptr;
-        }
-        if (stopEvent_) {
-            CloseHandle(stopEvent_);
-            stopEvent_ = nullptr;
-        }
+        // Wake a paused worker so it can observe the stop event.
         if (resumeEvent_) {
-            CloseHandle(resumeEvent_);
-            resumeEvent_ = nullptr;
+            SetEvent(resumeEvent_);
+        }
+        paused_.store(false);
+
+        bool exited = true;
+        if (thread_) {
+            exited = WaitForSingleObject(thread_, 30000) == WAIT_OBJECT_0;
+            if (exited) {
+                CloseHandle(thread_);
+                thread_ = nullptr;
+            } else {
+                // A handler is wedged in the worker. Leaking the handles is
+                // safer than closing them under a running thread.
+                Wh_Log(L"Warm-up thread did not exit; leaking its handles");
+            }
+        }
+        if (exited) {
+            if (stopEvent_) {
+                CloseHandle(stopEvent_);
+                stopEvent_ = nullptr;
+            }
+            if (resumeEvent_) {
+                CloseHandle(resumeEvent_);
+                resumeEvent_ = nullptr;
+            }
         }
     }
 
@@ -2130,14 +2415,17 @@ private:
             return;
         }
 
+        const std::vector<std::wstring> modulesBefore = SnapshotLoadedModules();
         HMENU offscreen = CreatePopupMenu();
         if (offscreen) {
             ReplayInto(menu, offscreen, 0, 1, 0x7FFF, CMF_NORMAL);
             MenuModel model = BuildModelFromHMenu(offscreen, 1, signature, menu);
             DestroyMenu(offscreen);
             if (!model.items.empty()) {
+                model.handlerModules =
+                    DiffModules(modulesBefore, SnapshotLoadedModules());
+                model.sourceStamp = ComputeModuleStamp(model.handlerModules);
                 g_cache.Put(std::move(model));
-                g_cache.MaybeSave(CacheFilePath());
             }
         }
         menu->Release();
@@ -2246,14 +2534,30 @@ private:
         }
 
         for (;;) {
-            DWORD wait = WaitForMultipleObjects(eventCount, events, FALSE, INFINITE);
+            // 5 s poll: debounced cache persistence. Hourly: handler-module
+            // stamp revalidation.
+            DWORD wait = WaitForMultipleObjects(eventCount, events, FALSE, 5000);
             if (wait == WAIT_OBJECT_0) {
                 break;
+            }
+            if (wait == WAIT_TIMEOUT) {
+                if (GetTickCount64() >= nextRevalidationTick_) {
+                    nextRevalidationTick_ = GetTickCount64() + 3600000;
+                    if (g_cache.RevalidateStamps()) {
+                        Wh_Log(L"Handler modules changed; cache invalidated");
+                        g_warmup.Stop();
+                        g_warmup.Start();
+                    }
+                }
+                g_cache.MaybeSave(CacheFilePath());
+                continue;
             }
             if (wait > WAIT_OBJECT_0 && wait < WAIT_OBJECT_0 + eventCount) {
                 const DWORD index = wait - WAIT_OBJECT_0;
                 ++generation_;
                 g_cache.Clear();
+                InvalidateSendToChildren();
+                RebuildSendToChildren();
                 Wh_Log(L"Context menu handlers changed; cache invalidated");
                 if (keyForEvent[index]) {
                     RegNotifyChangeKeyValue(
@@ -2277,6 +2581,7 @@ private:
     HANDLE thread_ = nullptr;
     HANDLE stopEvent_ = nullptr;
     std::atomic<uint64_t> generation_{0};
+    uint64_t nextRevalidationTick_ = 0;
 };
 
 inline Invalidation g_invalidation;
@@ -2306,20 +2611,24 @@ MenuPath DecidePath(bool shiftHeld, ShellViewKind kind, bool hasPendingCapture,
 bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner, POINT pt) {
     g_perf.MarkOpenPathStart();
 
-    std::vector<std::wstring> paths = GetSelectedPaths(owner, kind);
+    SelectionInfo info = GetSelection(owner, kind);
+    std::vector<std::wstring>& paths = info.paths;
     Shape shape = paths.size() > 1 ? Shape::Multi : Shape::Single;
 
-    Scope scope = ScopeFromKind(kind, paths.empty());
-    if (!paths.empty() && scope == Scope::Files) {
-        if (AllPathsAreDrives(paths)) {
-            scope = Scope::Drive;
-        } else if (AllPathsAreDirectories(paths)) {
-            scope = Scope::Folders;
-        }
+    if (!IsFilesystemContext(info.folderIsFilesystem, info.allItemsAreFilesystem)) {
+        Wh_Log(L"Non-filesystem namespace: using the native menu");
+        ShowNativeReplay(capture, owner, pt);
+        g_warmup.SetMenuOpen(false);
+        return true;
     }
-    ContextSignature signature{scope, MakeTypeKey(paths), shape, Variant::Normal};
 
-    const MenuModel* cached = g_cache.Find(signature);
+    Scope scope = RefineScope(ScopeFromKind(kind, paths.empty()), info.allItemsAreFolders,
+                              AllPathsAreDrives(paths));
+    const std::wstring typeKey =
+        scope == Scope::Files ? MakeTypeKey(paths) : std::wstring(L"*");
+    ContextSignature signature{scope, typeKey, shape, Variant::Normal};
+
+    std::optional<MenuModel> cached = g_cache.Find(signature);
     MenuModel model =
         cached ? MergeCoreWithCached(BuildCoreModel(scope, paths, shape), *cached)
                : BuildCoreModel(scope, paths, shape);
@@ -2327,6 +2636,13 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
         std::erase_if(model.items, [](const MenuItem& item) {
             return item.action == ActionKind::Fallback;
         });
+    }
+
+    if (ShouldShowNativeReplay(model.flags)) {
+        Wh_Log(L"Owner-draw context: using the native menu");
+        ShowNativeReplay(capture, owner, pt);
+        g_warmup.SetMenuOpen(false);
+        return true;
     }
 
     const DWORD clipboardSequence = GetClipboardSequenceNumber();
@@ -2337,16 +2653,27 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
         }
         if (item.kind == ItemKind::Submenu && item.label == L"Send to" &&
             item.children.empty()) {
-            BuildSendToSubmenu(item);
+            item.children = GetSendToChildren();
         }
     }
 
-    g_warmup.SetMenuOpen(true);
-    std::optional<uint32_t> selection = NativeMenuView::Show(model, owner, pt);
-    Wh_Log(L"Menu open path: %llu ms",
+    Wh_Log(L"Menu prep: %llu ms",
            static_cast<unsigned long long>(g_perf.OpenPathElapsedMs()));
-    if (selection) {
-        const MenuItem* item = FindById(model, *selection);
+
+    g_warmup.SetMenuOpen(true);
+    bool creationFailed = false;
+    std::optional<uint32_t> chosen =
+        NativeMenuView::Show(model, owner, pt, &creationFailed);
+    if (creationFailed) {
+        Wh_Log(L"Menu creation failed; using the native menu");
+        ShowNativeReplay(capture, owner, pt);
+        DiscoverIntoCache(capture.obj, capture, signature);
+        g_warmup.SetMenuOpen(false);
+        return true;
+    }
+
+    if (chosen) {
+        const MenuItem* item = FindById(model, *chosen);
         if (item) {
             InvocationContext ctx{};
             ctx.owner = owner;
@@ -2362,6 +2689,13 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
                 result = (model.flags & kModelOwnerDraw)
                              ? InvokeResult::FallbackNative
                              : InvokeExtensionItem(*item, ctx, capture);
+            } else if (item->action == ActionKind::ViewCommand) {
+                // View commands act on the view's current selection; never
+                // act on a different selection than the one captured.
+                SelectionInfo current = GetSelection(owner, kind);
+                result = PathSetsEqual(current.paths, paths)
+                             ? InvokeItem(*item, ctx)
+                             : InvokeResult::FallbackNative;
             } else {
                 result = InvokeItem(*item, ctx);
             }
@@ -2382,35 +2716,36 @@ BOOL WINAPI TrackPopupMenuEx_Hook(HMENU hMenu, UINT uFlags, int x, int y, HWND h
                                   LPTPMPARAMS lptpm) {
     ShellViewKind kind = ClassifyOwner(hWnd);
     g_pending.ExpireOlderThan(GetTickCount64(), 60000);
-    PendingCapture* pending = g_pending.Take();
+    PendingCapture pending{};
+    const bool hasPending = g_pending.Take(pending);
     const bool shiftHeld = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
     const MenuPath path =
-        DecidePath(shiftHeld, kind, pending != nullptr, g_settings.enableShiftBypass);
+        DecidePath(shiftHeld, kind, hasPending, g_settings.enableShiftBypass);
 
-    if (path == MenuPath::Ours && pending) {
+    if (path == MenuPath::Ours && hasPending) {
         Wh_Log(L"Replacing context menu: kind=%d", static_cast<int>(kind));
-        ShowReplacementMenu(*pending, kind, hWnd, POINT{x, y});
-        if (pending->obj) {
-            pending->obj->Release();
+        ShowReplacementMenu(pending, kind, hWnd, POINT{x, y});
+        if (pending.obj) {
+            pending.obj->Release();
         }
         return 0;
     }
 
-    if (path == MenuPath::NativeBypass && pending) {
+    if (path == MenuPath::NativeBypass && hasPending) {
         Wh_Log(L"Shift bypass: showing the native menu");
-        ShowNativeReplay(*pending, hWnd, POINT{x, y});
-        if (pending->obj) {
-            pending->obj->Release();
+        ShowNativeReplay(pending, hWnd, POINT{x, y});
+        if (pending.obj) {
+            pending.obj->Release();
         }
         return 0;
     }
 
-    if (pending) {
+    if (hasPending) {
         Wh_Log(L"Passing through: kind=%d", static_cast<int>(kind));
-        ReplayInto(pending->obj, hMenu, pending->indexMenu, pending->idCmdFirst,
-                   pending->idCmdLast, pending->flags);
-        if (pending->obj) {
-            pending->obj->Release();
+        ReplayInto(pending.obj, hMenu, pending.indexMenu, pending.idCmdFirst,
+                   pending.idCmdLast, pending.flags);
+        if (pending.obj) {
+            pending.obj->Release();
         }
     }
     return TrackPopupMenuEx_Original(hMenu, uFlags, x, y, hWnd, lptpm);
@@ -2420,35 +2755,36 @@ BOOL WINAPI TrackPopupMenu_Hook(HMENU hMenu, UINT uFlags, int x, int y, int nRes
                                 HWND hWnd, const RECT* prcRect) {
     ShellViewKind kind = ClassifyOwner(hWnd);
     g_pending.ExpireOlderThan(GetTickCount64(), 60000);
-    PendingCapture* pending = g_pending.Take();
+    PendingCapture pending{};
+    const bool hasPending = g_pending.Take(pending);
     const bool shiftHeld = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
     const MenuPath path =
-        DecidePath(shiftHeld, kind, pending != nullptr, g_settings.enableShiftBypass);
+        DecidePath(shiftHeld, kind, hasPending, g_settings.enableShiftBypass);
 
-    if (path == MenuPath::Ours && pending) {
+    if (path == MenuPath::Ours && hasPending) {
         Wh_Log(L"Replacing context menu: kind=%d", static_cast<int>(kind));
-        ShowReplacementMenu(*pending, kind, hWnd, POINT{x, y});
-        if (pending->obj) {
-            pending->obj->Release();
+        ShowReplacementMenu(pending, kind, hWnd, POINT{x, y});
+        if (pending.obj) {
+            pending.obj->Release();
         }
         return 0;
     }
 
-    if (path == MenuPath::NativeBypass && pending) {
+    if (path == MenuPath::NativeBypass && hasPending) {
         Wh_Log(L"Shift bypass: showing the native menu");
-        ShowNativeReplay(*pending, hWnd, POINT{x, y});
-        if (pending->obj) {
-            pending->obj->Release();
+        ShowNativeReplay(pending, hWnd, POINT{x, y});
+        if (pending.obj) {
+            pending.obj->Release();
         }
         return 0;
     }
 
-    if (pending) {
+    if (hasPending) {
         Wh_Log(L"Passing through: kind=%d", static_cast<int>(kind));
-        ReplayInto(pending->obj, hMenu, pending->indexMenu, pending->idCmdFirst,
-                   pending->idCmdLast, pending->flags);
-        if (pending->obj) {
-            pending->obj->Release();
+        ReplayInto(pending.obj, hMenu, pending.indexMenu, pending.idCmdFirst,
+                   pending.idCmdLast, pending.flags);
+        if (pending.obj) {
+            pending.obj->Release();
         }
     }
     return TrackPopupMenu_Original(hMenu, uFlags, x, y, nReserved, hWnd, prcRect);
@@ -2585,7 +2921,6 @@ BOOL Wh_ModInit() {
         return FALSE;
     }
 
-    cmo::InstallWin11Suppression();
     cmo::LoadSettings();
 
     const std::wstring cachePath = cmo::CacheFilePath();
@@ -2601,9 +2936,12 @@ BOOL Wh_ModInit() {
     }
     cmo::g_invalidation.Start();
     cmo::g_warmup.Start();
+    cmo::RebuildSendToChildren();
 
     if (cmo::InstallPopulationHook()) {
         Wh_Log(L"Population hook installed");
+        // Only hide the modern menu once the replacement can actually run.
+        cmo::InstallWin11Suppression();
     } else {
         Wh_Log(L"Population hook deferred to Wh_ModAfterInit");
         g_populationHookDeferred = true;
@@ -2616,6 +2954,7 @@ void Wh_ModAfterInit() {
     if (g_populationHookDeferred && cmo::InstallPopulationHook()) {
         g_populationHookDeferred = false;
         Wh_ApplyHookOperations();
+        cmo::InstallWin11Suppression();
         Wh_Log(L"Population hook installed after init");
     }
 }

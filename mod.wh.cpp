@@ -128,6 +128,9 @@ struct Settings {
 
 inline Settings g_settings;
 
+// Set in Wh_ModInit; only the UI thread may touch the render device/caches.
+inline DWORD g_uiThreadId = 0;
+
 std::wstring TrimWhitespace(const std::wstring& text) {
     const size_t first = text.find_first_not_of(L" \t\r\n");
     if (first == std::wstring::npos) {
@@ -1259,6 +1262,9 @@ bool ParseFont(const std::wstring& text, std::wstring& face, float& size) {
         return false;
     }
     face = TrimWhitespace(text.substr(0, comma));
+    if (face.size() >= 2 && face.front() == L'"' && face.back() == L'"') {
+        face = face.substr(1, face.size() - 2);
+    }
     const std::wstring sizeText = TrimWhitespace(text.substr(comma + 1));
     if (face.empty() || sizeText.empty()) {
         return false;
@@ -1369,6 +1375,19 @@ std::wstring ExtractQuoted(const std::wstring& text) {
         return L"";
     }
     return trimmed.substr(1, trimmed.size() - 2);
+}
+
+// Strips a ';' comment that is not inside a quoted value.
+std::wstring StripInlineComment(const std::wstring& line) {
+    bool inQuotes = false;
+    for (size_t i = 0; i < line.size(); ++i) {
+        if (line[i] == L'"') {
+            inQuotes = !inQuotes;
+        } else if (line[i] == L';' && !inQuotes) {
+            return line.substr(0, i);
+        }
+    }
+    return line;
 }
 
 bool AppendMatchValue(PredicateExpr& expr, const std::wstring& field,
@@ -1583,7 +1602,7 @@ bool ParseRulesConfig(const std::wstring& text, RulesConfig& out,
             line.pop_back();
         }
 
-        const std::wstring trimmed = TrimWhitespace(line);
+        const std::wstring trimmed = TrimWhitespace(StripInlineComment(line));
         if (trimmed.empty() || trimmed[0] == L';') {
             continue;
         }
@@ -2042,6 +2061,7 @@ RulesApplication ApplyRulesToModel(MenuModel& model, const RulesConfig& config,
         }
     }
 
+    uint32_t destinationId = 0xF700;
     for (const std::wstring& destination : destinations) {
         auto bucket = movedByDestination.find(destination);
         if (bucket == movedByDestination.end() || bucket->second.empty()) {
@@ -2063,7 +2083,7 @@ RulesApplication ApplyRulesToModel(MenuModel& model, const RulesConfig& config,
         }
 
         MenuItem submenu{};
-        submenu.id = 0xF100 + static_cast<uint32_t>(destinations.size());
+        submenu.id = destinationId++;
         submenu.kind = ItemKind::Submenu;
         submenu.action = ActionKind::Submenu;
         submenu.label = destination;
@@ -2122,20 +2142,27 @@ void InsertCustomItems(MenuModel& model, const RulesConfig& config,
 
     std::unordered_map<std::wstring, PendingCustomSubmenu> pending;
     std::vector<std::wstring> pendingOrder;
-    auto ensureTopLevel = [&](const std::wstring& name) -> PendingCustomSubmenu& {
+    std::unordered_set<std::wstring> filteredNames;
+    uint32_t syntheticId = 0xF100;
+    auto ensureTopLevel = [&](const std::wstring& name) -> PendingCustomSubmenu* {
         auto it = pending.find(name);
-        if (it == pending.end()) {
-            PendingCustomSubmenu entry;
-            entry.name = name;
-            if (const CustomSubmenu* submenu = findSubmenuConfig(name)) {
-                entry.iconRef = submenu->iconRef;
-                entry.position = submenu->position;
-                entry.positionLabel = submenu->positionLabel;
-            }
-            it = pending.emplace(name, std::move(entry)).first;
-            pendingOrder.push_back(name);
+        if (it != pending.end()) {
+            return filteredNames.count(name) ? nullptr : &it->second;
         }
-        return it->second;
+        PendingCustomSubmenu entry;
+        entry.name = name;
+        if (const CustomSubmenu* submenu = findSubmenuConfig(name)) {
+            if (!CommandMatchesContext(submenu->match, ctx)) {
+                filteredNames.insert(name);
+                return nullptr;
+            }
+            entry.iconRef = submenu->iconRef;
+            entry.position = submenu->position;
+            entry.positionLabel = submenu->positionLabel;
+        }
+        it = pending.emplace(name, std::move(entry)).first;
+        pendingOrder.push_back(name);
+        return &it->second;
     };
 
     auto resolveContainer =
@@ -2160,8 +2187,11 @@ void InsertCustomItems(MenuModel& model, const RulesConfig& config,
             return nullptr;
         }
 
-        PendingCustomSubmenu& top = ensureTopLevel(segments[0]);
-        std::vector<MenuItem>* current = &top.children;
+        PendingCustomSubmenu* top = ensureTopLevel(segments[0]);
+        if (!top) {
+            return nullptr;
+        }
+        std::vector<MenuItem>* current = &top->children;
         for (size_t s = 1; s < segments.size(); ++s) {
             MenuItem* nested = nullptr;
             for (MenuItem& child : *current) {
@@ -2173,11 +2203,14 @@ void InsertCustomItems(MenuModel& model, const RulesConfig& config,
             }
             if (!nested) {
                 MenuItem submenu{};
-                submenu.id = 0xF300 + static_cast<uint32_t>(s);
+                submenu.id = syntheticId++;
                 submenu.kind = ItemKind::Submenu;
                 submenu.action = ActionKind::Submenu;
                 submenu.label = segments[s];
                 if (const CustomSubmenu* sc = findSubmenuConfig(segments[s])) {
+                    if (!CommandMatchesContext(sc->match, ctx)) {
+                        return nullptr;
+                    }
                     submenu.iconRef = sc->iconRef;
                 }
                 current->push_back(std::move(submenu));
@@ -2206,6 +2239,10 @@ void InsertCustomItems(MenuModel& model, const RulesConfig& config,
         std::vector<MenuItem>* container = nullptr;
         if (!command.menuPath.empty()) {
             container = resolveContainer(command.menuPath);
+            if (!container) {
+                // Context-filtered or invalid destination: skip the command.
+                continue;
+            }
         }
         if (!container) {
             topLevelCommands.push_back(std::move(item));
@@ -2227,11 +2264,19 @@ void InsertCustomItems(MenuModel& model, const RulesConfig& config,
         }
     }
 
-    uint32_t syntheticId = 0xF400;
+    // Configured submenus with no referencing command still exist in matching
+    // contexts (empty ones are pruned later).
+    for (const CustomSubmenu& submenu : config.submenus) {
+        if (CommandMatchesContext(submenu.match, ctx)) {
+            ensureTopLevel(submenu.name);
+        }
+    }
+
+    uint32_t pendingId = syntheticId;
     for (const std::wstring& name : pendingOrder) {
         PendingCustomSubmenu& entry = pending[name];
         MenuItem submenu{};
-        submenu.id = syntheticId++;
+        submenu.id = pendingId++;
         submenu.kind = ItemKind::Submenu;
         submenu.action = ActionKind::Submenu;
         submenu.label = entry.name;
@@ -2334,11 +2379,21 @@ public:
             SetEvent(stopEvent_);
         }
         if (thread_) {
-            WaitForSingleObject(thread_, 5000);
-            CloseHandle(thread_);
+            const DWORD wait = WaitForSingleObject(thread_, 2000);
+            if (wait == WAIT_OBJECT_0) {
+                CloseHandle(thread_);
+                if (stopEvent_) {
+                    CloseHandle(stopEvent_);
+                    stopEvent_ = nullptr;
+                }
+            } else {
+                // The watcher did not exit in time; leave its handles alone so it
+                // can never touch freed state after unload. The OS reclaims them
+                // when the process exits.
+                Wh_Log(L"menu.ini watcher did not stop in time; leaving it parked");
+            }
             thread_ = nullptr;
-        }
-        if (stopEvent_) {
+        } else if (stopEvent_) {
             CloseHandle(stopEvent_);
             stopEvent_ = nullptr;
         }
@@ -2403,9 +2458,11 @@ private:
             CloseHandle(file);
             return false;
         }
-        text.resize(static_cast<size_t>(size.QuadPart / sizeof(wchar_t)));
+        const size_t bytes = static_cast<size_t>(size.QuadPart);
+        // Round up so an odd byte count can never overrun the buffer.
+        text.assign((bytes + sizeof(wchar_t) - 1) / sizeof(wchar_t), L'\0');
         DWORD read = 0;
-        const BOOL ok = ReadFile(file, text.data(), static_cast<DWORD>(size.QuadPart),
+        const BOOL ok = ReadFile(file, text.data(), static_cast<DWORD>(bytes),
                                  &read, nullptr);
         CloseHandle(file);
         if (!ok) {
@@ -2432,27 +2489,47 @@ private:
         HANDLE dirHandle = CreateFileW(
             dir.c_str(), FILE_LIST_DIRECTORY,
             FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
-            OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+            OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED,
+            nullptr);
         if (dirHandle == INVALID_HANDLE_VALUE) {
             return;
         }
 
+        OVERLAPPED overlapped = {};
+        overlapped.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        if (!overlapped.hEvent) {
+            CloseHandle(dirHandle);
+            return;
+        }
+
         std::vector<BYTE> buffer(4096);
+        HANDLE events[2] = {stopEvent_, overlapped.hEvent};
         for (;;) {
             DWORD bytes = 0;
+            ResetEvent(overlapped.hEvent);
             if (!ReadDirectoryChangesW(
                     dirHandle, buffer.data(), static_cast<DWORD>(buffer.size()), FALSE,
-                    FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_SIZE, &bytes,
-                    nullptr, nullptr)) {
+                    FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_SIZE |
+                        FILE_NOTIFY_CHANGE_FILE_NAME,
+                    nullptr, &overlapped, nullptr)) {
                 break;
             }
-            if (WaitForSingleObject(stopEvent_, 0) == WAIT_OBJECT_0) {
+            const DWORD wait = WaitForMultipleObjects(2, events, FALSE, INFINITE);
+            if (wait == WAIT_OBJECT_0) {
+                CancelIo(dirHandle);
+                GetOverlappedResult(dirHandle, &overlapped, &bytes, TRUE);
+                break;
+            }
+            if (wait != WAIT_OBJECT_0 + 1 ||
+                !GetOverlappedResult(dirHandle, &overlapped, &bytes, FALSE)) {
+                CancelIo(dirHandle);
+                GetOverlappedResult(dirHandle, &overlapped, &bytes, TRUE);
                 break;
             }
 
             bool menuChanged = false;
             DWORD offset = 0;
-            for (;;) {
+            while (offset < bytes) {
                 auto* info =
                     reinterpret_cast<FILE_NOTIFY_INFORMATION*>(buffer.data() + offset);
                 const std::wstring name(info->FileName,
@@ -2478,6 +2555,7 @@ private:
                 ApplyText(text);
             }
         }
+        CloseHandle(overlapped.hEvent);
         CloseHandle(dirHandle);
     }
 
@@ -2514,6 +2592,9 @@ struct LayoutMetrics {
     int padding = 6;
     int gutterWidth = 22;
     int submenuArrowWidth = 16;
+    int cornerRadius = 8;
+    int borderWidth = 1;
+    int shadowSize = 12;
     float fontSize = 9.0f;
     std::wstring fontFace = L"Segoe UI";
     uint32_t textColor = 0xFFFFFFFF;
@@ -2536,6 +2617,9 @@ LayoutMetrics ResolveLayoutMetrics(const Appearance& appearance, uint32_t dpi,
     metrics.gutterWidth = metrics.iconSize + metrics.padding;
     metrics.separatorHeight = MulDiv(7, scale, 96);
     metrics.submenuArrowWidth = MulDiv(16, scale, 96);
+    metrics.cornerRadius = MulDiv(appearance.cornerRadius, scale, 96);
+    metrics.borderWidth = std::max(1, MulDiv(appearance.borderWidth, scale, 96));
+    metrics.shadowSize = MulDiv(appearance.shadowSize, scale, 96);
     metrics.fontFace = appearance.fontFace;
     metrics.fontSize = appearance.fontSize * (static_cast<float>(scale) / 96.0f);
     metrics.textColor = appearance.textColor;
@@ -3040,6 +3124,10 @@ public:
 
     bool Create(HWND owner, const LayoutPanel* panel, bool isRoot,
                 int margin = 0) {
+        // Pooled windows may carry a previous window/surface; release it so
+        // reuse never leaks an HWND, swap chain, target, or visual.
+        Destroy();
+
         owner_ = owner;
         panel_ = panel;
         isRoot_ = isRoot;
@@ -3072,7 +3160,7 @@ public:
             return;
         }
         SetWindowPos(hwnd_, HWND_TOPMOST, screenPos.x, screenPos.y, 0, 0,
-                     SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+                     SWP_NOSIZE | SWP_NOACTIVATE);
     }
 
     void Show() {
@@ -3522,6 +3610,13 @@ private:
             auto resources = std::make_shared<LayoutItemResources>();
             resources->text = GetOrCreateText(item, metrics);
             resources->icon = GetOrCreateIcon(item, metrics);
+            // The cache owns one reference; each item's resources own their own.
+            if (resources->text) {
+                resources->text->AddRef();
+            }
+            if (resources->icon) {
+                resources->icon->AddRef();
+            }
             item.resources = std::move(resources);
         }
         for (LayoutPanel& child : panel.children) {
@@ -3730,13 +3825,13 @@ void DrawPanel(ID2D1DeviceContext* dc, const LayoutPanel& panel,
 
     const D2D1_RECT_F rect = {0.0f, 0.0f, static_cast<float>(panel.size.cx),
                               static_cast<float>(panel.size.cy)};
-    const float radius = static_cast<float>(appearance.cornerRadius);
+    const float radius = static_cast<float>(metrics.cornerRadius);
     const D2D1_ROUNDED_RECT rounded = {rect, radius, radius};
 
     // Drop shadow: stroke rings drawn in the margin outside the panel.
-    if (appearance.shadow && appearance.shadowSize > 0 && margin > 0) {
-        const float size = static_cast<float>(appearance.shadowSize);
-        const int layers = std::max(1, appearance.shadowSize / 4);
+    if (appearance.shadow && metrics.shadowSize > 0 && margin > 0) {
+        const float size = static_cast<float>(metrics.shadowSize);
+        const int layers = std::max(1, metrics.shadowSize / 4);
         for (int layer = layers; layer >= 1; --layer) {
             const float grow =
                 size * static_cast<float>(layer) / static_cast<float>(layers);
@@ -3762,7 +3857,7 @@ void DrawPanel(ID2D1DeviceContext* dc, const LayoutPanel& panel,
         const float scaleX = static_cast<float>(backdrop->width) /
                              static_cast<float>(std::max(1L, panel.size.cx));
         const int maskRadius = static_cast<int>(
-            static_cast<float>(appearance.cornerRadius) * scaleX);
+            static_cast<float>(metrics.cornerRadius) * scaleX);
         std::vector<uint8_t> mask;
         BuildRoundedRectMask(backdrop->width, backdrop->height, maskRadius, mask);
         std::vector<uint32_t> pixels = backdrop->pixels;
@@ -3871,13 +3966,13 @@ void DrawPanel(ID2D1DeviceContext* dc, const LayoutPanel& panel,
         }
     }
 
-    if (appearance.borderWidth > 0 && (appearance.border >> 24) != 0) {
+    if (metrics.borderWidth > 0 && (appearance.border >> 24) != 0) {
         ID2D1SolidColorBrush* brush = nullptr;
         if (SUCCEEDED(dc->CreateSolidColorBrush(ColorFromArgb(appearance.border),
                                                 &brush)) &&
             brush) {
             dc->DrawRoundedRectangle(&rounded, brush,
-                                     static_cast<float>(appearance.borderWidth));
+                                     static_cast<float>(metrics.borderWidth));
             brush->Release();
         }
     }
@@ -4182,17 +4277,81 @@ inline MenuSession* g_menuSession = nullptr;
 
 void OnDeviceLost();
 
+int MeasureTextWidthDirectWrite(const wchar_t* label, size_t length,
+                                const LayoutMetrics& metrics) {
+    IDWriteFactory* dwrite = g_renderDevice.DWriteFactory();
+    if (!dwrite || length == 0) {
+        return EstimateTextWidth(label, length, metrics);
+    }
+    IDWriteTextFormat* format = nullptr;
+    if (FAILED(dwrite->CreateTextFormat(metrics.fontFace.c_str(), nullptr,
+                                        DWRITE_FONT_WEIGHT_NORMAL,
+                                        DWRITE_FONT_STYLE_NORMAL,
+                                        DWRITE_FONT_STRETCH_NORMAL,
+                                        metrics.fontSize, L"", &format)) ||
+        !format) {
+        return EstimateTextWidth(label, length, metrics);
+    }
+    int width = EstimateTextWidth(label, length, metrics);
+    IDWriteTextLayout* layout = nullptr;
+    if (SUCCEEDED(dwrite->CreateTextLayout(label, static_cast<UINT32>(length),
+                                           format, 4096.0f,
+                                           static_cast<float>(metrics.itemHeight),
+                                           &layout)) &&
+        layout) {
+        DWRITE_TEXT_METRICS textMetrics = {};
+        if (SUCCEEDED(layout->GetMetrics(&textMetrics))) {
+            width = static_cast<int>(textMetrics.widthIncludingTrailingWhitespace) + 2;
+        }
+        layout->Release();
+    }
+    format->Release();
+    return width;
+}
+
 struct AnimationSpec {
     bool animate = false;
     bool slide = false;
     int durationMs = 0;
 };
 
-// MinGW's dcomp.h omits IDCompositionVisual::SetOpacity (the vtable tail);
-// mirror it so the correct slots are called.
-struct IDCompositionVisualOpacity : public IDCompositionVisual {
+// MinGW's dcomp.h lists overload pairs in the wrong order (and omits
+// SetOpacity, which lives on IDCompositionVisual3). Mirror the real SDK vtable
+// order so animation calls hit the intended slots.
+struct IDCompositionVisualCorrect : public IUnknown {
+    virtual HRESULT STDMETHODCALLTYPE SetOffsetX(float offsetX) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetOffsetX(IDCompositionAnimation* animation) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetOffsetY(float offsetY) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetOffsetY(IDCompositionAnimation* animation) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetTransform(
+        const D2D_MATRIX_3X2_F& matrix) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetTransform(
+        IDCompositionTransform* transform) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetTransformParent(
+        IDCompositionVisual* visual) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetEffect(IDCompositionEffect* effect) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetBitmapInterpolationMode(
+        DCOMPOSITION_BITMAP_INTERPOLATION_MODE mode) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetBorderMode(
+        DCOMPOSITION_BORDER_MODE mode) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetClip(const D2D_RECT_F& rect) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetClip(IDCompositionClip* clip) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetContent(IUnknown* content) = 0;
+    virtual HRESULT STDMETHODCALLTYPE AddVisual(IDCompositionVisual* visual,
+                                                BOOL insertAbove,
+                                                IDCompositionVisual* referenceVisual) = 0;
+    virtual HRESULT STDMETHODCALLTYPE RemoveVisual(IDCompositionVisual* visual) = 0;
+    virtual HRESULT STDMETHODCALLTYPE RemoveAllVisuals() = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetCompositeMode(
+        DCOMPOSITION_COMPOSITE_MODE mode) = 0;
+};
+
+struct IDCompositionEffectGroupCorrect : public IDCompositionEffect {
     virtual HRESULT STDMETHODCALLTYPE SetOpacity(float opacity) = 0;
-    virtual HRESULT STDMETHODCALLTYPE SetOpacity(IDCompositionAnimation* animation) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetOpacity(
+        IDCompositionAnimation* animation) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetTransform3D(
+        IDCompositionTransform3D* transform) = 0;
 };
 
 AnimationSpec ResolveAnimationSpec(const Appearance& appearance) {
@@ -4227,22 +4386,28 @@ void ApplyWindowAnimation(IDCompositionVisual* visual, const AnimationSpec& spec
     }
 
     if (!spec.animate || spec.durationMs <= 0) {
-        static_cast<IDCompositionVisualOpacity*>(visual)->SetOpacity(
-            opening ? 1.0f : 0.0f);
-        comp->Commit();
+        // Default opacity is 1; non-animated closes destroy the window.
         return;
     }
 
-    const double duration = static_cast<double>(spec.durationMs) / 1000.0;
-    IDCompositionAnimation* opacity = nullptr;
-    if (FAILED(comp->CreateAnimation(&opacity)) || !opacity) {
+    IDCompositionEffectGroup* group = nullptr;
+    if (FAILED(comp->CreateEffectGroup(&group)) || !group) {
         return;
     }
-    opacity->AddCubic(0.0, opening ? 0.0 : 1.0,
-                      (opening ? 1.0 : -1.0) / duration, 0.0, 0.0);
-    opacity->End(duration, opening ? 1.0 : 0.0);
-    static_cast<IDCompositionVisualOpacity*>(visual)->SetOpacity(opacity);
-    opacity->Release();
+    auto* groupCorrect = reinterpret_cast<IDCompositionEffectGroupCorrect*>(group);
+    auto* visualCorrect = reinterpret_cast<IDCompositionVisualCorrect*>(visual);
+
+    const double duration = static_cast<double>(spec.durationMs) / 1000.0;
+    IDCompositionAnimation* opacity = nullptr;
+    if (SUCCEEDED(comp->CreateAnimation(&opacity)) && opacity) {
+        opacity->AddCubic(0.0, opening ? 0.0 : 1.0,
+                          (opening ? 1.0 : -1.0) / duration, 0.0, 0.0);
+        opacity->End(duration, opening ? 1.0 : 0.0);
+        groupCorrect->SetOpacity(opacity);
+        opacity->Release();
+    }
+    visualCorrect->SetEffect(group);
+    group->Release();
 
     if (spec.slide) {
         IDCompositionAnimation* slide = nullptr;
@@ -4250,7 +4415,7 @@ void ApplyWindowAnimation(IDCompositionVisual* visual, const AnimationSpec& spec
             slide->AddCubic(0.0, opening ? 12.0 : 0.0,
                             (opening ? -12.0 : 12.0) / duration, 0.0, 0.0);
             slide->End(duration, opening ? 0.0 : 12.0);
-            visual->SetOffsetX(slide);
+            visualCorrect->SetOffsetX(slide);
             slide->Release();
         }
     }
@@ -4434,7 +4599,6 @@ LRESULT CustomMenuWindowProc(MenuWindow* window, HWND hwnd, UINT msg,
     switch (msg) {
         case WM_MOUSEMOVE: {
             session->active = index;
-            CloseSubmenusBelow(session, index);
 
             TRACKMOUSEEVENT track = {};
             track.cbSize = sizeof(track);
@@ -4443,22 +4607,33 @@ LRESULT CustomMenuWindowProc(MenuWindow* window, HWND hwnd, UINT msg,
             TrackMouseEvent(&track);
 
             const int hit = MenuStateItemAt(panel, state, panelPoint);
+            const bool isSubmenu =
+                hit >= 0 && panel.items[hit].kind == ItemKind::Submenu;
+            const bool ownsOpenChild =
+                state.openSubmenu >= 0 && hit >= 0 &&
+                panel.items[hit].submenuIndex == state.openSubmenu;
+            if (!ownsOpenChild) {
+                CloseSubmenusBelow(session, index);
+            }
+
             if (hit != state.hoverIndex) {
                 MenuStateMouseMove(state, panel, hit);
                 RepaintMenuWindow(session, index);
             }
 
-            const bool isSubmenu =
-                hit >= 0 && panel.items[hit].kind == ItemKind::Submenu;
-            if (isSubmenu && !session->submenuTimerActive) {
-                session->hoverCandidate = hit;
-                session->submenuTimerActive = true;
-                SetTimer(hwnd, kMenuSubmenuTimerId,
-                         static_cast<UINT>(session->submenuDelayMs <= 0
-                                               ? 1
-                                               : session->submenuDelayMs),
-                         nullptr);
-            } else if (!isSubmenu && session->submenuTimerActive) {
+            if (isSubmenu) {
+                if (!ownsOpenChild &&
+                    (session->hoverCandidate != hit ||
+                     !session->submenuTimerActive)) {
+                    session->hoverCandidate = hit;
+                    session->submenuTimerActive = true;
+                    SetTimer(hwnd, kMenuSubmenuTimerId,
+                             static_cast<UINT>(session->submenuDelayMs <= 0
+                                                   ? 1
+                                                   : session->submenuDelayMs),
+                             nullptr);
+                }
+            } else if (session->submenuTimerActive) {
                 KillTimer(hwnd, kMenuSubmenuTimerId);
                 session->submenuTimerActive = false;
                 session->hoverCandidate = -1;
@@ -4470,13 +4645,19 @@ LRESULT CustomMenuWindowProc(MenuWindow* window, HWND hwnd, UINT msg,
                 MenuStateMouseLeave(state);
                 RepaintMenuWindow(session, index);
             }
+            if (session->submenuTimerActive) {
+                KillTimer(hwnd, kMenuSubmenuTimerId);
+                session->submenuTimerActive = false;
+                session->hoverCandidate = -1;
+            }
             return 0;
         }
         case WM_TIMER: {
             if (wParam == kMenuSubmenuTimerId) {
                 session->submenuTimerActive = false;
                 KillTimer(hwnd, kMenuSubmenuTimerId);
-                if (index == session->active && session->hoverCandidate >= 0) {
+                if (index == session->active && session->hoverCandidate >= 0 &&
+                    session->hoverCandidate == state.hoverIndex) {
                     OpenSubmenu(session, index, session->hoverCandidate);
                 }
             }
@@ -4619,16 +4800,20 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
 
     std::shared_ptr<const LayoutPanel> panel = g_layoutCache.Find(key);
     if (!panel) {
-        auto built =
-            std::make_shared<LayoutPanel>(BuildLayoutPanel(model.items, metrics));
+        auto built = std::make_shared<LayoutPanel>(
+            BuildLayoutPanel(model.items, metrics, &MeasureTextWidthDirectWrite));
+        bool bound = false;
         ID2D1DeviceContext* bindDc = nullptr;
         if (SUCCEEDED(g_renderDevice.D2DDevice()->CreateDeviceContext(
                 D2D1_DEVICE_CONTEXT_OPTIONS_NONE, &bindDc)) &&
             bindDc) {
             g_contentCaches.Bind(*built, metrics, bindDc);
             bindDc->Release();
+            bound = true;
         }
-        g_layoutCache.Put(key, built);
+        if (bound) {
+            g_layoutCache.Put(key, built);
+        }
         panel = built;
     }
     if (!panel) {
@@ -4637,8 +4822,8 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
     }
 
     MenuWindow* root = g_menuWindowPool.Acquire();
-    const int margin = appearance.shadow && appearance.shadowSize > 0
-                           ? std::min(appearance.shadowSize, 24)
+    const int margin = appearance.shadow && metrics.shadowSize > 0
+                           ? std::min(metrics.shadowSize, 24)
                            : 0;
     if (!root || !root->Create(owner, panel.get(), true, margin)) {
         if (root) {
@@ -4750,7 +4935,8 @@ void PrebuildLayoutsForWarmup(const std::vector<MenuModel>& models, uint32_t dpi
             continue;
         }
         auto panel =
-            std::make_shared<LayoutPanel>(BuildLayoutPanel(model.items, metrics));
+            std::make_shared<LayoutPanel>(BuildLayoutPanel(
+                model.items, metrics, &MeasureTextWidthDirectWrite));
         g_contentCaches.Bind(*panel, metrics, dc);
         g_layoutCache.Put(key, panel);
     }
@@ -6865,9 +7051,12 @@ void DiscoverIntoCache(PendingCapture& capture, const ContextSignature& signatur
         DumpModelItems(model.items, 0);
     }
     // Warm the render-ready layout for the custom menu while we are already
-    // paying discovery cost, so the next open is a cache hit.
-    PrebuildLayoutsForWarmup({model}, DpiForWindow(GetDesktopWindow()),
-                             IsDarkThemeActive());
+    // paying discovery cost, so the next open is a cache hit. Only the UI
+    // thread may touch the render device and content caches.
+    if (GetCurrentThreadId() == g_uiThreadId) {
+        PrebuildLayoutsForWarmup({model}, DpiForWindow(GetDesktopWindow()),
+                                 IsDarkThemeActive());
+    }
     g_cache.Put(std::move(model));
 }
 
@@ -7287,6 +7476,33 @@ std::wstring QuotePathIfNeeded(const std::wstring& path) {
     return L'"' + path + L'"';
 }
 
+// Splits an expanded command line into the executable and its parameters for
+// ShellExecuteEx (which does not parse a single command-line string).
+bool SplitCommandLine(const std::wstring& command, std::wstring& file,
+                      std::wstring& parameters) {
+    bool inQuotes = false;
+    bool split = false;
+    for (size_t i = 0; i < command.size(); ++i) {
+        const wchar_t c = command[i];
+        if (c == L'"') {
+            inQuotes = !inQuotes;
+        } else if (!inQuotes && (c == L' ' || c == L'\t')) {
+            file = command.substr(0, i);
+            parameters = TrimWhitespace(command.substr(i + 1));
+            split = true;
+            break;
+        }
+    }
+    if (!split) {
+        file = command;
+        parameters.clear();
+    }
+    if (file.size() >= 2 && file.front() == L'"' && file.back() == L'"') {
+        file = file.substr(1, file.size() - 2);
+    }
+    return !file.empty();
+}
+
 std::wstring ExpandCommandPlaceholders(const std::wstring& command,
                                        const InvocationContext& ctx) {
     std::wstring expanded = ExpandEnv(command);
@@ -7320,12 +7536,18 @@ bool InvokeCustomCommand(const CustomCommand& command,
     }
 
     if (command.runAs == RunAs::Admin) {
+        std::wstring file;
+        std::wstring parameters;
+        if (!SplitCommandLine(expanded, file, parameters)) {
+            return false;
+        }
         SHELLEXECUTEINFOW info = {};
         info.cbSize = sizeof(info);
         info.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_FLAG_NO_UI;
         info.hwnd = ctx.owner;
         info.lpVerb = L"runas";
-        info.lpFile = expanded.c_str();
+        info.lpFile = file.c_str();
+        info.lpParameters = parameters.empty() ? nullptr : parameters.c_str();
         info.lpDirectory = workingDir.empty() ? nullptr : workingDir.c_str();
         info.nShow = ShowWindowToShowCmd(command.showWindow);
         if (ShellExecuteExW(&info)) {
@@ -7353,11 +7575,17 @@ bool InvokeCustomCommand(const CustomCommand& command,
         return true;
     }
 
+    std::wstring file;
+    std::wstring parameters;
+    if (!SplitCommandLine(expanded, file, parameters)) {
+        return false;
+    }
     SHELLEXECUTEINFOW info = {};
     info.cbSize = sizeof(info);
     info.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_FLAG_NO_UI;
     info.hwnd = ctx.owner;
-    info.lpFile = expanded.c_str();
+    info.lpFile = file.c_str();
+    info.lpParameters = parameters.empty() ? nullptr : parameters.c_str();
     info.lpDirectory = workingDir.empty() ? nullptr : workingDir.c_str();
     info.nShow = ShowWindowToShowCmd(command.showWindow);
     if (ShellExecuteExW(&info)) {
@@ -9507,6 +9735,25 @@ MenuPath DecidePath(bool shiftHeld, ShellViewKind kind, bool hasPendingCapture,
     return MenuPath::Ours;
 }
 
+std::wstring DirectoryOfPath(const std::wstring& path) {
+    const size_t slash = path.find_last_of(L"\\/");
+    if (slash == std::wstring::npos) {
+        return L"";
+    }
+    return path.substr(0, slash);
+}
+
+std::wstring SelectionDirectory(const std::vector<std::wstring>& paths,
+                                Scope scope) {
+    if (paths.empty()) {
+        return L"";
+    }
+    if (scope == Scope::Folders || scope == Scope::Drive) {
+        return paths.front();
+    }
+    return DirectoryOfPath(paths.front());
+}
+
 bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner, POINT pt) {
     g_perf.MarkOpenPathStart();
     // Handler changes are checked while menus are used, not on a timer.
@@ -9653,6 +9900,7 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
                 ctx.clipboardSequence = clipboardSequence;
                 ctx.clipboardHadData = clipboardHadData;
                 ctx.config = rules;
+                ctx.directory = SelectionDirectory(paths, scope);
 
                 InvokeResult result = InvokeResult::Failed;
                 if (item->flags & kModelExtension) {
@@ -9878,6 +10126,7 @@ bool g_populationHookDeferred = false;
 
 BOOL Wh_ModInit() {
     Wh_Log(L"Context Menu Overhaul init");
+    cmo::g_uiThreadId = GetCurrentThreadId();
 
     if (!Wh_SetFunctionHook((void*)TrackPopupMenuEx, (void*)cmo::TrackPopupMenuEx_Hook,
                             (void**)&cmo::TrackPopupMenuEx_Original)) {
@@ -9942,6 +10191,10 @@ void Wh_ModAfterInit() {
 void Wh_ModUninit() {
     Wh_Log(L"Context Menu Overhaul uninit");
     cmo::g_configStore.Stop();
+    cmo::g_menuWindowPool.DestroyAll();
+    cmo::g_contentCaches.Clear();
+    cmo::g_layoutCache.InvalidateAll();
+    cmo::g_renderDevice.Shutdown();
     cmo::RestoreMenuAnimation();
     cmo::RestoreMenuDelay();
     cmo::g_warmup.Stop();

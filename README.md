@@ -99,7 +99,10 @@ position = top
   aside when move rules exist). Precedence: hide > keep > move.
 - **Commands**: `command`, `workingDir`, `icon`, `menu`, `match.*`, `runAs`
   (`none`/`admin`), `showWindow`, `separator`. Placeholders: `%1`, `%*`,
-  `%dir%`, plus environment variables.
+  `%dir%`, plus environment variables. Command `match.*` supports the context
+  predicates (`ext:`, `scope:`, `multi`, `thirdParty`); label/verb predicates
+  apply to rules, not to commands. Rules run before custom items are inserted,
+  so `hide` does not remove custom commands or submenus.
 - **Submenus**: `icon`, `position` (`top`, `bottom`, `after:"Label"`,
   `before:"Label"`), `match.*`. Nesting comes from `menu = A/B` (up to 3
   levels).

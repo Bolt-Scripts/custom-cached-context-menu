@@ -2665,6 +2665,56 @@ int main() {
         CHECK(cmo::g_layoutCache.Find(a) == nullptr);
     }
 
+    // v2 review fixes: inline comments, %dir%, submenu match gating, split.
+    {
+        cmo::RulesConfig config;
+        std::vector<cmo::ConfigParseError> errors;
+        CHECK(cmo::ParseRulesConfig(
+            L"[appearance]\ncornerRadius = 4 ; trailing comment\n", config,
+            errors));
+        CHECK(config.appearance.cornerRadius == 4);
+
+        cmo::InvocationContext ctx{};
+        ctx.directory = L"C:\\src";
+        ctx.paths = {L"C:\\src\\a.cs"};
+        CHECK(cmo::ExpandCommandPlaceholders(L"%dir%", ctx) == L"C:\\src");
+
+        std::wstring file;
+        std::wstring parameters;
+        CHECK(cmo::SplitCommandLine(L"code.exe \"%1\" --flag", file, parameters));
+        CHECK(file == L"code.exe");
+        CHECK(parameters == L"\"%1\" --flag");
+
+        cmo::RulesConfig submenus;
+        CHECK(cmo::ParseRulesConfig(
+            L"[submenu \"OnlyFolders\"]\nmatch.scope = folders\n"
+            L"[submenu \"Everywhere\"]\n",
+            submenus, errors));
+        cmo::MenuModel model{};
+        cmo::MenuItem fb{};
+        fb.id = 1;
+        fb.kind = cmo::ItemKind::Command;
+        fb.action = cmo::ActionKind::Fallback;
+        fb.label = L"Show classic menu";
+        model.items.push_back(fb);
+        cmo::ItemContext itemCtx{};
+        itemCtx.scope = cmo::Scope::Files;
+        itemCtx.paths = {L"C:\\src\\a.cs"};
+        cmo::InsertCustomItems(model, submenus, itemCtx);
+        bool onlyFolders = false;
+        bool everywhere = false;
+        for (const cmo::MenuItem& item : model.items) {
+            if (item.label == L"OnlyFolders") {
+                onlyFolders = true;
+            }
+            if (item.label == L"Everywhere") {
+                everywhere = true;
+            }
+        }
+        CHECK(!onlyFolders);
+        CHECK(everywhere);
+    }
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

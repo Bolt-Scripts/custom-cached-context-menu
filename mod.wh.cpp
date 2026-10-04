@@ -1,140 +1,184 @@
 // ==WindhawkMod==
-// @id              context-mod
+// @id              context-menu-overhaul
 // @name            Context Menu Overhaul
-// @description     The best mod ever that does great things, such as overhaul the context menu to not suck nuts.
+// @description     Replaces the Explorer context menu with an instantly-opening cached menu, then discovers and caches shell extension items asynchronously.
 // @version         0.1
-// @author          You
-// @include         mspaint.exe
-// @compilerOptions -lcomdlg32
+// @include         explorer.exe
+// @architecture    x86-64
+// @compilerOptions -lole32 -lshlwapi -luuid -lcomctl32 -ladvapi32 -lgdi32
 // @license         MIT
 // ==/WindhawkMod==
 
 // ==WindhawkModReadme==
 /*
-# Your Awesome Mod
-This is a place for useful information about your mod. Use it to describe the
-mod, explain why it's useful, and add any other relevant details. You can use
-[Markdown](https://en.wikipedia.org/wiki/Markdown) to add links and
-**formatting** to the readme.
+# Context Menu Overhaul
 
-This short sample customizes Microsoft Paint by forcing it to use just a single
-color, and by blocking file opening. To see the mod in action:
-- Compile the mod with the button on the left or with Ctrl+B.
-- Run Microsoft Paint from the start menu (type "Paint") or by running
-  mspaint.exe.
-- Draw something and notice that the orange color is always used, regardless of
-  the color you pick.
-- Try opening a file and notice that it's blocked.
+Replaces the Windows Explorer file context menu with a custom menu that opens
+instantly. The native menu is slow because every registered shell extension is
+loaded synchronously before it can be shown; this mod shows a cached menu right
+away and discovers extension items asynchronously in the background.
 
-# Getting started
-Check out the documentation
-[here](https://github.com/ramensoftware/windhawk/wiki/Creating-a-new-mod).
+Hold Shift while right-clicking to get the untouched native menu.
+
+Design document: `docs/superpowers/specs/2026-10-04-context-menu-overhaul-design.md`
 */
 // ==/WindhawkModReadme==
 
 // ==WindhawkModSettings==
 /*
-# Here you can define settings, in YAML format, that the mod users will be able
-# to configure. Metadata values such as $name and $description are optional.
-# Check out the documentation for more information:
-# https://github.com/ramensoftware/windhawk/wiki/Creating-a-new-mod#settings
-- color:
-  - red: 255
-  - green: 127
-  - blue: 39
-  $name: Custom color
-  $description: This color will be used regardless of the selected color.
-- blockOpen: true
-  $name: Block opening files
-  $description: When enabled, opening files in Paint is not allowed.
+- enableShiftBypass: true
+  $name: Shift bypass
+  $description: Hold Shift while right-clicking to show the untouched native menu.
+- showMoreOptionsItem: true
+  $name: Show more options item
+  $description: Add a "Show more options" entry at the bottom of the replacement menu.
+- warmupExtensions: [".txt", ".pdf", ".zip", ".rar", ".7z", ".jpg", ".png", ".mp4", ".mp3", ".docx", ".xlsx", ".exe", ".lnk"]
+  $name: Warm-up extensions
+  $description: File types whose menus are pre-built at Explorer startup.
+- warmupDelaySeconds: 5
+  $name: Warm-up delay
+  $description: Seconds to wait after Explorer starts before warming the cache.
+- clearCache: false
+  $name: Clear cache
+  $description: Turn on to delete the cached menu models; they rebuild on next use.
+- debugLogging: false
+  $name: Debug logging
+  $description: Log timing and diagnostics for troubleshooting.
 */
 // ==/WindhawkModSettings==
 
-// The source code of the mod starts here. This sample was inspired by the great
-// article of Kyle Halladay, X64 Function Hooking by Example:
-// https://kylehalladay.com/blog/2020/11/13/Hooking-By-Example.html
-// If you're new to terms such as code injection and function hooking, the
-// article is great to get started.
+#include <windows.h>
+#include <shlwapi.h>
 
-#include <gdiplus.h>
+#include <cstdint>
+#include <string>
+#include <string_view>
+#include <vector>
 
-using namespace Gdiplus;
+// ===========================================================================
+// [CMO:Signature] Context signature: what identifies a cached menu model.
+// ===========================================================================
+namespace cmo {
 
-struct {
-    BYTE red;
-    BYTE green;
-    BYTE blue;
-    bool blockOpen;
-} settings;
+enum class Scope : uint8_t { Files, Folders, Background, Desktop, Drive, NavPane, Other };
+enum class Shape : uint8_t { Single, Multi };
+enum class Variant : uint8_t { Normal, Extended };
 
-using GdipSetSolidFillColor_t = decltype(&DllExports::GdipSetSolidFillColor);
-GdipSetSolidFillColor_t GdipSetSolidFillColor_Original;
-GpStatus WINAPI GdipSetSolidFillColor_Hook(GpSolidFill* brush, ARGB color) {
-    Wh_Log(L"GdipSetSolidFillColor_Hook: color=%08X", color);
+inline uint64_t HashCombine(uint64_t seed, uint64_t value) {
+    value += 0x9e3779b97f4a7c15ULL + (seed << 6) + (seed >> 2);
+    return seed ^ value;
+}
 
-    // If the color is not transparent, replace it.
-    if (Color(color).GetAlpha() == 255) {
-        color =
-            Color::MakeARGB(255, settings.red, settings.green, settings.blue);
+inline uint64_t HashString(std::wstring_view text) {
+    // FNV-1a 64-bit.
+    uint64_t hash = 1469598103934665603ULL;
+    for (wchar_t c : text) {
+        hash ^= static_cast<uint64_t>(c);
+        hash *= 1099511628211ULL;
+    }
+    return hash;
+}
+
+struct ContextSignature {
+    Scope scope;
+    std::wstring typeKey;
+    Shape shape;
+    Variant variant;
+
+    bool operator==(const ContextSignature&) const = default;
+
+    uint64_t Hash() const {
+        uint64_t hash = HashCombine(static_cast<uint64_t>(scope), HashString(typeKey));
+        hash = HashCombine(hash, static_cast<uint64_t>(shape));
+        hash = HashCombine(hash, static_cast<uint64_t>(variant));
+        return hash;
+    }
+};
+
+// Lowercased extension including the dot (".txt"), or "*" when the name has
+// no usable extension: leading-dot names, trailing dots, or no dot at all.
+inline std::wstring MakeExtensionKey(std::wstring_view path) {
+    size_t nameStart = path.find_last_of(L"\\/");
+    nameStart = (nameStart == std::wstring_view::npos) ? 0 : nameStart + 1;
+
+    size_t dot = path.find_last_of(L'.');
+    if (dot == std::wstring_view::npos || dot < nameStart || dot == nameStart ||
+        dot + 1 >= path.size()) {
+        return L"*";
     }
 
-    // Call the original function.
-    return GdipSetSolidFillColor_Original(brush, color);
+    std::wstring extension(path.substr(dot));
+    CharLowerBuffW(extension.data(), static_cast<DWORD>(extension.size()));
+    return extension;
 }
 
-using GetOpenFileNameW_t = decltype(&GetOpenFileNameW);
-GetOpenFileNameW_t GetOpenFileNameW_Original;
-BOOL WINAPI GetOpenFileNameW_Hook(LPOPENFILENAMEW params) {
-    Wh_Log(L"GetOpenFileNameW_Hook");
-
-    if (settings.blockOpen) {
-        // Forbid the operation and return without calling the original
-        // function.
-        MessageBoxW(GetActiveWindow(), L"Opening files is forbidden",
-                    L"Surprise!", MB_OK);
-        return FALSE;
+// The shared type key of a selection: the common extension, "mixed" when the
+// selection spans several extensions, or "*" for an empty selection.
+inline std::wstring MakeTypeKey(const std::vector<std::wstring>& paths) {
+    if (paths.empty()) {
+        return L"*";
     }
 
-    return GetOpenFileNameW_Original(params);
+    std::wstring first = MakeExtensionKey(paths.front());
+    for (size_t i = 1; i < paths.size(); ++i) {
+        if (MakeExtensionKey(paths[i]) != first) {
+            return L"mixed";
+        }
+    }
+    return first;
 }
 
-void LoadSettings() {
-    settings.red = Wh_GetIntSetting(L"color.red");
-    settings.green = Wh_GetIntSetting(L"color.green");
-    settings.blue = Wh_GetIntSetting(L"color.blue");
-    settings.blockOpen = Wh_GetIntSetting(L"blockOpen");
-}
+}  // namespace cmo
 
-// The mod is being initialized, load settings, hook functions, and do other
-// initialization stuff if required.
+// ===========================================================================
+// [CMO:Model] Menu item / menu model definitions. (Task 4)
+// ===========================================================================
+
+// ===========================================================================
+// [CMO:Cache] In-memory and persistent menu model cache. (Tasks 4/7)
+// ===========================================================================
+
+// ===========================================================================
+// [CMO:Classify] Popup owner classification. (Task 2)
+// ===========================================================================
+
+// ===========================================================================
+// [CMO:Discovery] Real shell menu population capture. (Tasks 3/5)
+// ===========================================================================
+
+// ===========================================================================
+// [CMO:Invoker] Executing a chosen menu item. (Tasks 4/6)
+// ===========================================================================
+
+// ===========================================================================
+// [CMO:View] Rendering abstraction, native implementation. (Task 4)
+// ===========================================================================
+
+// ===========================================================================
+// [CMO:Warmup] Background cache warm-up. (Task 8)
+// ===========================================================================
+
+// ===========================================================================
+// [CMO:Invalidation] Cache invalidation. (Task 7)
+// ===========================================================================
+
+// ===========================================================================
+// [CMO:Hooks] Hook functions and interception state. (Tasks 2/3/9)
+// ===========================================================================
+
+// ===========================================================================
+// [CMO:ModLifecycle] Windhawk entry points.
+// ===========================================================================
+
 BOOL Wh_ModInit() {
-    Wh_Log(L"Init");
-
-    LoadSettings();
-
-    HMODULE gdiPlusModule = LoadLibrary(L"gdiplus.dll");
-    GdipSetSolidFillColor_t GdipSetSolidFillColor =
-        (GdipSetSolidFillColor_t)GetProcAddress(gdiPlusModule,
-                                                "GdipSetSolidFillColor");
-
-    Wh_SetFunctionHook((void*)GdipSetSolidFillColor,
-                       (void*)GdipSetSolidFillColor_Hook,
-                       (void**)&GdipSetSolidFillColor_Original);
-
-    Wh_SetFunctionHook((void*)GetOpenFileNameW, (void*)GetOpenFileNameW_Hook,
-                       (void**)&GetOpenFileNameW_Original);
-
+    Wh_Log(L"Context Menu Overhaul init");
     return TRUE;
 }
 
-// The mod is being unloaded, free all allocated resources.
 void Wh_ModUninit() {
-    Wh_Log(L"Uninit");
+    Wh_Log(L"Context Menu Overhaul uninit");
 }
 
-// The mod setting were changed, reload them.
 void Wh_ModSettingsChanged() {
-    Wh_Log(L"SettingsChanged");
-
-    LoadSettings();
+    Wh_Log(L"Context Menu Overhaul settings changed");
 }

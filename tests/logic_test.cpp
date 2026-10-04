@@ -49,6 +49,18 @@ int main() {
     CHECK(a.Hash() == b.Hash());
     CHECK(!(a == c));
 
+    CHECK_EQ(cmo::ClassifyClassChain({L"SHELLDLL_DefView", L"CabinetWClass"}, false),
+             cmo::ShellViewKind::ShellDefView);
+    CHECK_EQ(cmo::ClassifyClassChain({L"NamespaceTreeControl", L"ShellTabWindowClass"}, false),
+             cmo::ShellViewKind::NavPane);
+    CHECK_EQ(cmo::ClassifyClassChain({L"ToolbarWindow32"}, true),
+             cmo::ShellViewKind::Desktop);
+    CHECK_EQ(cmo::ClassifyClassChain({L"Shell_TrayWnd"}, false),
+             cmo::ShellViewKind::None);
+    CHECK(cmo::IsReplaceableKind(cmo::ShellViewKind::ShellDefView));
+    CHECK(cmo::IsReplaceableKind(cmo::ShellViewKind::Desktop));
+    CHECK(!cmo::IsReplaceableKind(cmo::ShellViewKind::NavPane));
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

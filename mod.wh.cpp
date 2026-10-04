@@ -2,7 +2,7 @@
 // @id              context-menu-overhaul
 // @name            Context Menu Overhaul
 // @description     Replaces the Explorer context menu with an instantly-opening cached menu, then discovers and caches shell extension items asynchronously.
-// @version         0.3.20
+// @version         0.3.21
 // @include         explorer.exe
 // @architecture    x86-64
 // @compilerOptions -lole32 -lshlwapi -luuid -lcomctl32 -ladvapi32 -lgdi32 -luxtheme -lversion
@@ -710,6 +710,8 @@ const ShellNewRoot kShellNewRoots[] = {
     {HKEY_CLASSES_ROOT, L""},
     {HKEY_CURRENT_USER, L"Software\\Classes\\"},
     {HKEY_LOCAL_MACHINE, L"Software\\Classes\\"},
+    // Office and other 32-bit installers register here.
+    {HKEY_LOCAL_MACHINE, L"Software\\Classes\\WOW6432Node\\"},
 };
 
 std::vector<NewTemplate> EnumerateShellNewTemplates() {
@@ -866,6 +868,42 @@ void EnsureNewTemplates() {
                     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
         filtered.push_back(std::move(zip));
     }
+
+    // Windows 11 registers some built-in New items through the AppX/MRT
+    // system instead of ShellNew; add the standard Windows types when the
+    // registry provides nothing for them.
+    struct BuiltinTemplate {
+        const wchar_t* extension;
+        const wchar_t* displayName;
+        NewTemplate::Kind kind;
+        const char* data;  // optional payload
+    };
+    const BuiltinTemplate kBuiltins[] = {
+        {L".txt", L"Text Document", NewTemplate::Kind::NullFile, nullptr},
+        {L".bmp", L"Bitmap image", NewTemplate::Kind::NullFile, nullptr},
+        {L".rtf", L"Rich Text Document", NewTemplate::Kind::Data, "{\\rtf1}"},
+    };
+    for (const BuiltinTemplate& builtin : kBuiltins) {
+        bool present = false;
+        for (const NewTemplate& tmpl : filtered) {
+            if (_wcsicmp(tmpl.extension.c_str(), builtin.extension) == 0) {
+                present = true;
+                break;
+            }
+        }
+        if (present) {
+            continue;
+        }
+        NewTemplate tmpl;
+        tmpl.kind = builtin.kind;
+        tmpl.displayName = builtin.displayName;
+        tmpl.extension = builtin.extension;
+        if (builtin.data) {
+            tmpl.data.assign(builtin.data, builtin.data + strlen(builtin.data));
+        }
+        filtered.push_back(std::move(tmpl));
+    }
+
     std::sort(filtered.begin(), filtered.end(),
               [](const NewTemplate& a, const NewTemplate& b) {
                   return _wcsicmp(a.displayName.c_str(), b.displayName.c_str()) < 0;
@@ -906,7 +944,12 @@ void ResetNewTemplatesForTesting() {
 #endif
 
 void BuildNewMenuChildren(std::vector<MenuItem>& children, uint32_t& nextId) {
-    EnsureNewTemplates();
+    // Never build templates on the open path: the warm-up thread prebuilds
+    // them, and blocking on its registry walk can stall the menu right after
+    // Explorer starts. New appears once the list is ready.
+    if (!g_newTemplatesReady.load(std::memory_order_acquire)) {
+        return;
+    }
     for (size_t i = 0; i < g_newTemplates.size(); ++i) {
         const NewTemplate& tmpl = g_newTemplates[i];
         MenuItem item{};

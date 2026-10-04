@@ -84,7 +84,10 @@ untouched native menu, including extended verbs.
   builds where the shell object rejects those verbs. New is a real submenu
   built from the registry's ShellNew templates (Folder, Shortcut, and file
   types with the shell's own type icons), created directly without involving
-  the shell's own New handler.
+  the shell's own New handler. The standard Windows types (Text Document,
+  Bitmap image, Rich Text Document) and Compressed (zipped) Folder are added
+  when the registry provides no template — Windows 11 registers them through
+  the AppX/MRT system rather than ShellNew.
 - Rare entries whose labels cannot be read from the shell (dynamic or
   owner-drawn items) are hidden rather than shown blank, and submenus left
   empty are removed with them; each hidden item is logged as

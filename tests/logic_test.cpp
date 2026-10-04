@@ -1784,6 +1784,9 @@ int main() {
         bool foundStringData = false;
         bool foundZip = false;
         bool foundHkcr = false;
+        bool foundTxt = false;
+        bool foundBmp = false;
+        bool foundRtf = false;
         for (const cmo::NewTemplate& tmpl : cmo::g_newTemplates) {
             if (tmpl.extension == L".cmonull" &&
                 tmpl.kind == cmo::NewTemplate::Kind::NullFile) {
@@ -1812,6 +1815,19 @@ int main() {
                 tmpl.kind == cmo::NewTemplate::Kind::NullFile) {
                 foundHkcr = true;
             }
+            if (tmpl.extension == L".txt" &&
+                tmpl.kind == cmo::NewTemplate::Kind::NullFile) {
+                foundTxt = true;
+            }
+            if (tmpl.extension == L".bmp" &&
+                tmpl.kind == cmo::NewTemplate::Kind::NullFile) {
+                foundBmp = true;
+            }
+            if (tmpl.extension == L".rtf" &&
+                tmpl.kind == cmo::NewTemplate::Kind::Data &&
+                tmpl.data.size() == 7 && tmpl.data[0] == '{') {
+                foundRtf = true;
+            }
         }
         CHECK(foundNull);
         CHECK(foundData);
@@ -1820,6 +1836,9 @@ int main() {
         CHECK(foundStringData);
         CHECK(foundZip);
         CHECK(foundHkcr);
+        CHECK(foundTxt);
+        CHECK(foundBmp);
+        CHECK(foundRtf);
 
         // The core background model exposes New as a submenu with children.
         cmo::MenuModel background =

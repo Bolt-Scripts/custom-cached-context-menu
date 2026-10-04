@@ -305,6 +305,19 @@ int main() {
     warmupState.SetMenuOpen(false);
     CHECK(!warmupState.IsPaused());
 
+    CHECK(cmo::DecidePath(true, cmo::ShellViewKind::ShellDefView, true, true) ==
+          cmo::MenuPath::NativeBypass);
+    CHECK(cmo::DecidePath(false, cmo::ShellViewKind::ShellDefView, true, true) ==
+          cmo::MenuPath::Ours);
+    CHECK(cmo::DecidePath(false, cmo::ShellViewKind::NavPane, true, true) ==
+          cmo::MenuPath::Passthrough);
+    CHECK(cmo::DecidePath(false, cmo::ShellViewKind::ShellDefView, false, true) ==
+          cmo::MenuPath::Passthrough);
+    CHECK(cmo::DecidePath(true, cmo::ShellViewKind::Desktop, true, false) ==
+          cmo::MenuPath::Ours);
+    CHECK(cmo::DecidePath(true, cmo::ShellViewKind::ShellDefView, true, false) ==
+          cmo::MenuPath::Ours);
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

@@ -1955,6 +1955,21 @@ inline Invalidation g_invalidation;
 // ===========================================================================
 namespace cmo {
 
+enum class MenuPath : uint8_t { Ours, NativeBypass, Passthrough };
+
+// Decides which menu a popup owner gets. Shift bypasses the replacement and
+// shows the untouched native menu (stock behavior, extended verbs included).
+MenuPath DecidePath(bool shiftHeld, ShellViewKind kind, bool hasPendingCapture,
+                    bool enableShiftBypass) {
+    if (!hasPendingCapture || !IsReplaceableKind(kind)) {
+        return MenuPath::Passthrough;
+    }
+    if (shiftHeld && enableShiftBypass) {
+        return MenuPath::NativeBypass;
+    }
+    return MenuPath::Ours;
+}
+
 bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner, POINT pt) {
     std::vector<std::wstring> paths = GetSelectedPaths(owner, kind);
     Shape shape = paths.size() > 1 ? Shape::Multi : Shape::Single;
@@ -1963,6 +1978,11 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
     const MenuModel* cached = g_cache.Find(signature);
     MenuModel model = cached ? MergeCoreWithCached(BuildCoreFileModel(paths, shape), *cached)
                              : BuildCoreFileModel(paths, shape);
+    if (!g_settings.showMoreOptionsItem) {
+        std::erase_if(model.items, [](const MenuItem& item) {
+            return item.action == ActionKind::Fallback;
+        });
+    }
 
     g_warmup.SetMenuOpen(true);
     std::optional<uint32_t> selection = NativeMenuView::Show(model, owner, pt);
@@ -2000,16 +2020,30 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
 BOOL WINAPI TrackPopupMenuEx_Hook(HMENU hMenu, UINT uFlags, int x, int y, HWND hWnd,
                                   LPTPMPARAMS lptpm) {
     ShellViewKind kind = ClassifyOwner(hWnd);
-    if (PendingCapture* pending = g_pending.Take()) {
-        if (IsReplaceableKind(kind)) {
-            Wh_Log(L"Replacing context menu: kind=%d", static_cast<int>(kind));
-            ShowReplacementMenu(*pending, kind, hWnd, POINT{x, y});
-            if (pending->obj) {
-                pending->obj->Release();
-            }
-            return 0;
-        }
+    PendingCapture* pending = g_pending.Take();
+    const bool shiftHeld = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+    const MenuPath path =
+        DecidePath(shiftHeld, kind, pending != nullptr, g_settings.enableShiftBypass);
 
+    if (path == MenuPath::Ours && pending) {
+        Wh_Log(L"Replacing context menu: kind=%d", static_cast<int>(kind));
+        ShowReplacementMenu(*pending, kind, hWnd, POINT{x, y});
+        if (pending->obj) {
+            pending->obj->Release();
+        }
+        return 0;
+    }
+
+    if (path == MenuPath::NativeBypass && pending) {
+        Wh_Log(L"Shift bypass: showing the native menu");
+        ShowNativeReplay(*pending, hWnd, POINT{x, y});
+        if (pending->obj) {
+            pending->obj->Release();
+        }
+        return 0;
+    }
+
+    if (pending) {
         Wh_Log(L"Passing through: kind=%d", static_cast<int>(kind));
         ReplayInto(pending->obj, hMenu, pending->indexMenu, pending->idCmdFirst,
                    pending->idCmdLast, pending->flags);
@@ -2023,16 +2057,30 @@ BOOL WINAPI TrackPopupMenuEx_Hook(HMENU hMenu, UINT uFlags, int x, int y, HWND h
 BOOL WINAPI TrackPopupMenu_Hook(HMENU hMenu, UINT uFlags, int x, int y, int nReserved,
                                 HWND hWnd, const RECT* prcRect) {
     ShellViewKind kind = ClassifyOwner(hWnd);
-    if (PendingCapture* pending = g_pending.Take()) {
-        if (IsReplaceableKind(kind)) {
-            Wh_Log(L"Replacing context menu: kind=%d", static_cast<int>(kind));
-            ShowReplacementMenu(*pending, kind, hWnd, POINT{x, y});
-            if (pending->obj) {
-                pending->obj->Release();
-            }
-            return 0;
-        }
+    PendingCapture* pending = g_pending.Take();
+    const bool shiftHeld = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+    const MenuPath path =
+        DecidePath(shiftHeld, kind, pending != nullptr, g_settings.enableShiftBypass);
 
+    if (path == MenuPath::Ours && pending) {
+        Wh_Log(L"Replacing context menu: kind=%d", static_cast<int>(kind));
+        ShowReplacementMenu(*pending, kind, hWnd, POINT{x, y});
+        if (pending->obj) {
+            pending->obj->Release();
+        }
+        return 0;
+    }
+
+    if (path == MenuPath::NativeBypass && pending) {
+        Wh_Log(L"Shift bypass: showing the native menu");
+        ShowNativeReplay(*pending, hWnd, POINT{x, y});
+        if (pending->obj) {
+            pending->obj->Release();
+        }
+        return 0;
+    }
+
+    if (pending) {
         Wh_Log(L"Passing through: kind=%d", static_cast<int>(kind));
         ReplayInto(pending->obj, hMenu, pending->indexMenu, pending->idCmdFirst,
                    pending->idCmdLast, pending->flags);
@@ -2087,13 +2135,13 @@ HRESULT WINAPI IUnknown_QueryService_Hook(IUnknown* punk, REFGUID guidService,
     if (IsEqualGUID(guidService, kContextMenuPresenterService) &&
         (IsEqualGUID(riid, kContextMenuPresenterIid) ||
          IsEqualGUID(riid, kContextMenuPresenterIid24H2))) {
-        if ((GetAsyncKeyState(VK_SHIFT) & 0x8000) == 0) {
-            Wh_Log(L"Blocking modern context menu presenter");
-            if (ppvOut) {
-                *ppvOut = nullptr;
-            }
-            return E_FAIL;
+        // Suppressed unconditionally so Shift+right-click reaches our bypass
+        // and shows the classic native menu, matching stock Windows 11.
+        Wh_Log(L"Blocking modern context menu presenter");
+        if (ppvOut) {
+            *ppvOut = nullptr;
         }
+        return E_FAIL;
     }
     return IUnknown_QueryService_Original(punk, guidService, riid, ppvOut);
 }
@@ -2102,11 +2150,12 @@ using ShouldShowMiniMenu_t = bool(WINAPI*)(void*, void*);
 inline ShouldShowMiniMenu_t ShouldShowMiniMenu_Original = nullptr;
 
 bool WINAPI ShouldShowMiniMenu_Hook(void* pThis, void* param) {
-    if ((GetAsyncKeyState(VK_SHIFT) & 0x8000) == 0) {
-        Wh_Log(L"Blocking modern desktop mini menu");
-        return false;
-    }
-    return ShouldShowMiniMenu_Original(pThis, param);
+    (void)pThis;
+    (void)param;
+    // Suppressed unconditionally so the classic path (and our replacement)
+    // always handles desktop menus; Shift bypass is handled by the popup hooks.
+    Wh_Log(L"Blocking modern desktop mini menu");
+    return false;
 }
 
 void InstallWin11Suppression() {

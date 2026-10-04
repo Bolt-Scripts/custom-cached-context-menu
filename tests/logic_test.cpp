@@ -2530,6 +2530,56 @@ int main() {
         CHECK(caches.TextCount() == 0);
     }
 
+    // v2 input state machine.
+    {
+        cmo::LayoutMetrics metrics{};
+        metrics.itemHeight = 28;
+        metrics.separatorHeight = 7;
+        metrics.iconSize = 16;
+        metrics.padding = 6;
+        metrics.gutterWidth = 22;
+        metrics.submenuArrowWidth = 16;
+        metrics.textColor = 0xFFFFFFFFu;
+        metrics.disabledTextColor = 0x66FFFFFFu;
+        std::vector<cmo::MenuItem> items;
+        for (int i = 0; i < 5; ++i) {
+            cmo::MenuItem item{};
+            item.id = static_cast<uint32_t>(i + 1);
+            item.kind = cmo::ItemKind::Command;
+            item.action = cmo::ActionKind::ShellVerb;
+            item.label = std::wstring(L"Item ") + std::to_wstring(i);
+            items.push_back(item);
+        }
+        cmo::MenuItem sep{};
+        sep.id = 99;
+        sep.kind = cmo::ItemKind::Separator;
+        items.insert(items.begin() + 2, sep);
+        cmo::LayoutPanel panel = cmo::BuildLayoutPanel(items, metrics);
+
+        cmo::MenuInputState state{};
+        cmo::MenuStateKey(state, panel, cmo::MenuInputEvent::KeyDown);
+        CHECK(state.keyboardIndex == 0);
+        cmo::MenuStateKey(state, panel, cmo::MenuInputEvent::KeyDown);
+        CHECK(state.keyboardIndex == 1);
+        cmo::MenuStateKey(state, panel, cmo::MenuInputEvent::KeyDown);
+        CHECK(state.keyboardIndex == 3);  // skips separator
+        cmo::MenuStateKey(state, panel, cmo::MenuInputEvent::KeyUp);
+        CHECK(state.keyboardIndex == 1);
+        cmo::MenuStateKey(state, panel, cmo::MenuInputEvent::KeyEnd);
+        CHECK(state.keyboardIndex == 5);  // last enabled item
+
+        cmo::MenuStateMouseMove(state, panel, 2);
+        CHECK(state.hoverIndex == -1);  // separator is not hoverable
+        cmo::MenuStateMouseMove(state, panel, 3);
+        CHECK(state.hoverIndex == 3 && state.keyboardIndex == -1);
+        cmo::MenuStateMouseLeave(state);
+        CHECK(state.hoverIndex == -1);
+
+        CHECK(cmo::MenuStateItemAt(panel, state, POINT{10, 28 + 28 + 7 + 5}) == 3);
+        cmo::MenuStateWheel(state, panel, -1);
+        CHECK(state.scrollOffset >= 0);
+    }
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

@@ -3632,6 +3632,191 @@ void DrawPanel(ID2D1DeviceContext* dc, const LayoutPanel& panel,
     }
 }
 
+// ===========================================================================
+// [CMO:MenuInput] Keyboard and mouse state machine.
+// ===========================================================================
+
+enum class MenuInputEvent : uint8_t {
+    MouseMove,
+    MouseLeave,
+    WheelUp,
+    WheelDown,
+    KeyUp,
+    KeyDown,
+    KeyLeft,
+    KeyRight,
+    KeyEnter,
+    KeyEscape,
+    KeyHome,
+    KeyEnd,
+};
+
+bool MenuItemIsSelectable(const LayoutItem& item) {
+    return item.kind != ItemKind::Separator && (item.flags & kModelDisabled) == 0;
+}
+
+void MenuStateMouseMove(MenuInputState& state, const LayoutPanel& panel,
+                        int itemIndex) {
+    state.keyboardIndex = -1;
+    if (itemIndex < 0 || itemIndex >= static_cast<int>(panel.items.size()) ||
+        !MenuItemIsSelectable(panel.items[itemIndex])) {
+        state.hoverIndex = -1;
+        return;
+    }
+    state.hoverIndex = itemIndex;
+}
+
+void MenuStateMouseLeave(MenuInputState& state) {
+    state.hoverIndex = -1;
+}
+
+void MenuStateWheel(MenuInputState& state, const LayoutPanel& panel, int delta,
+                    int maxHeight = 0) {
+    const int itemCount = static_cast<int>(panel.items.size());
+    if (itemCount == 0) {
+        state.scrollOffset = 0;
+        return;
+    }
+
+    int visibleCount = itemCount;
+    if (maxHeight > 0) {
+        visibleCount = 0;
+        int y = 0;
+        for (const LayoutItem& item : panel.items) {
+            const int height = static_cast<int>(item.rect.bottom - item.rect.top);
+            if (y + height > maxHeight) {
+                break;
+            }
+            y += height;
+            ++visibleCount;
+        }
+    }
+
+    const int maxOffset = std::max(0, itemCount - visibleCount);
+    const int step = delta > 0 ? 1 : -1;
+    state.scrollOffset = std::clamp(state.scrollOffset + step, 0, maxOffset);
+
+    if (state.hoverIndex >= 0) {
+        if (state.hoverIndex < state.scrollOffset) {
+            state.hoverIndex = state.scrollOffset;
+        } else if (state.hoverIndex >= state.scrollOffset + visibleCount) {
+            state.hoverIndex = state.scrollOffset + visibleCount - 1;
+        }
+    }
+    if (state.keyboardIndex >= 0) {
+        if (state.keyboardIndex < state.scrollOffset) {
+            state.keyboardIndex = state.scrollOffset;
+        } else if (state.keyboardIndex >= state.scrollOffset + visibleCount) {
+            state.keyboardIndex = state.scrollOffset + visibleCount - 1;
+        }
+    }
+}
+
+void MenuStateKey(MenuInputState& state, const LayoutPanel& panel,
+                  MenuInputEvent event) {
+    const int count = static_cast<int>(panel.items.size());
+    if (count == 0) {
+        state.keyboardIndex = -1;
+        return;
+    }
+
+    auto findNext = [&](int from, int direction) {
+        for (int step = 1; step <= count; ++step) {
+            const int index =
+                ((from + direction * step) % count + count) % count;
+            if (MenuItemIsSelectable(panel.items[index])) {
+                return index;
+            }
+        }
+        return -1;
+    };
+    auto findEdge = [&](int direction) {
+        for (int i = 0; i < count; ++i) {
+            const int candidate = direction > 0 ? i : count - 1 - i;
+            if (MenuItemIsSelectable(panel.items[candidate])) {
+                return candidate;
+            }
+        }
+        return -1;
+    };
+
+    switch (event) {
+        case MenuInputEvent::KeyDown: {
+            const int from = state.keyboardIndex >= 0 ? state.keyboardIndex : -1;
+            state.keyboardIndex = findNext(from, +1);
+            state.hoverIndex = -1;
+            break;
+        }
+        case MenuInputEvent::KeyUp: {
+            const int from = state.keyboardIndex >= 0 ? state.keyboardIndex : count;
+            state.keyboardIndex = findNext(from, -1);
+            state.hoverIndex = -1;
+            break;
+        }
+        case MenuInputEvent::KeyHome:
+            state.keyboardIndex = findEdge(+1);
+            state.hoverIndex = -1;
+            break;
+        case MenuInputEvent::KeyEnd:
+            state.keyboardIndex = findEdge(-1);
+            state.hoverIndex = -1;
+            break;
+        case MenuInputEvent::KeyRight: {
+            const int index = state.keyboardIndex >= 0 ? state.keyboardIndex
+                                                       : state.hoverIndex;
+            if (index >= 0 && index < count &&
+                panel.items[index].kind == ItemKind::Submenu) {
+                state.openSubmenu = panel.items[index].submenuIndex;
+            }
+            break;
+        }
+        case MenuInputEvent::KeyLeft:
+            state.openSubmenu = -1;
+            break;
+        default:
+            break;
+    }
+}
+
+const LayoutItem* MenuStateActiveItem(const LayoutPanel& panel,
+                                      const MenuInputState& state) {
+    const int index = state.hoverIndex >= 0 ? state.hoverIndex : state.keyboardIndex;
+    if (index < 0 || index >= static_cast<int>(panel.items.size())) {
+        return nullptr;
+    }
+    return &panel.items[index];
+}
+
+int MenuStateVisibleItems(const LayoutPanel& panel, const MenuInputState& state,
+                          int maxHeight) {
+    int y = 0;
+    int count = 0;
+    for (int i = state.scrollOffset; i < static_cast<int>(panel.items.size()); ++i) {
+        const int height =
+            static_cast<int>(panel.items[i].rect.bottom - panel.items[i].rect.top);
+        if (y + height > maxHeight) {
+            break;
+        }
+        y += height;
+        ++count;
+    }
+    return count;
+}
+
+int MenuStateItemAt(const LayoutPanel& panel, const MenuInputState& state,
+                    POINT clientPoint) {
+    for (size_t i = 0; i < panel.items.size(); ++i) {
+        const LayoutItem& item = panel.items[i];
+        if (clientPoint.y >= item.rect.top && clientPoint.y < item.rect.bottom) {
+            if (!MenuItemIsSelectable(item)) {
+                return -1;
+            }
+            return static_cast<int>(i);
+        }
+    }
+    return -1;
+}
+
 // Shell property keys used by the Sort by and Group by submenus (all in the
 // shell's System property set, defined here so no SDK propkey.h is needed).
 const PROPERTYKEY kShellPropertyKeys[] = {

@@ -554,6 +554,116 @@ int main() {
     }
     CHECK(cutAdopted);
 
+    // Fix: only main file/folder menus are deferred. Flags are the exact
+    // values seen in the on-device log.
+    CHECK(cmo::ShouldDeferContextMenu(0x00020494));   // file menu
+    CHECK(cmo::ShouldDeferContextMenu(0x00020594));   // Shift-extended menu
+    CHECK(cmo::ShouldDeferContextMenu(0x00020424));   // background menu
+    CHECK(!cmo::ShouldDeferContextMenu(0x00000805));  // CMF_DEFAULTONLY (open)
+    CHECK(!cmo::ShouldDeferContextMenu(0x00000008));  // CMF_NOVERBS (Send to)
+    CHECK(!cmo::ShouldDeferContextMenu(0x00000002));  // CMF_VERBSONLY
+
+    // Fix: invocation descriptors carry both the ANSI and the wide verb.
+    cmo::MenuItem bothItem{};
+    bothItem.canonicalVerb = L"open";
+    cmo::InvocationContext bothCtx{};
+    std::string ansiStorage;
+    CMINVOKECOMMANDINFOEX bothInfo = {};
+    cmo::FillInvokeCommandInfo(bothItem, bothCtx, ansiStorage, bothInfo);
+    CHECK(bothInfo.lpVerb != nullptr);
+    CHECK(bothInfo.lpVerbW != nullptr);
+    CHECK(strcmp(bothInfo.lpVerb, "open") == 0);
+    CHECK(wcscmp(bothInfo.lpVerbW, L"open") == 0);
+
+    cmo::MenuItem offsetOnlyItem{};
+    offsetOnlyItem.verbOffset = 9;
+    CMINVOKECOMMANDINFOEX offsetOnlyInfo = {};
+    cmo::FillInvokeCommandInfo(offsetOnlyItem, bothCtx, ansiStorage, offsetOnlyInfo);
+    CHECK(reinterpret_cast<UINT_PTR>(offsetOnlyInfo.lpVerb) == 9);
+    CHECK(reinterpret_cast<UINT_PTR>(offsetOnlyInfo.lpVerbW) == 9);
+
+    // Integration against the real shell32 in this Wine environment: the
+    // shell reads lpVerb (ANSI) to tell offsets from verbs. A wide-only
+    // descriptor is refused; setting both fields dispatches.
+    {
+        CreateDirectoryW(L"cmo-test-storage", nullptr);
+        CreateDirectoryW(L"cmo-test-storage\\integration", nullptr);
+        wchar_t currentDirectory[MAX_PATH] = {};
+        GetCurrentDirectoryW(ARRAYSIZE(currentDirectory), currentDirectory);
+        const std::wstring integrationFile =
+            std::wstring(currentDirectory) +
+            L"\\cmo-test-storage\\integration\\sample.txt";
+        HANDLE file = CreateFileW(integrationFile.c_str(), GENERIC_WRITE, 0, nullptr,
+                                  CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (file != INVALID_HANDLE_VALUE) {
+            DWORD written = 0;
+            WriteFile(file, "x", 1, &written, nullptr);
+            CloseHandle(file);
+        }
+
+        IContextMenu* shellMenu = cmo::CreateContextMenuForPath(integrationFile, false);
+        CHECK(shellMenu != nullptr);
+        if (shellMenu) {
+            void** vtable = *reinterpret_cast<void***>(shellMenu);
+            auto shellQueryContextMenu =
+                reinterpret_cast<HRESULT(STDMETHODCALLTYPE*)(IContextMenu*, HMENU, UINT,
+                                                             UINT, UINT, UINT)>(vtable[3]);
+            HMENU shellHMenu = CreatePopupMenu();
+            CHECK(shellHMenu != nullptr);
+            CHECK(SUCCEEDED(shellQueryContextMenu(shellMenu, shellHMenu, 0, 1, 0x7FFF,
+                                                  CMF_NORMAL)));
+            CHECK(GetMenuItemCount(shellHMenu) > 0);
+
+            CMINVOKECOMMANDINFOEX wideOnly = {};
+            wideOnly.cbSize = sizeof(wideOnly);
+            wideOnly.fMask = CMIC_MASK_UNICODE;
+            wideOnly.lpVerbW = MAKEINTRESOURCEW(0);
+            wideOnly.nShow = SW_SHOWNORMAL;
+            const HRESULT wideOnlyResult = shellMenu->InvokeCommand(
+                reinterpret_cast<CMINVOKECOMMANDINFO*>(&wideOnly));
+            CHECK(FAILED(wideOnlyResult));
+
+            // Find the native "copy" command and dispatch it with both
+            // fields set (a harmless clipboard action).
+            UINT copyOffset = UINT_MAX;
+            const int itemCount = GetMenuItemCount(shellHMenu);
+            for (int i = 0; i < itemCount; ++i) {
+                MENUITEMINFOW itemInfo = {};
+                itemInfo.cbSize = sizeof(itemInfo);
+                itemInfo.fMask = MIIM_ID | MIIM_FTYPE;
+                if (!GetMenuItemInfoW(shellHMenu, static_cast<UINT>(i), TRUE,
+                                      &itemInfo)) {
+                    continue;
+                }
+                if ((itemInfo.fType & MFT_SEPARATOR) || itemInfo.wID < 1) {
+                    continue;
+                }
+                wchar_t verb[128] = {};
+                if (SUCCEEDED(shellMenu->GetCommandString(
+                        static_cast<UINT_PTR>(itemInfo.wID - 1), GCS_VERBW, nullptr,
+                        reinterpret_cast<LPSTR>(verb), ARRAYSIZE(verb))) &&
+                    _wcsicmp(verb, L"copy") == 0) {
+                    copyOffset = itemInfo.wID - 1;
+                    break;
+                }
+            }
+            if (copyOffset != UINT_MAX) {
+                CMINVOKECOMMANDINFOEX copyInfo = {};
+                copyInfo.cbSize = sizeof(copyInfo);
+                copyInfo.fMask = CMIC_MASK_UNICODE;
+                copyInfo.lpVerb = MAKEINTRESOURCEA(copyOffset);
+                copyInfo.lpVerbW = MAKEINTRESOURCEW(copyOffset);
+                copyInfo.nShow = SW_SHOWNORMAL;
+                const HRESULT copyResult = shellMenu->InvokeCommand(
+                    reinterpret_cast<CMINVOKECOMMANDINFO*>(&copyInfo));
+                CHECK(copyResult != E_INVALIDARG);
+            }
+
+            DestroyMenu(shellHMenu);
+            shellMenu->Release();
+        }
+    }
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

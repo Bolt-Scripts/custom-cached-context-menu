@@ -2,7 +2,7 @@
 // @id              context-menu-overhaul
 // @name            Context Menu Overhaul
 // @description     Replaces the Explorer context menu with an instantly-opening cached menu, then discovers and caches shell extension items asynchronously.
-// @version         0.2
+// @version         0.2.1
 // @include         explorer.exe
 // @architecture    x86-64
 // @compilerOptions -lole32 -lshlwapi -luuid -lcomctl32 -ladvapi32 -lgdi32
@@ -1213,6 +1213,17 @@ private:
 
 inline thread_local PendingQueue g_pending;
 
+// Only the main file/folder menu is deferred. CMF_DEFAULTONLY is the
+// default-verb resolution used by double-click/open; CMF_NOVERBS builds
+// submenus such as Send to; CMF_VERBSONLY builds verb-only menus. Those
+// never show a popup we could replace and must reach the shell untouched.
+bool ShouldDeferContextMenu(UINT flags) {
+    if (flags & (CMF_DEFAULTONLY | CMF_NOVERBS | CMF_VERBSONLY)) {
+        return false;
+    }
+    return (flags & CMF_EXPLORE) != 0;
+}
+
 using QueryContextMenu_t =
     HRESULT(STDMETHODCALLTYPE*)(IContextMenu*, HMENU, UINT, UINT, UINT, UINT);
 inline QueryContextMenu_t QueryContextMenu_Original = nullptr;
@@ -1220,6 +1231,12 @@ inline QueryContextMenu_t QueryContextMenu_Original = nullptr;
 HRESULT STDMETHODCALLTYPE QueryContextMenu_Hook(IContextMenu* pThis, HMENU hmenu,
                                                 UINT indexMenu, UINT idCmdFirst,
                                                 UINT idCmdLast, UINT uFlags) {
+    if (!ShouldDeferContextMenu(uFlags)) {
+        Wh_Log(L"QueryContextMenu pass-through: flags=%08X", uFlags);
+        return QueryContextMenu_Original(pThis, hmenu, indexMenu, idCmdFirst, idCmdLast,
+                                         uFlags);
+    }
+
     // A capture that never reached TrackPopupMenu* is stale; release it
     // before capturing the new one.
     PendingCapture previous{};
@@ -1763,6 +1780,12 @@ struct InvocationContext {
 
 // Invokes a menu item through the live context object using its descriptor
 // (canonical verb or command offset).
+// Fills a CMINVOKECOMMANDINFOEX for the item. Both the ANSI lpVerb and the
+// wide lpVerbW are set: the shell reads lpVerb to tell offsets from verbs,
+// and wide-only descriptors are ignored (observed on real Windows).
+void FillInvokeCommandInfo(const MenuItem& item, const InvocationContext& ctx,
+                           std::string& ansiStorage, CMINVOKECOMMANDINFOEX& info);
+
 CMINVOKECOMMANDINFOEX BuildInvokeCommandInfo(const MenuItem& item,
                                              const InvocationContext& ctx);
 
@@ -1785,7 +1808,9 @@ bool InvokeContextItem(IContextMenu* context, const MenuItem& item,
     if (!context) {
         return false;
     }
-    CMINVOKECOMMANDINFOEX info = BuildInvokeCommandInfo(item, ctx);
+    std::string ansiStorage;
+    CMINVOKECOMMANDINFOEX info = {};
+    FillInvokeCommandInfo(item, ctx, ansiStorage, info);
     return SUCCEEDED(context->InvokeCommand(reinterpret_cast<CMINVOKECOMMANDINFO*>(&info)));
 }
 
@@ -1977,24 +2002,41 @@ bool InvokeSendTo(const std::wstring& target, const std::vector<std::wstring>& p
     return ShellExecuteExW(&info) != FALSE;
 }
 
-// Fills an invocation descriptor: canonical verb when available, otherwise
-// the cached command offset.
-CMINVOKECOMMANDINFOEX BuildInvokeCommandInfo(const MenuItem& item,
-                                             const InvocationContext& ctx) {
-    auto descriptor = ChooseInvokeDescriptor(item);
-
-    CMINVOKECOMMANDINFOEX info = {};
+// Fills an invocation descriptor. Both fields are populated deliberately:
+// the shell's default context menu reads lpVerb (ANSI) to decide between an
+// offset (MAKEINTRESOURCE) and a canonical verb, and ignores wide-only input.
+void FillInvokeCommandInfo(const MenuItem& item, const InvocationContext& ctx,
+                           std::string& ansiStorage, CMINVOKECOMMANDINFOEX& info) {
+    info = {};
     info.cbSize = sizeof(info);
     info.fMask = CMIC_MASK_UNICODE;
     info.hwnd = ctx.owner;
     info.nShow = SW_SHOWNORMAL;
     info.ptInvoke = ctx.pt;
 
+    auto descriptor = ChooseInvokeDescriptor(item);
     if (!descriptor.first.empty()) {
+        const int length = WideCharToMultiByte(CP_ACP, 0, descriptor.first.c_str(), -1,
+                                               nullptr, 0, nullptr, nullptr);
+        if (length > 0) {
+            ansiStorage.resize(static_cast<size_t>(length));
+            WideCharToMultiByte(CP_ACP, 0, descriptor.first.c_str(), -1,
+                                ansiStorage.data(), length, nullptr, nullptr);
+            ansiStorage.resize(static_cast<size_t>(length - 1));
+            info.lpVerb = ansiStorage.c_str();
+        }
         info.lpVerbW = descriptor.first.c_str();
     } else {
+        info.lpVerb = MAKEINTRESOURCEA(descriptor.second);
         info.lpVerbW = MAKEINTRESOURCEW(descriptor.second);
     }
+}
+
+CMINVOKECOMMANDINFOEX BuildInvokeCommandInfo(const MenuItem& item,
+                                             const InvocationContext& ctx) {
+    static thread_local std::string ansiStorage;
+    CMINVOKECOMMANDINFOEX info = {};
+    FillInvokeCommandInfo(item, ctx, ansiStorage, info);
     return info;
 }
 
@@ -2309,12 +2351,13 @@ std::optional<uint32_t> ShowNativeReplay(PendingCapture& capture, HWND owner, PO
     info.cbSize = sizeof(info);
     info.fMask = CMIC_MASK_UNICODE;
     info.hwnd = owner;
-    info.lpVerbW = MAKEINTRESOURCEW(static_cast<UINT>(command) - capture.idCmdFirst);
+    const UINT offset = static_cast<UINT>(command) - capture.idCmdFirst;
+    info.lpVerb = MAKEINTRESOURCEA(offset);
+    info.lpVerbW = MAKEINTRESOURCEW(offset);
     info.nShow = SW_SHOWNORMAL;
     if (FAILED(capture.obj->InvokeCommand(
             reinterpret_cast<CMINVOKECOMMANDINFO*>(&info)))) {
-        Wh_Log(L"Native menu invocation failed for offset %u",
-               static_cast<UINT>(command) - capture.idCmdFirst);
+        Wh_Log(L"Native menu invocation failed for offset %u", offset);
     }
 
     return static_cast<uint32_t>(command);
@@ -2974,17 +3017,23 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
     bool creationFailed = false;
     std::optional<uint32_t> chosen;
     {
-        // The menu paints immediately; discovery runs from the timer while
-        // the menu is interactive, so closing stays instant.
-        OwnerSubclass subclass(owner, &capture, /*forwardMenuMessages=*/false);
-        subclass.StartDiscoveryTimer(signature);
-        chosen = NativeMenuView::Show(model, owner, pt, &creationFailed);
+        // On a cache miss the menu paints immediately and discovery runs from
+        // the timer while the menu is interactive, so closing stays instant.
+        // Cache hits skip population entirely; extension items populate
+        // lazily if they are clicked.
+        if (cached) {
+            chosen = NativeMenuView::Show(model, owner, pt, &creationFailed);
+        } else {
+            OwnerSubclass subclass(owner, &capture, /*forwardMenuMessages=*/false);
+            subclass.StartDiscoveryTimer(signature);
+            chosen = NativeMenuView::Show(model, owner, pt, &creationFailed);
+        }
     }
 
     if (creationFailed) {
         Wh_Log(L"Menu creation failed; using the native menu");
         ShowNativeReplay(capture, owner, pt);
-        if (!capture.discoveryDone) {
+        if (!cached && !capture.discoveryDone) {
             DiscoverIntoCache(capture, signature);
         }
         g_warmup.SetMenuOpen(false);
@@ -3030,8 +3079,8 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
     }
 
     // If the timer did not run while the menu was open (fast dismissal),
-    // warm the cache now.
-    if (!capture.discoveryDone) {
+    // warm the cache now. Cache hits never populate.
+    if (!cached && !capture.discoveryDone) {
         DiscoverIntoCache(capture, signature);
     }
     g_warmup.SetMenuOpen(false);

@@ -2315,6 +2315,19 @@ int main() {
         CHECK(rulesConfig.rules[2].destination == L"More options");
     }
 
+    // v2 ConfigStore: snapshot swap, revision, bad text keeps previous.
+    {
+        cmo::ConfigStore store;
+        CHECK(store.ApplyTextForTesting(L"[appearance]\ncornerRadius = 4\n"));
+        CHECK(store.Revision() == 1);
+        CHECK(store.Snapshot() && store.Snapshot()->appearance.cornerRadius == 4);
+        CHECK(!store.ApplyTextForTesting(L"[appearance]\ncornerRadius = nope\n"));
+        CHECK(store.Revision() == 1);
+        CHECK(store.Snapshot() && store.Snapshot()->appearance.cornerRadius == 4);
+        CHECK(!cmo::ConfigFilePath().empty());
+        CHECK(cmo::ConfigFilePath().find(L"menu.ini") != std::wstring::npos);
+    }
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

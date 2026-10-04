@@ -84,6 +84,7 @@ Design document: `docs/superpowers/specs/2026-10-04-context-menu-overhaul-design
 #include <cstring>
 #include <cwchar>
 #include <cwctype>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <span>
@@ -2268,6 +2269,210 @@ void InsertCustomItems(MenuModel& model, const RulesConfig& config,
         }
     }
 }
+
+// ===========================================================================
+// [CMO:ConfigStore] Live-reloaded menu.ini.
+// ===========================================================================
+
+std::wstring ConfigFilePath() {
+    wchar_t storagePath[MAX_PATH] = {};
+    if (!Wh_GetModStoragePath(storagePath, ARRAYSIZE(storagePath))) {
+        return L"";
+    }
+    return std::wstring(storagePath) + L"\\menu.ini";
+}
+
+class ConfigStore {
+public:
+    void Start() {
+        if (thread_) {
+            return;
+        }
+        const std::wstring path = ConfigFilePath();
+        if (path.empty()) {
+            return;
+        }
+        const size_t slash = path.find_last_of(L'\\');
+        if (slash != std::wstring::npos) {
+            CreateDirectoryW(path.substr(0, slash).c_str(), nullptr);
+        }
+        if (GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) {
+            WriteDefaultFile(path);
+        }
+        std::wstring text;
+        if (ReadTextFile(path, text)) {
+            ApplyText(text);
+        }
+
+        stopEvent_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        if (!stopEvent_) {
+            return;
+        }
+        thread_ = CreateThread(nullptr, 0, &ConfigStore::ThreadProc, this, 0, nullptr);
+        if (!thread_) {
+            CloseHandle(stopEvent_);
+            stopEvent_ = nullptr;
+        }
+    }
+
+    void Stop() {
+        if (stopEvent_) {
+            SetEvent(stopEvent_);
+        }
+        if (thread_) {
+            WaitForSingleObject(thread_, 5000);
+            CloseHandle(thread_);
+            thread_ = nullptr;
+        }
+        if (stopEvent_) {
+            CloseHandle(stopEvent_);
+            stopEvent_ = nullptr;
+        }
+    }
+
+    std::shared_ptr<const RulesConfig> Snapshot() const {
+        return config_.load(std::memory_order_acquire);
+    }
+
+    uint64_t Revision() const {
+        std::shared_ptr<const RulesConfig> snapshot =
+            config_.load(std::memory_order_acquire);
+        return snapshot ? snapshot->revision : 0;
+    }
+
+    bool ApplyTextForTesting(const std::wstring& text) {
+        return ApplyText(text);
+    }
+
+private:
+    bool ApplyText(const std::wstring& text) {
+        RulesConfig parsed;
+        std::vector<ConfigParseError> errors;
+        if (!ParseRulesConfig(text, parsed, errors)) {
+            for (const ConfigParseError& error : errors) {
+                Wh_Log(L"menu.ini:%d: %s", error.line, error.message.c_str());
+            }
+            return false;
+        }
+        std::shared_ptr<const RulesConfig> previous =
+            config_.load(std::memory_order_acquire);
+        parsed.revision = previous ? previous->revision + 1 : 1;
+        config_.store(std::make_shared<const RulesConfig>(std::move(parsed)),
+                      std::memory_order_release);
+        return true;
+    }
+
+    static void WriteDefaultFile(const std::wstring& path) {
+        const std::wstring text = DefaultRulesConfigText();
+        HANDLE file =
+            CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+                        FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (file == INVALID_HANDLE_VALUE) {
+            return;
+        }
+        DWORD written = 0;
+        WriteFile(file, text.c_str(),
+                  static_cast<DWORD>(text.size() * sizeof(wchar_t)), &written,
+                  nullptr);
+        CloseHandle(file);
+    }
+
+    static bool ReadTextFile(const std::wstring& path, std::wstring& text) {
+        HANDLE file =
+            CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                        nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (file == INVALID_HANDLE_VALUE) {
+            return false;
+        }
+        LARGE_INTEGER size = {};
+        if (!GetFileSizeEx(file, &size) || size.QuadPart > 1024 * 1024) {
+            CloseHandle(file);
+            return false;
+        }
+        text.resize(static_cast<size_t>(size.QuadPart / sizeof(wchar_t)));
+        DWORD read = 0;
+        const BOOL ok = ReadFile(file, text.data(), static_cast<DWORD>(size.QuadPart),
+                                 &read, nullptr);
+        CloseHandle(file);
+        if (!ok) {
+            return false;
+        }
+        text.resize(read / sizeof(wchar_t));
+        return true;
+    }
+
+    static DWORD WINAPI ThreadProc(LPVOID param) {
+        static_cast<ConfigStore*>(param)->Run();
+        return 0;
+    }
+
+    void Run() {
+        const std::wstring path = ConfigFilePath();
+        const size_t slash = path.find_last_of(L'\\');
+        if (slash == std::wstring::npos) {
+            return;
+        }
+        const std::wstring dir = path.substr(0, slash);
+        const std::wstring fileName = path.substr(slash + 1);
+
+        HANDLE dirHandle = CreateFileW(
+            dir.c_str(), FILE_LIST_DIRECTORY,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+            OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+        if (dirHandle == INVALID_HANDLE_VALUE) {
+            return;
+        }
+
+        std::vector<BYTE> buffer(4096);
+        for (;;) {
+            DWORD bytes = 0;
+            if (!ReadDirectoryChangesW(
+                    dirHandle, buffer.data(), static_cast<DWORD>(buffer.size()), FALSE,
+                    FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_SIZE, &bytes,
+                    nullptr, nullptr)) {
+                break;
+            }
+            if (WaitForSingleObject(stopEvent_, 0) == WAIT_OBJECT_0) {
+                break;
+            }
+
+            bool menuChanged = false;
+            DWORD offset = 0;
+            for (;;) {
+                auto* info =
+                    reinterpret_cast<FILE_NOTIFY_INFORMATION*>(buffer.data() + offset);
+                const std::wstring name(info->FileName,
+                                        info->FileNameLength / sizeof(wchar_t));
+                if (_wcsicmp(name.c_str(), fileName.c_str()) == 0) {
+                    menuChanged = true;
+                }
+                if (info->NextEntryOffset == 0) {
+                    break;
+                }
+                offset += info->NextEntryOffset;
+            }
+            if (!menuChanged) {
+                continue;
+            }
+
+            // Debounce editor write bursts.
+            if (WaitForSingleObject(stopEvent_, 300) == WAIT_OBJECT_0) {
+                break;
+            }
+            std::wstring text;
+            if (ReadTextFile(path, text)) {
+                ApplyText(text);
+            }
+        }
+        CloseHandle(dirHandle);
+    }
+
+    std::atomic<std::shared_ptr<const RulesConfig>> config_;
+    HANDLE thread_ = nullptr;
+    HANDLE stopEvent_ = nullptr;
+};
+
+inline ConfigStore g_configStore;
 
 // Shell property keys used by the Sort by and Group by submenus (all in the
 // shell's System property set, defined here so no SDK propkey.h is needed).
@@ -7358,6 +7563,7 @@ BOOL Wh_ModInit() {
         }
     }
     cmo::g_invalidation.Start();
+    cmo::g_configStore.Start();
     cmo::g_warmup.Start();
     cmo::RebuildSendToChildren();
 
@@ -7384,6 +7590,7 @@ void Wh_ModAfterInit() {
 
 void Wh_ModUninit() {
     Wh_Log(L"Context Menu Overhaul uninit");
+    cmo::g_configStore.Stop();
     cmo::RestoreMenuAnimation();
     cmo::RestoreMenuDelay();
     cmo::g_warmup.Stop();

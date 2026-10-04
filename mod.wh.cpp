@@ -63,6 +63,7 @@ Design document: `docs/superpowers/specs/2026-10-04-context-menu-overhaul-design
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -157,6 +158,7 @@ enum ModelFlags : uint32_t {
     kModelDisabled = 1u << 3,
     kModelOwnerDraw = 1u << 4,
     kModelSeparator = 1u << 5,
+    kModelExtension = 1u << 6,
 };
 
 // Native Explorer shell view commands, from the classic shlobj.h command set.
@@ -184,6 +186,7 @@ struct MenuItem {
 struct MenuModel {
     ContextSignature sig;
     std::vector<MenuItem> items;
+    uint32_t flags = kModelNone;
 };
 
 void FlattenIdsInto(const std::vector<MenuItem>& items, std::vector<uint32_t>& out) {
@@ -241,12 +244,13 @@ MenuModel BuildCoreFileModel(const std::vector<std::wstring>& paths, Shape shape
         item.flags = flags;
         model.items.push_back(std::move(item));
     };
-    auto addViewCommand = [&](std::wstring label, UINT commandId,
+    auto addViewCommand = [&](std::wstring label, std::wstring dedupVerb, UINT commandId,
                               uint32_t flags = kModelNone) {
         MenuItem item{};
         item.id = nextId++;
         item.kind = ItemKind::Command;
         item.label = std::move(label);
+        item.canonicalVerb = std::move(dedupVerb);
         item.action = ActionKind::ViewCommand;
         item.viewCommandId = commandId;
         item.flags = flags;
@@ -283,12 +287,12 @@ MenuModel BuildCoreFileModel(const std::vector<std::wstring>& paths, Shape shape
     addCommand(openLabel, L"open", kModelDefault);
     addCommand(L"Open with", L"openwith");
     addSeparator();
-    addViewCommand(L"Cut", kViewCmdCut, multiDisabled);
-    addViewCommand(L"Copy", kViewCmdCopy, multiDisabled);
-    addViewCommand(L"Rename", kViewCmdRename, multiDisabled);
+    addViewCommand(L"Cut", L"cut", kViewCmdCut, multiDisabled);
+    addViewCommand(L"Copy", L"copy", kViewCmdCopy, multiDisabled);
+    addViewCommand(L"Rename", L"rename", kViewCmdRename, multiDisabled);
     addCommand(L"Delete", L"delete");
     addSeparator();
-    addViewCommand(L"Create shortcut", kViewCmdCreateLink, multiDisabled);
+    addViewCommand(L"Create shortcut", L"createshortcut", kViewCmdCreateLink, multiDisabled);
     addSubmenu(L"Send to");
     addCommand(L"Copy as path", L"copyaspath");
     addSeparator();
@@ -297,6 +301,58 @@ MenuModel BuildCoreFileModel(const std::vector<std::wstring>& paths, Shape shape
     addFallback();
 
     return model;
+}
+
+// Merges cached extension items into a freshly built core model: core items
+// keep their order, duplicates are dropped by label or canonical verb, cached
+// separators are skipped, and the fallback item stays last.
+MenuModel MergeCoreWithCached(const MenuModel& core, const MenuModel& cached) {
+    MenuModel result = core;
+
+    MenuItem fallback{};
+    bool hadFallback = false;
+    if (!result.items.empty() && result.items.back().action == ActionKind::Fallback) {
+        fallback = result.items.back();
+        result.items.pop_back();
+        hadFallback = true;
+    }
+
+    std::unordered_set<std::wstring> coreLabels;
+    std::unordered_set<std::wstring> coreVerbs;
+    for (const MenuItem& item : result.items) {
+        if (!item.label.empty()) {
+            coreLabels.insert(item.label);
+        }
+        if (!item.canonicalVerb.empty()) {
+            coreVerbs.insert(item.canonicalVerb);
+        }
+    }
+
+    std::vector<MenuItem> added;
+    for (const MenuItem& item : cached.items) {
+        if (item.kind == ItemKind::Separator) {
+            continue;
+        }
+        if ((!item.label.empty() && coreLabels.count(item.label)) ||
+            (!item.canonicalVerb.empty() && coreVerbs.count(item.canonicalVerb))) {
+            continue;
+        }
+        added.push_back(item);
+    }
+
+    if (!added.empty()) {
+        result.items.insert(result.items.end(), added.begin(), added.end());
+    }
+    if (hadFallback) {
+        if (!added.empty()) {
+            MenuItem separator{};
+            separator.id = 9999;
+            separator.kind = ItemKind::Separator;
+            result.items.push_back(std::move(separator));
+        }
+        result.items.push_back(std::move(fallback));
+    }
+    return result;
 }
 
 }  // namespace cmo
@@ -510,6 +566,107 @@ bool ConsumePendingAndReplay(HWND owner, HMENU hMenu) {
     }
     Wh_Log(L"Replayed native population for owner=%p", owner);
     return true;
+}
+
+uint32_t MapMenuState(UINT state) {
+    uint32_t flags = kModelNone;
+    if (state & MFS_DISABLED) {
+        flags |= kModelDisabled;
+    }
+    if (state & MFS_CHECKED) {
+        flags |= kModelChecked;
+    }
+    if (state & MFS_DEFAULT) {
+        flags |= kModelDefault;
+    }
+    return flags;
+}
+
+void BuildItemsFromHMenu(HMENU menu, UINT idCmdFirst, IContextMenu* context,
+                         uint32_t& nextId, std::vector<MenuItem>& out, bool& ownerDraw) {
+    const int count = GetMenuItemCount(menu);
+    for (int index = 0; index < count; ++index) {
+        MENUITEMINFOW info = {};
+        info.cbSize = sizeof(info);
+        info.fMask = MIIM_ID | MIIM_STATE | MIIM_FTYPE | MIIM_SUBMENU;
+        if (!GetMenuItemInfoW(menu, static_cast<UINT>(index), TRUE, &info)) {
+            continue;
+        }
+
+        MenuItem item{};
+        item.id = nextId++;
+        item.flags = MapMenuState(info.fState) | kModelExtension;
+
+        if (info.fType & MFT_SEPARATOR) {
+            item.kind = ItemKind::Separator;
+            out.push_back(std::move(item));
+            continue;
+        }
+
+        wchar_t labelBuffer[512] = {};
+        const int labelLength = GetMenuStringW(menu, static_cast<UINT>(index), labelBuffer,
+                                               ARRAYSIZE(labelBuffer), MF_BYPOSITION);
+        if (labelLength > 0) {
+            item.label.assign(labelBuffer, static_cast<size_t>(labelLength));
+        }
+
+        if (info.fType & MFT_OWNERDRAW) {
+            item.flags |= kModelOwnerDraw;
+            ownerDraw = true;
+        }
+
+        if (info.hSubMenu) {
+            item.kind = ItemKind::Submenu;
+            item.action = ActionKind::Submenu;
+            BuildItemsFromHMenu(info.hSubMenu, idCmdFirst, context, nextId, item.children,
+                                ownerDraw);
+        } else {
+            item.kind = ItemKind::Command;
+            item.action = ActionKind::ShellVerb;
+            item.verbOffset = (info.wID >= idCmdFirst) ? (info.wID - idCmdFirst) : 0;
+            if (context) {
+                wchar_t verbBuffer[256] = {};
+                if (SUCCEEDED(context->GetCommandString(
+                        static_cast<UINT_PTR>(item.verbOffset), GCS_VERBW, nullptr,
+                        reinterpret_cast<LPSTR>(verbBuffer), ARRAYSIZE(verbBuffer)))) {
+                    item.canonicalVerb = verbBuffer;
+                }
+            }
+        }
+        out.push_back(std::move(item));
+    }
+}
+
+MenuModel BuildModelFromHMenu(HMENU menu, UINT idCmdFirst,
+                              const ContextSignature& signature, IContextMenu* context) {
+    MenuModel model{};
+    model.sig = signature;
+    uint32_t nextId = 10000;
+    bool ownerDraw = false;
+    BuildItemsFromHMenu(menu, idCmdFirst, context, nextId, model.items, ownerDraw);
+    if (ownerDraw) {
+        model.flags |= kModelOwnerDraw;
+    }
+    return model;
+}
+
+// Runs the real population offscreen and refreshes the cache. Always called
+// after the interactive menu has closed, on the same UI thread.
+void DiscoverIntoCache(IContextMenu* context, const PendingCapture& capture,
+                       const ContextSignature& signature) {
+    if (!context) {
+        return;
+    }
+    HMENU menu = CreatePopupMenu();
+    if (!menu) {
+        return;
+    }
+    ReplayInto(context, menu, capture.indexMenu, capture.idCmdFirst, capture.idCmdLast,
+               capture.flags);
+    MenuModel model = BuildModelFromHMenu(menu, capture.idCmdFirst, signature, context);
+    DestroyMenu(menu);
+    Wh_Log(L"Discovered %zu menu items", model.items.size());
+    g_cache.Put(std::move(model));
 }
 
 // Creates a throwaway default context menu to read the shared vtable of
@@ -859,6 +1016,11 @@ InvokeResult InvokeItem(const MenuItem& item, const InvocationContext& ctx) {
             return InvokeResult::Handled;
         }
         case ActionKind::ShellVerb:
+            if (item.flags & kModelExtension) {
+                // Extension invocation lands in the next task; use the native
+                // menu until then.
+                return InvokeResult::FallbackNative;
+            }
             if (item.canonicalVerb == L"copyaspath") {
                 return CopyAsPath(ctx.paths) ? InvokeResult::Handled
                                              : InvokeResult::Failed;
@@ -993,28 +1155,28 @@ bool ShowReplacementMenu(const PendingCapture& capture, ShellViewKind kind, HWND
     ContextSignature signature{Scope::Files, MakeTypeKey(paths), shape, Variant::Normal};
 
     const MenuModel* cached = g_cache.Find(signature);
-    MenuModel model = cached ? *cached : BuildCoreFileModel(paths, shape);
+    MenuModel model = cached ? MergeCoreWithCached(BuildCoreFileModel(paths, shape), *cached)
+                             : BuildCoreFileModel(paths, shape);
 
     std::optional<uint32_t> selection = NativeMenuView::Show(model, owner, pt);
-    if (!selection) {
-        return true;
+    if (selection) {
+        const MenuItem* item = FindById(model, *selection);
+        if (item) {
+            InvocationContext ctx{};
+            ctx.owner = owner;
+            ctx.pt = pt;
+            ctx.paths = paths;
+            ctx.liveContext = capture.obj;
+            ctx.idCmdFirst = capture.idCmdFirst;
+
+            if (InvokeItem(*item, ctx) == InvokeResult::FallbackNative) {
+                ShowNativeReplay(capture, owner, pt);
+            }
+        }
     }
 
-    const MenuItem* item = FindById(model, *selection);
-    if (!item) {
-        return true;
-    }
-
-    InvocationContext ctx{};
-    ctx.owner = owner;
-    ctx.pt = pt;
-    ctx.paths = paths;
-    ctx.liveContext = capture.obj;
-    ctx.idCmdFirst = capture.idCmdFirst;
-
-    if (InvokeItem(*item, ctx) == InvokeResult::FallbackNative) {
-        ShowNativeReplay(capture, owner, pt);
-    }
+    // Refresh the cache from the real population, off the interactive path.
+    DiscoverIntoCache(capture.obj, capture, signature);
     return true;
 }
 

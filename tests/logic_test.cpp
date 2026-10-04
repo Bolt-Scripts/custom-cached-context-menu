@@ -132,6 +132,51 @@ int main() {
     CHECK(offsetDescriptor.first.empty());
     CHECK(offsetDescriptor.second == 7);
 
+    CHECK(cmo::MapMenuState(0) == cmo::kModelNone);
+    CHECK((cmo::MapMenuState(MFS_DISABLED) & cmo::kModelDisabled) != 0);
+    CHECK((cmo::MapMenuState(MFS_CHECKED) & cmo::kModelChecked) != 0);
+    CHECK((cmo::MapMenuState(MFS_DEFAULT) & cmo::kModelDefault) != 0);
+
+    cmo::MenuModel coreModel = cmo::BuildCoreFileModel(onePath, cmo::Shape::Single);
+    cmo::MenuModel cachedModel{};
+    cachedModel.sig = coreModel.sig;
+    cmo::MenuItem duplicateOpen{};
+    duplicateOpen.id = 10000;
+    duplicateOpen.kind = cmo::ItemKind::Command;
+    duplicateOpen.action = cmo::ActionKind::ShellVerb;
+    duplicateOpen.label = L"Open";
+    duplicateOpen.canonicalVerb = L"open";
+    cmo::MenuItem localizedOpen{};
+    localizedOpen.id = 10001;
+    localizedOpen.kind = cmo::ItemKind::Command;
+    localizedOpen.action = cmo::ActionKind::ShellVerb;
+    localizedOpen.label = L"\u00d6ffnen";
+    localizedOpen.canonicalVerb = L"open";
+    cmo::MenuItem cachedSeparator{};
+    cachedSeparator.id = 10002;
+    cachedSeparator.kind = cmo::ItemKind::Separator;
+    cmo::MenuItem winrarItem{};
+    winrarItem.id = 10003;
+    winrarItem.kind = cmo::ItemKind::Command;
+    winrarItem.action = cmo::ActionKind::ShellVerb;
+    winrarItem.label = L"Extract to...";
+    winrarItem.canonicalVerb = L"WinRAR.Extract";
+    cachedModel.items = {duplicateOpen, localizedOpen, cachedSeparator, winrarItem};
+
+    cmo::MenuModel mergedModel = cmo::MergeCoreWithCached(coreModel, cachedModel);
+    int openCount = 0;
+    int winrarCount = 0;
+    int separatorCount = 0;
+    for (const cmo::MenuItem& item : mergedModel.items) {
+        if (item.label == L"Open") openCount++;
+        if (item.label == L"Extract to...") winrarCount++;
+        if (item.kind == cmo::ItemKind::Separator) separatorCount++;
+    }
+    CHECK(openCount == 1);
+    CHECK(winrarCount == 1);
+    CHECK(separatorCount >= 3);
+    CHECK_EQ(mergedModel.items.back().label, std::wstring(L"Show more options"));
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

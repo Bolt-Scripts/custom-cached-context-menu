@@ -1,8 +1,8 @@
 # Context Menu Overhaul
 
 A [Windhawk](https://windhawk.net/) mod that replaces the Windows Explorer file
-context menu with an instantly-opening cached menu, then discovers real shell
-extension items asynchronously in the background.
+and desktop context menu with an instantly-opening cached menu, then discovers
+real shell extension items asynchronously in the background.
 
 ## Why
 

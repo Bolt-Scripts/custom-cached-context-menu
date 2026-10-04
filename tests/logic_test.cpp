@@ -687,9 +687,14 @@ int main() {
     CHECK(cmo::ShouldDeferContextMenu(0x00020494));   // file menu
     CHECK(cmo::ShouldDeferContextMenu(0x00020594));   // Shift-extended menu
     CHECK(cmo::ShouldDeferContextMenu(0x00020424));   // background menu
+    // The desktop passes the same flags minus CMF_EXPLORE.
+    CHECK(cmo::ShouldDeferContextMenu(0x00020490));   // desktop icon menu
+    CHECK(cmo::ShouldDeferContextMenu(0x00020420));   // desktop background menu
     CHECK(!cmo::ShouldDeferContextMenu(0x00000805));  // CMF_DEFAULTONLY (open)
     CHECK(!cmo::ShouldDeferContextMenu(0x00000008));  // CMF_NOVERBS (Send to)
     CHECK(!cmo::ShouldDeferContextMenu(0x00000002));  // CMF_VERBSONLY
+    CHECK(!cmo::ShouldDeferContextMenu(0x00000800));  // verb-state query
+    CHECK(!cmo::ShouldDeferContextMenu(0x00008100));  // submenu build
 
     // Fix: invocation descriptors carry both the ANSI and the wide verb.
     cmo::MenuItem bothItem{};

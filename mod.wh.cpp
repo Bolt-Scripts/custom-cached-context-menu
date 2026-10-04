@@ -2,7 +2,7 @@
 // @id              context-menu-overhaul
 // @name            Context Menu Overhaul
 // @description     Replaces the Explorer context menu with an instantly-opening cached menu, then discovers and caches shell extension items asynchronously.
-// @version         0.3.11
+// @version         0.3.12
 // @include         explorer.exe
 // @architecture    x86-64
 // @compilerOptions -lole32 -lshlwapi -luuid -lcomctl32 -ladvapi32 -lgdi32 -luxtheme -lversion
@@ -1565,15 +1565,21 @@ private:
 
 inline thread_local PendingQueue g_pending;
 
-// Only the main file/folder menu is deferred. CMF_DEFAULTONLY is the
-// default-verb resolution used by double-click/open; CMF_NOVERBS builds
-// submenus such as Send to; CMF_VERBSONLY builds verb-only menus. Those
-// never show a popup we could replace and must reach the shell untouched.
+// Undocumented shell32 bit set for every menu that is actually shown as a
+// popup. Desktop menus (icons and background) pass the same flags as Explorer
+// views but omit CMF_EXPLORE; they still carry this bit, while verb-state
+// queries and submenu builds do not.
+constexpr UINT kCmfPopupMenu = 0x00020000;
+
+// Only main popup menus are deferred. CMF_DEFAULTONLY is the default-verb
+// resolution used by double-click/open; CMF_NOVERBS builds submenus such as
+// Send to; CMF_VERBSONLY builds verb-only menus. Those never show a popup we
+// could replace and must reach the shell untouched.
 bool ShouldDeferContextMenu(UINT flags) {
     if (flags & (CMF_DEFAULTONLY | CMF_NOVERBS | CMF_VERBSONLY)) {
         return false;
     }
-    return (flags & CMF_EXPLORE) != 0;
+    return (flags & (CMF_EXPLORE | kCmfPopupMenu)) != 0;
 }
 
 using QueryContextMenu_t =

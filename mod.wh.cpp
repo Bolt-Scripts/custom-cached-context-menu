@@ -2,7 +2,7 @@
 // @id              context-menu-overhaul
 // @name            Context Menu Overhaul
 // @description     Replaces the Explorer context menu with an instantly-opening cached menu, then discovers and caches shell extension items asynchronously.
-// @version         0.3.13
+// @version         0.3.14
 // @include         explorer.exe
 // @architecture    x86-64
 // @compilerOptions -lole32 -lshlwapi -luuid -lcomctl32 -ladvapi32 -lgdi32 -luxtheme -lversion
@@ -659,8 +659,8 @@ MenuModel BuildCoreModel(Scope scope, const std::vector<std::wstring>& paths, Sh
         addCommand(L"New", L"new");
         if (scope == Scope::Desktop) {
             addSeparator();
-            addCommand(L"Display settings", L"display");
-            addCommand(L"Personalize", L"personalize");
+            addCommand(L"Display settings", L"display", kModelNone, L"@glyph:E7F4");
+            addCommand(L"Personalize", L"personalize", kModelNone, L"@glyph:E790");
         }
         addSeparator();
         addFallback();

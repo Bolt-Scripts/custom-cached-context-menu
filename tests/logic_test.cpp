@@ -531,8 +531,14 @@ int main() {
     bool hasPersonalize = false;
     bool hasDisplaySettings = false;
     for (const cmo::MenuItem& item : desktopModel.items) {
-        if (item.label == L"Personalize") hasPersonalize = true;
-        if (item.label == L"Display settings") hasDisplaySettings = true;
+        if (item.label == L"Personalize") {
+            hasPersonalize = true;
+            CHECK(item.iconRef == L"@glyph:E790");
+        }
+        if (item.label == L"Display settings") {
+            hasDisplaySettings = true;
+            CHECK(item.iconRef == L"@glyph:E7F4");
+        }
     }
     CHECK(hasPersonalize);
     CHECK(hasDisplaySettings);

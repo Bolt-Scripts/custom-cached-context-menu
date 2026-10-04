@@ -79,6 +79,7 @@ Design document: `docs/superpowers/specs/2026-10-04-context-menu-overhaul-design
 #include <dcomp.h>
 #include <dwrite.h>
 #include <dxgi.h>
+#include <dxgi1_2.h>
 
 #include <commctrl.h>
 #include <tlhelp32.h>
@@ -2977,6 +2978,256 @@ private:
 };
 
 inline RenderDevice g_renderDevice;
+
+// ===========================================================================
+// [CMO:MenuWindow] DirectComposition-backed popup windows.
+// ===========================================================================
+
+const GUID kIidIDXGIFactory2 = {
+    0x50c83a1c, 0xe072, 0x4c48, {0x87, 0xb0, 0x36, 0x30, 0xfa, 0x36, 0xa6, 0xd0}};
+
+const wchar_t kMenuWindowClass[] = L"ContextMenuOverhaulV2Window";
+
+DWORD MenuWindowStyle() { return WS_POPUP; }
+
+DWORD MenuWindowExStyle() {
+    return WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOREDIRECTIONBITMAP;
+}
+
+class MenuWindow;
+
+using MenuWindowMessageFn = LRESULT (*)(MenuWindow*, HWND, UINT, WPARAM, LPARAM);
+inline MenuWindowMessageFn g_menuWindowMessageHook = nullptr;
+
+class MenuWindow {
+public:
+    ~MenuWindow() { Destroy(); }
+
+    bool Create(HWND owner, const LayoutPanel* panel, bool isRoot) {
+        owner_ = owner;
+        panel_ = panel;
+        isRoot_ = isRoot;
+
+        RegisterClassOnce();
+
+        const int width = panel && panel->size.cx > 0 ? panel->size.cx : 100;
+        const int height = panel && panel->size.cy > 0 ? panel->size.cy : 100;
+        hwnd_ = CreateWindowExW(MenuWindowExStyle(), kMenuWindowClass, L"",
+                                MenuWindowStyle(), 0, 0, width, height, owner, nullptr,
+                                GetModuleHandleW(nullptr), this);
+        if (!hwnd_) {
+            return false;
+        }
+        SetWindowLongPtrW(hwnd_, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
+
+        if (!CreateSurface(width, height)) {
+            DestroyWindow(hwnd_);
+            hwnd_ = nullptr;
+            return false;
+        }
+        return true;
+    }
+
+    void Move(POINT screenPos) {
+        if (!hwnd_) {
+            return;
+        }
+        SetWindowPos(hwnd_, HWND_TOPMOST, screenPos.x, screenPos.y, 0, 0,
+                     SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    }
+
+    void Show() {
+        if (!hwnd_) {
+            return;
+        }
+        ::ShowWindow(hwnd_, isRoot_ ? SW_SHOW : SW_SHOWNOACTIVATE);
+    }
+
+    void Hide() {
+        if (hwnd_) {
+            ::ShowWindow(hwnd_, SW_HIDE);
+        }
+    }
+
+    void Destroy() {
+        if (visual_) {
+            visual_->Release();
+            visual_ = nullptr;
+        }
+        if (target_) {
+            target_->Release();
+            target_ = nullptr;
+        }
+        if (swapChain_) {
+            swapChain_->Release();
+            swapChain_ = nullptr;
+        }
+        if (hwnd_) {
+            SetWindowLongPtrW(hwnd_, GWLP_USERDATA, 0);
+            DestroyWindow(hwnd_);
+            hwnd_ = nullptr;
+        }
+    }
+
+    HWND Handle() const { return hwnd_; }
+    const LayoutPanel* Panel() const { return panel_; }
+    bool IsRoot() const { return isRoot_; }
+    IDXGISwapChain1* SwapChain() const { return swapChain_; }
+    IDCompositionTarget* CompTarget() const { return target_; }
+    IDCompositionVisual* CompVisual() const { return visual_; }
+
+    void Present() {
+        if (swapChain_) {
+            swapChain_->Present(1, 0);
+        }
+    }
+
+    void Resize(int width, int height) {
+        if (!swapChain_ || width <= 0 || height <= 0) {
+            return;
+        }
+        swapChain_->ResizeBuffers(0, static_cast<UINT>(width),
+                                  static_cast<UINT>(height), DXGI_FORMAT_UNKNOWN, 0);
+    }
+
+    LRESULT HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+        if (g_menuWindowMessageHook) {
+            return g_menuWindowMessageHook(this, hwnd, msg, wParam, lParam);
+        }
+        return DefWindowProcW(hwnd, msg, wParam, lParam);
+    }
+
+private:
+    static void RegisterClassOnce() {
+        static bool registered = false;
+        if (registered) {
+            return;
+        }
+        WNDCLASSEXW wc = {};
+        wc.cbSize = sizeof(wc);
+        wc.style = CS_HREDRAW | CS_VREDRAW;
+        wc.lpfnWndProc = &MenuWindow::WindowProc;
+        wc.hInstance = GetModuleHandleW(nullptr);
+        wc.hCursor = LoadCursorW(nullptr, MAKEINTRESOURCEW(32512));
+        wc.lpszClassName = kMenuWindowClass;
+        RegisterClassExW(&wc);
+        registered = true;
+    }
+
+    static LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam,
+                                       LPARAM lParam) {
+        auto* window =
+            reinterpret_cast<MenuWindow*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+        if (window) {
+            return window->HandleMessage(hwnd, msg, wParam, lParam);
+        }
+        return DefWindowProcW(hwnd, msg, wParam, lParam);
+    }
+
+    bool CreateSurface(int width, int height) {
+        if (!g_renderDevice.IsReady() || width <= 0 || height <= 0) {
+            return false;
+        }
+
+        IDXGIDevice* dxgi = g_renderDevice.DxgiDevice();
+        IDXGIAdapter* adapter = nullptr;
+        if (FAILED(dxgi->GetAdapter(&adapter)) || !adapter) {
+            return false;
+        }
+        IDXGIFactory2* factory = nullptr;
+        const HRESULT factoryHr =
+            adapter->GetParent(kIidIDXGIFactory2, reinterpret_cast<void**>(&factory));
+        adapter->Release();
+        if (FAILED(factoryHr) || !factory) {
+            return false;
+        }
+
+        DXGI_SWAP_CHAIN_DESC1 desc = {};
+        desc.Width = static_cast<UINT>(width);
+        desc.Height = static_cast<UINT>(height);
+        desc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        desc.SampleDesc.Count = 1;
+        desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+        desc.BufferCount = 2;
+        desc.Scaling = DXGI_SCALING_STRETCH;
+        desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
+        desc.AlphaMode = DXGI_ALPHA_MODE_PREMULTIPLIED;
+        const HRESULT chainHr = factory->CreateSwapChainForComposition(
+            g_renderDevice.D3DDevice(), &desc, nullptr, &swapChain_);
+        factory->Release();
+        if (FAILED(chainHr) || !swapChain_) {
+            return false;
+        }
+
+        IDCompositionDevice* comp = g_renderDevice.CompDevice();
+        if (FAILED(comp->CreateTargetForHwnd(hwnd_, TRUE, &target_)) || !target_) {
+            return false;
+        }
+        if (FAILED(comp->CreateVisual(&visual_)) || !visual_) {
+            return false;
+        }
+        if (FAILED(visual_->SetContent(swapChain_))) {
+            return false;
+        }
+        if (FAILED(target_->SetRoot(visual_))) {
+            return false;
+        }
+        comp->Commit();
+        return true;
+    }
+
+    HWND hwnd_ = nullptr;
+    HWND owner_ = nullptr;
+    const LayoutPanel* panel_ = nullptr;
+    bool isRoot_ = false;
+    IDXGISwapChain1* swapChain_ = nullptr;
+    IDCompositionTarget* target_ = nullptr;
+    IDCompositionVisual* visual_ = nullptr;
+};
+
+class MenuWindowPool {
+public:
+    static constexpr size_t kMaxWindows = 8;
+
+    MenuWindow* Acquire() {
+        if (!free_.empty()) {
+            MenuWindow* window = free_.back();
+            free_.pop_back();
+            return window;
+        }
+        if (all_.size() >= kMaxWindows) {
+            return nullptr;
+        }
+        auto window = std::make_unique<MenuWindow>();
+        MenuWindow* raw = window.get();
+        all_.push_back(std::move(window));
+        return raw;
+    }
+
+    void Release(MenuWindow* window) {
+        if (!window) {
+            return;
+        }
+        window->Hide();
+        free_.push_back(window);
+    }
+
+    void DestroyAll() {
+        for (auto& window : all_) {
+            window->Destroy();
+        }
+        all_.clear();
+        free_.clear();
+    }
+
+    size_t Size() const { return all_.size(); }
+
+private:
+    std::vector<std::unique_ptr<MenuWindow>> all_;
+    std::vector<MenuWindow*> free_;
+};
+
+inline MenuWindowPool g_menuWindowPool;
 
 // Shell property keys used by the Sort by and Group by submenus (all in the
 // shell's System property set, defined here so no SDK propkey.h is needed).

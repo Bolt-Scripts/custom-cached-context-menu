@@ -2507,6 +2507,20 @@ int main() {
         CHECK(controller.ConsecutiveFailures() == 0);
     }
 
+    // v2 window style decisions and pool reuse.
+    {
+        CHECK(cmo::MenuWindowExStyle() ==
+              (WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOREDIRECTIONBITMAP));
+        CHECK(cmo::MenuWindowStyle() == WS_POPUP);
+        cmo::MenuWindowPool pool;
+        cmo::MenuWindow* a = pool.Acquire();
+        cmo::MenuWindow* b = pool.Acquire();
+        CHECK(a != nullptr && b != nullptr && a != b);
+        pool.Release(a);
+        CHECK(pool.Acquire() == a);
+        pool.DestroyAll();
+    }
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

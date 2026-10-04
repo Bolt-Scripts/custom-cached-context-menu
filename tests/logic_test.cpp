@@ -2461,6 +2461,35 @@ int main() {
         CHECK(sub.x == 1500);  // flipped to the parent's left
     }
 
+    // v2 layout cache: key components, LRU, device invalidation.
+    {
+        cmo::LayoutCache cache;
+        cache.SetMaxEntries(2);
+        auto panel = std::make_shared<cmo::LayoutPanel>();
+        panel->size = SIZE{100, 100};
+        cmo::LayoutKey key{};
+        key.sig = cmo::ContextSignature{cmo::Scope::Files, L".txt", cmo::Shape::Single,
+                                        cmo::Variant::Normal};
+        key.rulesRevision = 1;
+        key.appearanceRevision = 1;
+        key.dpi = 96;
+        key.darkTheme = true;
+        cache.Put(key, panel);
+        CHECK(cache.Find(key) != nullptr);
+        CHECK(cache.Size() == 1);
+
+        cmo::LayoutKey otherTheme = key;
+        otherTheme.darkTheme = false;
+        CHECK(cache.Find(otherTheme) == nullptr);
+        cmo::LayoutKey otherDpi = key;
+        otherDpi.dpi = 144;
+        CHECK(cache.Find(otherDpi) == nullptr);
+
+        cache.InvalidateDevice();
+        CHECK(cache.Find(key) == nullptr);
+        CHECK(cache.Size() == 0);
+    }
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

@@ -84,6 +84,7 @@ Design document: `docs/superpowers/specs/2026-10-04-context-menu-overhaul-design
 #include <cstring>
 #include <cwchar>
 #include <cwctype>
+#include <list>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -2685,6 +2686,94 @@ POINT SubmenuPosition(const RECT& parentItemScreenRect, SIZE childSize,
     y = std::clamp(y, top, std::max(top, static_cast<int>(workArea.bottom) - static_cast<int>(childSize.cy)));
     return POINT{x, y};
 }
+
+struct LayoutKey {
+    ContextSignature sig;
+    uint64_t rulesRevision = 0;
+    uint64_t appearanceRevision = 0;
+    uint32_t dpi = 96;
+    bool darkTheme = false;
+
+    bool operator==(const LayoutKey&) const = default;
+
+    uint64_t Hash() const {
+        uint64_t hash = sig.Hash();
+        hash = HashCombine(hash, rulesRevision);
+        hash = HashCombine(hash, appearanceRevision);
+        hash = HashCombine(hash, dpi);
+        hash = HashCombine(hash, darkTheme ? 1 : 0);
+        return hash;
+    }
+};
+
+class LayoutCache {
+public:
+    std::shared_ptr<const LayoutPanel> Find(const LayoutKey& key) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto it = map_.find(key.Hash());
+        if (it == map_.end() || !(it->second.key == key)) {
+            return nullptr;
+        }
+        order_.splice(order_.begin(), order_, it->second.orderIt);
+        return it->second.panel;
+    }
+
+    void Put(const LayoutKey& key, std::shared_ptr<const LayoutPanel> panel) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        const uint64_t hash = key.Hash();
+        auto it = map_.find(hash);
+        if (it != map_.end() && it->second.key == key) {
+            it->second.panel = std::move(panel);
+            order_.splice(order_.begin(), order_, it->second.orderIt);
+            return;
+        }
+
+        order_.push_front(hash);
+        Entry entry;
+        entry.key = key;
+        entry.panel = std::move(panel);
+        entry.orderIt = order_.begin();
+        map_[hash] = std::move(entry);
+
+        while (map_.size() > maxEntries_ && !order_.empty()) {
+            const uint64_t victim = order_.back();
+            order_.pop_back();
+            map_.erase(victim);
+        }
+    }
+
+    void InvalidateDevice() { Clear(); }
+    void InvalidateAll() { Clear(); }
+
+    void SetMaxEntries(size_t maxEntries) {
+        maxEntries_ = maxEntries == 0 ? 1 : maxEntries;
+    }
+
+    size_t Size() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return map_.size();
+    }
+
+private:
+    struct Entry {
+        LayoutKey key;
+        std::shared_ptr<const LayoutPanel> panel;
+        std::list<uint64_t>::iterator orderIt;
+    };
+
+    void Clear() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        map_.clear();
+        order_.clear();
+    }
+
+    mutable std::mutex mutex_;
+    std::unordered_map<uint64_t, Entry> map_;
+    std::list<uint64_t> order_;
+    size_t maxEntries_ = 32;
+};
+
+inline LayoutCache g_layoutCache;
 
 // Shell property keys used by the Sort by and Group by submenus (all in the
 // shell's System property set, defined here so no SDK propkey.h is needed).

@@ -1740,6 +1740,17 @@ int main() {
                            sizeof(textData));
             RegCloseKey(stringKey);
         }
+        // HKCR is scanned first, mirroring the shell's own view.
+        HKEY hkcrKey = nullptr;
+        const bool hkcrKeyOk =
+            RegCreateKeyExW(HKEY_CLASSES_ROOT, L".cmohkcr\\ShellNew", 0, nullptr, 0,
+                            KEY_WRITE, nullptr, &hkcrKey, nullptr) == ERROR_SUCCESS;
+        if (hkcrKeyOk) {
+            const wchar_t empty[] = L"";
+            RegSetValueExW(hkcrKey, L"NullFile", 0, REG_SZ,
+                           reinterpret_cast<const BYTE*>(empty), sizeof(empty));
+            RegCloseKey(hkcrKey);
+        }
         // An HKCU extension key without ShellNew must not shadow the HKLM
         // template for the same extension.
         HKEY shadowKey = nullptr;
@@ -1772,6 +1783,7 @@ int main() {
         bool foundExpand = false;
         bool foundStringData = false;
         bool foundZip = false;
+        bool foundHkcr = false;
         for (const cmo::NewTemplate& tmpl : cmo::g_newTemplates) {
             if (tmpl.extension == L".cmonull" &&
                 tmpl.kind == cmo::NewTemplate::Kind::NullFile) {
@@ -1796,6 +1808,10 @@ int main() {
             if (tmpl.extension == L".zip") {
                 foundZip = true;
             }
+            if (tmpl.extension == L".cmohkcr" &&
+                tmpl.kind == cmo::NewTemplate::Kind::NullFile) {
+                foundHkcr = true;
+            }
         }
         CHECK(foundNull);
         CHECK(foundData);
@@ -1803,6 +1819,7 @@ int main() {
         CHECK(foundExpand);
         CHECK(foundStringData);
         CHECK(foundZip);
+        CHECK(foundHkcr);
 
         // The core background model exposes New as a submenu with children.
         cmo::MenuModel background =
@@ -1877,6 +1894,9 @@ int main() {
         }
         if (stringKeyOk) {
             RegDeleteTreeW(HKEY_CURRENT_USER, L"Software\\Classes\\.cmostr");
+        }
+        if (hkcrKeyOk) {
+            RegDeleteTreeW(HKEY_CLASSES_ROOT, L".cmohkcr");
         }
     }
 

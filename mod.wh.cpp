@@ -2,7 +2,7 @@
 // @id              context-menu-overhaul
 // @name            Context Menu Overhaul
 // @description     Replaces the Explorer context menu with an instantly-opening cached menu, then discovers and caches shell extension items asynchronously.
-// @version         0.3.19
+// @version         0.3.20
 // @include         explorer.exe
 // @architecture    x86-64
 // @compilerOptions -lole32 -lshlwapi -luuid -lcomctl32 -ladvapi32 -lgdi32 -luxtheme -lversion
@@ -616,16 +616,16 @@ std::wstring ReadRegString(HKEY root, const std::wstring& subkey, const wchar_t*
     return type == REG_SZ ? buffer : L"";
 }
 
-void AddShellNewTemplate(HKEY root, const std::wstring& ext,
-                         std::vector<NewTemplate>& out) {
-    const std::wstring extKey = L"Software\\Classes\\" + ext;
+void AddShellNewTemplate(HKEY root, const std::wstring& classesPrefix,
+                         const std::wstring& ext, std::vector<NewTemplate>& out) {
+    const std::wstring extKey = classesPrefix + ext;
     std::wstring shellNew = extKey + L"\\ShellNew";
     if (!RegKeyExists(root, shellNew)) {
         const std::wstring progId = ReadRegString(root, extKey, nullptr);
         if (progId.empty()) {
             return;
         }
-        shellNew = L"Software\\Classes\\" + progId + L"\\ShellNew";
+        shellNew = classesPrefix + progId + L"\\ShellNew";
         if (!RegKeyExists(root, shellNew)) {
             return;
         }
@@ -697,21 +697,43 @@ void AddShellNewTemplate(HKEY root, const std::wstring& ext,
     RegCloseKey(key);
 }
 
+// ShellNew keys are looked up exactly like the shell does: the merged
+// HKEY_CLASSES_ROOT view first, then the two hives directly (Wine does not
+// merge HKCU into HKCR, and a hive key without ShellNew must not shadow the
+// other hive's template).
+struct ShellNewRoot {
+    HKEY root;
+    const wchar_t* classesPrefix;  // "" for HKCR, "Software\Classes\" otherwise
+};
+
+const ShellNewRoot kShellNewRoots[] = {
+    {HKEY_CLASSES_ROOT, L""},
+    {HKEY_CURRENT_USER, L"Software\\Classes\\"},
+    {HKEY_LOCAL_MACHINE, L"Software\\Classes\\"},
+};
+
 std::vector<NewTemplate> EnumerateShellNewTemplates() {
     std::vector<NewTemplate> templates;
     std::unordered_set<std::wstring> seenExtensions;
-    for (HKEY root : {HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE}) {
-        HKEY classes = nullptr;
-        if (RegOpenKeyExW(root, L"Software\\Classes", 0, KEY_READ, &classes) !=
-            ERROR_SUCCESS) {
-            continue;
+    for (const ShellNewRoot& entry : kShellNewRoots) {
+        HKEY classes = entry.root;
+        const bool opened = entry.classesPrefix[0] != L'\0';
+        if (opened) {
+            if (RegOpenKeyExW(entry.root, entry.classesPrefix, 0, KEY_READ,
+                              &classes) != ERROR_SUCCESS) {
+                continue;
+            }
         }
         for (DWORD i = 0;; ++i) {
             wchar_t ext[256] = {};
             DWORD length = ARRAYSIZE(ext);
-            if (RegEnumKeyExW(classes, i, ext, &length, nullptr, nullptr, nullptr,
-                              nullptr) != ERROR_SUCCESS) {
+            const LONG rc = RegEnumKeyExW(classes, i, ext, &length, nullptr, nullptr,
+                                          nullptr, nullptr);
+            if (rc == ERROR_NO_MORE_ITEMS) {
                 break;
+            }
+            if (rc != ERROR_SUCCESS) {
+                continue;  // skip overlong names instead of aborting
             }
             if (ext[0] != L'.') {
                 continue;
@@ -719,15 +741,17 @@ std::vector<NewTemplate> EnumerateShellNewTemplates() {
             std::wstring lower = ext;
             std::transform(lower.begin(), lower.end(), lower.begin(), towlower);
             if (seenExtensions.count(lower)) {
-                continue;  // HKCU wins over HKLM
+                continue;  // earlier root wins
             }
             const size_t before = templates.size();
-            AddShellNewTemplate(root, ext, templates);
+            AddShellNewTemplate(entry.root, entry.classesPrefix, ext, templates);
             if (templates.size() > before) {
                 seenExtensions.insert(lower);
             }
         }
-        RegCloseKey(classes);
+        if (opened) {
+            RegCloseKey(classes);
+        }
     }
 
     std::sort(templates.begin(), templates.end(),
@@ -749,6 +773,49 @@ std::vector<NewTemplate> EnumerateShellNewTemplates() {
     return unique;
 }
 
+// Debug: logs where ShellNew data for the standard types actually lives.
+void LogShellNewProbe(const wchar_t* ext) {
+    if (!g_settings.debugLogging) {
+        return;
+    }
+    for (const ShellNewRoot& entry : kShellNewRoots) {
+        const std::wstring extKey = std::wstring(entry.classesPrefix) + ext;
+        const std::wstring shellNew = extKey + L"\\ShellNew";
+        const bool extExists = RegKeyExists(entry.root, extKey);
+        const bool shellNewExists = RegKeyExists(entry.root, shellNew);
+        const std::wstring progId = ReadRegString(entry.root, extKey, nullptr);
+        bool progShellNew = false;
+        if (!progId.empty()) {
+            progShellNew = RegKeyExists(
+                entry.root, entry.classesPrefix + progId + L"\\ShellNew");
+        }
+        const wchar_t* rootName =
+            entry.classesPrefix[0] == L'\0'
+                ? L"HKCR"
+                : (entry.root == HKEY_CURRENT_USER ? L"HKCU" : L"HKLM");
+        Wh_Log(L"ShellNew probe %s root=%s ext=%d shellnew=%d prog='%s' progShellNew=%d",
+               ext, rootName, extExists, shellNewExists, progId.c_str(), progShellNew);
+        if (shellNewExists) {
+            HKEY key = nullptr;
+            if (RegOpenKeyExW(entry.root, shellNew.c_str(), 0, KEY_READ, &key) ==
+                ERROR_SUCCESS) {
+                for (DWORD i = 0;; ++i) {
+                    wchar_t name[256] = {};
+                    DWORD nameLength = ARRAYSIZE(name);
+                    DWORD type = 0;
+                    DWORD size = 0;
+                    if (RegEnumValueW(key, i, name, &nameLength, nullptr, &type, nullptr,
+                                      &size) != ERROR_SUCCESS) {
+                        break;
+                    }
+                    Wh_Log(L"  value '%s' type=%lu size=%lu", name, type, size);
+                }
+                RegCloseKey(key);
+            }
+        }
+    }
+}
+
 // Builds the template list once. Warm-up prebuilds it; a first open can build
 // it synchronously as a one-time fallback.
 void EnsureNewTemplates() {
@@ -758,6 +825,12 @@ void EnsureNewTemplates() {
     std::lock_guard<std::mutex> lock(g_newTemplatesMutex);
     if (g_newTemplatesReady.load(std::memory_order_relaxed)) {
         return;
+    }
+
+    if (g_settings.debugLogging) {
+        for (const wchar_t* probe : {L".txt", L".bmp", L".rtf", L".pptx"}) {
+            LogShellNewProbe(probe);
+        }
     }
 
     std::vector<NewTemplate> templates = EnumerateShellNewTemplates();

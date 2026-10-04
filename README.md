@@ -69,6 +69,8 @@ untouched native menu, including extended verbs.
   known Windows verb (i.e. third-party shell extensions, however they are
   registered) and the configured Windows extras are grouped into one submenu
   just above the native fallback; separators left dangling are collapsed.
+  Inside the submenu, Windows extras come first and third-party handlers last,
+  split by a separator, with each group keeping the shell's relative order.
   Labels are matched with `&` accelerators and trailing ellipses stripped, so
   what you type matches what you see. Windows items are additionally detected
   by handler registration (key name, DLL name, or version-info

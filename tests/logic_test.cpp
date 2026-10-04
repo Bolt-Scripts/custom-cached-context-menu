@@ -1372,9 +1372,11 @@ int main() {
             CHECK(advanced != nullptr);
             CHECK(advanced && advanced->kind == cmo::ItemKind::Submenu);
             CHECK(advanced && advanced->iconRef == L"@glyph:E712");
-            CHECK(advanced && advanced->children.size() == 2);
-            CHECK(advanced && advanced->children[0].label == L"Scan with Malwarebytes");
-            CHECK(advanced && advanced->children[1].label == L"Pin to Start");
+            CHECK(advanced && advanced->children.size() == 3);
+            // Built-ins above, third-party handlers below, one separator.
+            CHECK(advanced && advanced->children[0].label == L"Pin to Start");
+            CHECK(advanced && advanced->children[1].kind == cmo::ItemKind::Separator);
+            CHECK(advanced && advanced->children[2].label == L"Scan with Malwarebytes");
             // Moved children stay reachable for invocation by id.
             const cmo::MenuItem* moved = cmo::FindById(model, 3);
             CHECK(moved != nullptr);
@@ -1445,6 +1447,87 @@ int main() {
         // Known Windows verbs stay unless listed.
         CHECK(!cmo::IsAdvancedItem(extensionCommand(5, L"Print", L"Print")));
         CHECK(!cmo::IsAdvancedItem(extensionCommand(6, L"Cu&t", L"cut")));
+
+        cmo::g_settings.advancedSubmenu = previousEnabled;
+        cmo::g_settings.advancedSubmenuLabel = previousLabel;
+        cmo::g_settings.advancedSubmenuItems = previousItems;
+    }
+
+    // More options ordering: Windows extras group above third-party handlers,
+    // each group keeping the shell's relative order, with one separator
+    // between them only when both groups exist.
+    {
+        const bool previousEnabled = cmo::g_settings.advancedSubmenu;
+        const std::wstring previousLabel = cmo::g_settings.advancedSubmenuLabel;
+        const std::vector<std::wstring> previousItems =
+            cmo::g_settings.advancedSubmenuItems;
+        cmo::g_settings.advancedSubmenu = true;
+        cmo::g_settings.advancedSubmenuLabel = L"More options";
+        cmo::g_settings.advancedSubmenuItems =
+            cmo::ParseAdvancedItems(L"Share, Add to Favorites");
+
+        auto advancedItem = [](uint32_t id, const wchar_t* label,
+                               const wchar_t* verb, uint32_t flags) {
+            cmo::MenuItem menuItem{};
+            menuItem.id = id;
+            menuItem.kind = cmo::ItemKind::Command;
+            menuItem.action = cmo::ActionKind::ShellVerb;
+            menuItem.label = label;
+            menuItem.canonicalVerb = verb;
+            menuItem.flags = cmo::kModelExtension | flags;
+            return menuItem;
+        };
+
+        std::vector<cmo::MenuItem> menu;
+        menu.push_back(advancedItem(1, L"WinRAR", L"", cmo::kModelThirdParty));
+        menu.push_back(advancedItem(2, L"Share", L"Windows.ModernShare", 0));
+        menu.push_back(
+            advancedItem(3, L"Scan with Malwarebytes", L"", cmo::kModelThirdParty));
+        menu.push_back(advancedItem(4, L"Add to &Favorites", L"pintohomefile", 0));
+        menu.push_back(advancedItem(5, L"TortoiseSVN", L"", cmo::kModelThirdParty));
+
+        cmo::ReorganizeAdvancedItems(menu);
+
+        const cmo::MenuItem* submenu = nullptr;
+        for (const cmo::MenuItem& menuItem : menu) {
+            if (menuItem.kind == cmo::ItemKind::Submenu) {
+                submenu = &menuItem;
+            }
+        }
+        CHECK(submenu != nullptr);
+        if (submenu) {
+            CHECK(submenu->children.size() == 6);
+            CHECK(submenu->children[0].label == L"Share");
+            CHECK(submenu->children[1].label == L"Add to &Favorites");
+            CHECK(submenu->children[2].kind == cmo::ItemKind::Separator);
+            CHECK(submenu->children[3].label == L"WinRAR");
+            CHECK(submenu->children[4].label == L"Scan with Malwarebytes");
+            CHECK(submenu->children[5].label == L"TortoiseSVN");
+        }
+
+        // A single group gets no separator.
+        std::vector<cmo::MenuItem> customOnly;
+        customOnly.push_back(advancedItem(1, L"WinRAR", L"", cmo::kModelThirdParty));
+        customOnly.push_back(advancedItem(2, L"TortoiseSVN", L"", cmo::kModelThirdParty));
+        cmo::ReorganizeAdvancedItems(customOnly);
+        for (const cmo::MenuItem& menuItem : customOnly) {
+            if (menuItem.kind == cmo::ItemKind::Submenu) {
+                CHECK(menuItem.children.size() == 2);
+                CHECK(menuItem.children[0].kind != cmo::ItemKind::Separator);
+            }
+        }
+
+        std::vector<cmo::MenuItem> builtinOnly;
+        builtinOnly.push_back(advancedItem(1, L"Share", L"Windows.ModernShare", 0));
+        builtinOnly.push_back(
+            advancedItem(2, L"Add to &Favorites", L"pintohomefile", 0));
+        cmo::ReorganizeAdvancedItems(builtinOnly);
+        for (const cmo::MenuItem& menuItem : builtinOnly) {
+            if (menuItem.kind == cmo::ItemKind::Submenu) {
+                CHECK(menuItem.children.size() == 2);
+                CHECK(menuItem.children[0].kind != cmo::ItemKind::Separator);
+            }
+        }
 
         cmo::g_settings.advancedSubmenu = previousEnabled;
         cmo::g_settings.advancedSubmenuLabel = previousLabel;

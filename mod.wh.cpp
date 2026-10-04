@@ -2,7 +2,7 @@
 // @id              context-menu-overhaul
 // @name            Context Menu Overhaul
 // @description     Replaces the Explorer context menu with an instantly-opening cached menu, then discovers and caches shell extension items asynchronously.
-// @version         0.3.12
+// @version         0.3.13
 // @include         explorer.exe
 // @architecture    x86-64
 // @compilerOptions -lole32 -lshlwapi -luuid -lcomctl32 -ladvapi32 -lgdi32 -luxtheme -lversion
@@ -450,6 +450,18 @@ bool IsAdvancedItem(const MenuItem& item) {
            !IsKnownWindowsVerb(item.canonicalVerb);
 }
 
+// Windows extras (configured list or a known Windows verb) sort above
+// third-party handlers inside the More options submenu.
+bool IsBuiltinExtra(const MenuItem& item) {
+    for (const std::wstring& token : g_settings.advancedSubmenuItems) {
+        if (LabelsMatchIgnoreCase(item.label, token) ||
+            EqualsIgnoreCase(item.canonicalVerb, token)) {
+            return true;
+        }
+    }
+    return IsKnownWindowsVerb(item.canonicalVerb);
+}
+
 // Removes separators left dangling or duplicated by moving items out.
 void CollapseSeparators(std::vector<MenuItem>& items) {
     std::vector<MenuItem> out;
@@ -500,6 +512,17 @@ void ReorganizeAdvancedItems(std::vector<MenuItem>& items) {
     }
     if (advanced.empty()) {
         return;
+    }
+
+    // Built-in Windows extras first, third-party handlers last; both groups
+    // keep the shell's relative order. One separator splits the groups.
+    const auto customStart =
+        std::stable_partition(advanced.begin(), advanced.end(), IsBuiltinExtra);
+    if (customStart != advanced.begin() && customStart != advanced.end()) {
+        MenuItem separator{};
+        separator.id = 0xF001;
+        separator.kind = ItemKind::Separator;
+        advanced.insert(customStart, std::move(separator));
     }
 
     MenuItem submenu{};

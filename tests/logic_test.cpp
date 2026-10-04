@@ -540,10 +540,12 @@ int main() {
         CHECK(sortBy && sortBy->children.size() == 7);
         CHECK(groupBy && groupBy->kind == cmo::ItemKind::Submenu);
         CHECK(groupBy && groupBy->iconRef == L"@glyph:E902");
-        CHECK(groupBy && groupBy->children.size() == 4);
+        CHECK(groupBy && groupBy->children.size() == 8);
         bool hasSortName = false;
         bool hasSortDescending = false;
         bool hasGroupType = false;
+        bool hasGroupNone = false;
+        bool hasGroupDescending = false;
         if (sortBy) {
             for (const cmo::MenuItem& child : sortBy->children) {
                 if (child.label == L"Name" &&
@@ -563,11 +565,53 @@ int main() {
                     child.action == cmo::ActionKind::GroupBy && child.sortIndex == 2) {
                     hasGroupType = true;
                 }
+                if (child.label == L"(None)" &&
+                    child.action == cmo::ActionKind::GroupBy &&
+                    child.sortIndex == cmo::kGroupNoneIndex) {
+                    hasGroupNone = true;
+                }
+                if (child.label == L"Descending" &&
+                    child.action == cmo::ActionKind::GroupDirection &&
+                    !child.sortAscending) {
+                    hasGroupDescending = true;
+                }
             }
         }
         CHECK(hasSortName);
         CHECK(hasSortDescending);
         CHECK(hasGroupType);
+        CHECK(hasGroupNone);
+        CHECK(hasGroupDescending);
+
+        // View offers the full set of modes plus arrange options.
+        const cmo::MenuItem* viewSubmenu = nullptr;
+        for (const cmo::MenuItem& item : backgroundModel.items) {
+            if (item.label == L"View") {
+                viewSubmenu = &item;
+            }
+        }
+        CHECK(viewSubmenu && viewSubmenu->children.size() == 11);
+        bool hasExtraLarge = false;
+        bool hasTiles = false;
+        bool hasAutoArrange = false;
+        if (viewSubmenu) {
+            for (const cmo::MenuItem& child : viewSubmenu->children) {
+                if (child.label == L"Extra large icons" && child.iconSize == 256) {
+                    hasExtraLarge = true;
+                }
+                if (child.label == L"Tiles" &&
+                    child.action == cmo::ActionKind::ViewAction) {
+                    hasTiles = true;
+                }
+                if (child.label == L"Auto arrange icons" &&
+                    child.action == cmo::ActionKind::ViewAction) {
+                    hasAutoArrange = true;
+                }
+            }
+        }
+        CHECK(hasExtraLarge);
+        CHECK(hasTiles);
+        CHECK(hasAutoArrange);
     }
 
     cmo::MenuModel desktopModel =

@@ -2,7 +2,7 @@
 // @id              context-menu-overhaul
 // @name            Context Menu Overhaul
 // @description     Replaces the Explorer context menu with an instantly-opening cached menu, then discovers and caches shell extension items asynchronously.
-// @version         0.3.22
+// @version         0.3.23
 // @include         explorer.exe
 // @architecture    x86-64
 // @compilerOptions -lole32 -lshlwapi -luuid -lcomctl32 -ladvapi32 -lgdi32 -luxtheme -lversion
@@ -279,6 +279,7 @@ enum class ActionKind : uint8_t {
     SortBy,
     SortDirection,
     GroupBy,
+    GroupDirection,
 };
 
 // Documented view operations, dispatched through IFolderView2 / IShellView.
@@ -288,10 +289,16 @@ enum class ViewAction : uint32_t {
     None = 0,
     Rename,
     Refresh,
+    ViewExtraLargeIcons,
     ViewLargeIcons,
+    ViewMediumIcons,
     ViewSmallIcons,
     ViewList,
     ViewDetails,
+    ViewTiles,
+    ViewContent,
+    AutoArrange,
+    AlignToGrid,
 };
 
 enum ModelFlags : uint32_t {
@@ -324,6 +331,8 @@ struct MenuItem {
     // Sort/group field index into kShellPropertyKeys, and sort direction.
     uint32_t sortIndex = 0;
     bool sortAscending = true;
+    // Icon size for icon view modes (-1 for the shell default).
+    int32_t iconSize = -1;
     // 16x16 BGRA icon captured from the shell's own menu bitmap.
     std::vector<uint8_t> iconPixels;
     std::vector<MenuItem> children;
@@ -1090,6 +1099,7 @@ const PROPERTYKEY kShellPropertyKeys[] = {
 const wchar_t* const kShellPropertyLabels[] = {L"Name", L"Date modified", L"Type",
                                                L"Size"};
 constexpr uint32_t kShellPropertyKeyCount = ARRAYSIZE(kShellPropertyKeys);
+constexpr uint32_t kGroupNoneIndex = 0xFFFFFFFF;
 
 // Core model for a context. The common commands come first, cached extension
 // items are merged in later, and the native fallback stays last.
@@ -1114,7 +1124,7 @@ MenuModel BuildCoreModel(Scope scope, const std::vector<std::wstring>& paths, Sh
     };
     auto makeViewAction = [&](std::wstring label, std::wstring dedupVerb,
                               ViewAction action, uint32_t flags,
-                              std::wstring iconRef = L"") {
+                              std::wstring iconRef = L"", int32_t iconSize = -1) {
         MenuItem item{};
         item.id = nextId++;
         item.kind = ItemKind::Command;
@@ -1124,6 +1134,7 @@ MenuModel BuildCoreModel(Scope scope, const std::vector<std::wstring>& paths, Sh
         item.viewAction = static_cast<uint32_t>(action);
         item.flags = flags;
         item.iconRef = std::move(iconRef);
+        item.iconSize = iconSize;
         return item;
     };
     auto addCommand = [&](std::wstring label, std::wstring verb,
@@ -1168,9 +1179,15 @@ MenuModel BuildCoreModel(Scope scope, const std::vector<std::wstring>& paths, Sh
     if (scope == Scope::Background || scope == Scope::Desktop) {
         MenuItem& viewMenu = addSubmenu(L"View");
         viewMenu.iconRef = L"@glyph:E890";
+        viewMenu.children.push_back(makeViewAction(L"Extra large icons", L"viewxlarge",
+                                                   ViewAction::ViewExtraLargeIcons,
+                                                   kModelNone, L"@glyph:F0E2", 256));
         viewMenu.children.push_back(makeViewAction(L"Large icons", L"viewlarge",
                                                    ViewAction::ViewLargeIcons, kModelNone,
-                                                   L"@glyph:F0E2"));
+                                                   L"@glyph:F0E2", 96));
+        viewMenu.children.push_back(makeViewAction(L"Medium icons", L"viewmedium",
+                                                   ViewAction::ViewMediumIcons, kModelNone,
+                                                   L"@glyph:E8A9", 48));
         viewMenu.children.push_back(makeViewAction(L"Small icons", L"viewsmall",
                                                    ViewAction::ViewSmallIcons, kModelNone,
                                                    L"@glyph:E8A9"));
@@ -1180,6 +1197,22 @@ MenuModel BuildCoreModel(Scope scope, const std::vector<std::wstring>& paths, Sh
         viewMenu.children.push_back(makeViewAction(L"Details", L"viewdetails",
                                                    ViewAction::ViewDetails, kModelNone,
                                                    L"@glyph:E9D5"));
+        viewMenu.children.push_back(makeViewAction(L"Tiles", L"viewtiles",
+                                                   ViewAction::ViewTiles, kModelNone,
+                                                   L"@glyph:ECA5"));
+        viewMenu.children.push_back(makeViewAction(L"Content", L"viewcontent",
+                                                   ViewAction::ViewContent, kModelNone,
+                                                   L"@glyph:E8FD"));
+        {
+            MenuItem separator{};
+            separator.id = nextId++;
+            separator.kind = ItemKind::Separator;
+            viewMenu.children.push_back(std::move(separator));
+        }
+        viewMenu.children.push_back(makeViewAction(L"Auto arrange icons", L"autoarrange",
+                                                   ViewAction::AutoArrange, kModelNone));
+        viewMenu.children.push_back(makeViewAction(L"Align icons to grid", L"aligngrid",
+                                                   ViewAction::AlignToGrid, kModelNone));
 
         MenuItem& sortMenu = addSubmenu(L"Sort by");
         sortMenu.iconRef = L"@glyph:E8CB";
@@ -1211,6 +1244,15 @@ MenuModel BuildCoreModel(Scope scope, const std::vector<std::wstring>& paths, Sh
 
         MenuItem& groupMenu = addSubmenu(L"Group by");
         groupMenu.iconRef = L"@glyph:E902";
+        {
+            MenuItem noneItem{};
+            noneItem.id = nextId++;
+            noneItem.kind = ItemKind::Command;
+            noneItem.label = L"(None)";
+            noneItem.action = ActionKind::GroupBy;
+            noneItem.sortIndex = kGroupNoneIndex;
+            groupMenu.children.push_back(std::move(noneItem));
+        }
         for (uint32_t i = 0; i < kShellPropertyKeyCount; ++i) {
             MenuItem groupItem{};
             groupItem.id = nextId++;
@@ -1219,6 +1261,21 @@ MenuModel BuildCoreModel(Scope scope, const std::vector<std::wstring>& paths, Sh
             groupItem.action = ActionKind::GroupBy;
             groupItem.sortIndex = i;
             groupMenu.children.push_back(std::move(groupItem));
+        }
+        {
+            MenuItem separator{};
+            separator.id = nextId++;
+            separator.kind = ItemKind::Separator;
+            groupMenu.children.push_back(std::move(separator));
+        }
+        for (bool ascending : {true, false}) {
+            MenuItem directionItem{};
+            directionItem.id = nextId++;
+            directionItem.kind = ItemKind::Command;
+            directionItem.label = ascending ? L"Ascending" : L"Descending";
+            directionItem.action = ActionKind::GroupDirection;
+            directionItem.sortAscending = ascending;
+            groupMenu.children.push_back(std::move(directionItem));
         }
 
         addViewAction(L"Refresh", L"refresh", ViewAction::Refresh, kModelNone,
@@ -3526,16 +3583,37 @@ CMINVOKECOMMANDINFOEX BuildInvokeCommandInfo(const MenuItem& item,
 // Maps a view action to its documented folder view mode.
 FOLDERVIEWMODE FolderViewModeFor(ViewAction action) {
     switch (action) {
+        case ViewAction::ViewExtraLargeIcons:
+        case ViewAction::ViewLargeIcons:
+        case ViewAction::ViewMediumIcons:
+            return FVM_ICON;
         case ViewAction::ViewSmallIcons:
             return FVM_SMALLICON;
         case ViewAction::ViewList:
             return FVM_LIST;
         case ViewAction::ViewDetails:
             return FVM_DETAILS;
+        case ViewAction::ViewTiles:
+            return FVM_TILE;
+        case ViewAction::ViewContent:
+            return FVM_CONTENT;
         default:
             return FVM_ICON;
     }
 }
+
+bool IsIconViewMode(ViewAction action) {
+    return action == ViewAction::ViewExtraLargeIcons ||
+           action == ViewAction::ViewLargeIcons ||
+           action == ViewAction::ViewMediumIcons ||
+           action == ViewAction::ViewSmallIcons;
+}
+
+bool EqualPropertyKey(const PROPERTYKEY& left, const PROPERTYKEY& right) {
+    return IsEqualGUID(left.fmtid, right.fmtid) && left.pid == right.pid;
+}
+
+const PROPERTYKEY kNullPropertyKey = {};
 
 bool InvokeContextItem(IContextMenu* context, const MenuItem& item,
                        const InvocationContext& ctx) {
@@ -3750,17 +3828,132 @@ bool InvokeSortDirection(const MenuItem& item, const InvocationContext& ctx) {
 }
 
 bool InvokeGroupBy(const MenuItem& item, const InvocationContext& ctx) {
-    if (item.sortIndex >= kShellPropertyKeyCount) {
-        return false;
-    }
     IFolderView2* view = GetFolderView2(ctx.owner, ctx.kind);
     if (!view) {
         return false;
     }
-    const bool ok =
-        SUCCEEDED(view->SetGroupBy(kShellPropertyKeys[item.sortIndex], TRUE));
+    const PROPERTYKEY key = item.sortIndex == kGroupNoneIndex
+                                ? kNullPropertyKey
+                                : kShellPropertyKeys[item.sortIndex];
+    const bool ok = SUCCEEDED(view->SetGroupBy(key, TRUE));
     view->Release();
     return ok;
+}
+
+bool InvokeGroupDirection(const MenuItem& item, const InvocationContext& ctx) {
+    IFolderView2* view = GetFolderView2(ctx.owner, ctx.kind);
+    if (!view) {
+        return false;
+    }
+    PROPERTYKEY key = {};
+    WINBOOL ascending = TRUE;
+    bool ok = false;
+    if (SUCCEEDED(view->GetGroupBy(&key, &ascending)) &&
+        !EqualPropertyKey(key, kNullPropertyKey)) {
+        ok = SUCCEEDED(view->SetGroupBy(key, item.sortAscending ? TRUE : FALSE));
+    }
+    view->Release();
+    return ok;
+}
+
+// Marks the View / Sort by / Group by entries that match the view's current
+// state, so the menu shows the same dots as the shell's own submenus.
+void ApplyViewStateChecks(std::vector<MenuItem>& items, HWND owner,
+                          ShellViewKind kind) {
+    IFolderView2* view = GetFolderView2(owner, kind);
+    if (!view) {
+        return;
+    }
+
+    FOLDERVIEWMODE mode = FVM_AUTO;
+    int iconSize = -1;
+    const bool haveMode = SUCCEEDED(view->GetViewModeAndIconSize(&mode, &iconSize));
+    DWORD folderFlags = 0;
+    const bool haveFlags = SUCCEEDED(view->GetCurrentFolderFlags(&folderFlags));
+
+    SORTCOLUMN sortColumn = {};
+    int sortCount = 0;
+    const bool haveSort =
+        SUCCEEDED(view->GetSortColumnCount(&sortCount)) && sortCount > 0 &&
+        SUCCEEDED(view->GetSortColumns(&sortColumn, 1));
+
+    PROPERTYKEY groupKey = {};
+    WINBOOL groupAscending = TRUE;
+    const bool haveGroup = SUCCEEDED(view->GetGroupBy(&groupKey, &groupAscending));
+    const bool groupActive = haveGroup && !EqualPropertyKey(groupKey, kNullPropertyKey);
+
+    for (MenuItem& submenu : items) {
+        if (submenu.kind != ItemKind::Submenu) {
+            continue;
+        }
+        for (MenuItem& child : submenu.children) {
+            if (child.action == ActionKind::ViewAction) {
+                const ViewAction action = static_cast<ViewAction>(child.viewAction);
+                if (!haveMode) {
+                    continue;
+                }
+                if (IsIconViewMode(action) && child.iconSize >= 0) {
+                    if (mode == FVM_ICON && iconSize == child.iconSize) {
+                        child.flags |= kModelChecked;
+                    }
+                } else if (action == ViewAction::ViewSmallIcons) {
+                    if (mode == FVM_SMALLICON || (mode == FVM_ICON && iconSize == 16)) {
+                        child.flags |= kModelChecked;
+                    }
+                } else if (action == ViewAction::ViewList) {
+                    if (mode == FVM_LIST) {
+                        child.flags |= kModelChecked;
+                    }
+                } else if (action == ViewAction::ViewDetails) {
+                    if (mode == FVM_DETAILS) {
+                        child.flags |= kModelChecked;
+                    }
+                } else if (action == ViewAction::ViewTiles) {
+                    if (mode == FVM_TILE) {
+                        child.flags |= kModelChecked;
+                    }
+                } else if (action == ViewAction::ViewContent) {
+                    if (mode == FVM_CONTENT) {
+                        child.flags |= kModelChecked;
+                    }
+                } else if (haveFlags && action == ViewAction::AutoArrange) {
+                    if (folderFlags & FWF_AUTOARRANGE) {
+                        child.flags |= kModelChecked;
+                    }
+                } else if (haveFlags && action == ViewAction::AlignToGrid) {
+                    if (folderFlags & FWF_SNAPTOGRID) {
+                        child.flags |= kModelChecked;
+                    }
+                }
+            } else if (child.action == ActionKind::SortBy) {
+                if (haveSort && child.sortIndex < kShellPropertyKeyCount &&
+                    EqualPropertyKey(kShellPropertyKeys[child.sortIndex],
+                                     sortColumn.propkey)) {
+                    child.flags |= kModelChecked;
+                }
+            } else if (child.action == ActionKind::SortDirection) {
+                if (haveSort &&
+                    (sortColumn.direction > 0) == child.sortAscending) {
+                    child.flags |= kModelChecked;
+                }
+            } else if (child.action == ActionKind::GroupBy) {
+                if (child.sortIndex == kGroupNoneIndex) {
+                    if (haveGroup && !groupActive) {
+                        child.flags |= kModelChecked;
+                    }
+                } else if (groupActive && child.sortIndex < kShellPropertyKeyCount &&
+                           EqualPropertyKey(kShellPropertyKeys[child.sortIndex],
+                                            groupKey)) {
+                    child.flags |= kModelChecked;
+                }
+            } else if (child.action == ActionKind::GroupDirection) {
+                if (groupActive && (groupAscending != FALSE) == child.sortAscending) {
+                    child.flags |= kModelChecked;
+                }
+            }
+        }
+    }
+    view->Release();
 }
 
 // Dispatches a documented view operation through IFolderView2 / IShellView.
@@ -3786,14 +3979,33 @@ InvokeResult InvokeViewAction(const MenuItem& item, const InvocationContext& ctx
                                  ? InvokeResult::Handled
                                  : InvokeResult::FallbackNative;
                     break;
+                case ViewAction::ViewExtraLargeIcons:
                 case ViewAction::ViewLargeIcons:
+                case ViewAction::ViewMediumIcons:
                 case ViewAction::ViewSmallIcons:
                 case ViewAction::ViewList:
-                case ViewAction::ViewDetails: {
+                case ViewAction::ViewDetails:
+                case ViewAction::ViewTiles:
+                case ViewAction::ViewContent: {
                     const FOLDERVIEWMODE mode = FolderViewModeFor(action);
-                    result = SUCCEEDED(folderView->SetViewModeAndIconSize(mode, -1))
+                    const int iconSize = IsIconViewMode(action) ? item.iconSize : -1;
+                    result = SUCCEEDED(folderView->SetViewModeAndIconSize(mode, iconSize))
                                  ? InvokeResult::Handled
                                  : InvokeResult::FallbackNative;
+                    break;
+                }
+                case ViewAction::AutoArrange:
+                case ViewAction::AlignToGrid: {
+                    DWORD flags = 0;
+                    const DWORD mask = action == ViewAction::AutoArrange
+                                           ? FWF_AUTOARRANGE
+                                           : FWF_SNAPTOGRID;
+                    if (SUCCEEDED(folderView->GetCurrentFolderFlags(&flags))) {
+                        result = SUCCEEDED(
+                                     folderView->SetCurrentFolderFlags(mask, flags ^ mask))
+                                     ? InvokeResult::Handled
+                                     : InvokeResult::FallbackNative;
+                    }
                     break;
                 }
                 default:
@@ -4053,6 +4265,9 @@ InvokeResult InvokeItem(const MenuItem& item, const InvocationContext& ctx,
         case ActionKind::GroupBy:
             return InvokeGroupBy(item, ctx) ? InvokeResult::Handled
                                             : InvokeResult::Failed;
+        case ActionKind::GroupDirection:
+            return InvokeGroupDirection(item, ctx) ? InvokeResult::Handled
+                                                   : InvokeResult::Failed;
         case ActionKind::ViewAction:
             return InvokeViewAction(item, ctx);
         case ActionKind::ShellVerb:
@@ -4845,11 +5060,9 @@ private:
                    UINT_PTR idSubclass) {
         if (msg == WM_TIMER && wParam == kDiscoveryTimerId) {
             StopDiscoveryTimer();
-            if (capture_ && !capture_->discoveryDone) {
-                DiscoverIntoCache(*capture_, discoverySignature_);
-            }
-            if (capture_ && capture_->discoveryDone && !capture_->reopenRequested) {
-                // Refresh the visible menu with the freshly discovered items.
+            if (capture_ && !capture_->discoveryDone && !capture_->reopenRequested) {
+                // Close the menu before population: it blocks the UI thread
+                // and would leave visible items blank until the reopen.
                 capture_->reopenRequested = true;
                 EndMenu();
             }
@@ -5498,6 +5711,10 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
 
         ReorganizeAdvancedItems(model.items);
 
+        if (scope == Scope::Background || scope == Scope::Desktop) {
+            ApplyViewStateChecks(model.items, owner, kind);
+        }
+
         Wh_Log(L"Menu prep: %llu ms",
                static_cast<unsigned long long>(g_perf.OpenPathElapsedMs()));
 
@@ -5564,9 +5781,14 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
             break;
         }
 
-        // Discovery finished while the menu was open: show the updated menu.
+        // Discovery was requested while the menu was open. The menu is closed
+        // now, so populate without a visible menu and rebuild with the full
+        // model.
         if (capture.reopenRequested) {
             capture.reopenRequested = false;
+            if (!capture.discoveryDone) {
+                DiscoverIntoCache(capture, signature);
+            }
             continue;
         }
 

@@ -64,8 +64,10 @@ untouched native menu, including extended verbs.
   shell's file-type icons, and the View modes use glyphs.
 - Warm-up models are provisional: they are shown instantly but never overwrite
   a live model, and are refreshed from the real context on first use.
-- On the first open of an uncached context, the menu shows the core commands
-  and reopens with the full set as soon as discovery finishes.
+- On the first open of an uncached context, the menu shows the core commands,
+  then closes briefly while the shell populates and reopens with the full set.
+  Population blocks the UI thread, so the menu is closed for that moment
+  instead of freezing blank.
 - With the **More options submenu** on, discovered items whose verb is not a
   known Windows verb (i.e. third-party shell extensions, however they are
   registered) and the configured Windows extras are grouped into one submenu
@@ -95,9 +97,11 @@ untouched native menu, including extended verbs.
   empty are removed with them; each hidden item is logged as
   `[suspicious dN] ...` so it can be reported.
 - Rename, Refresh, and the View modes use the documented `IFolderView2` /
-  `IShellView` APIs; the old `FCIDM_*` view command IDs are not used.
-- Undo is not implemented: the shell does not expose its per-view undo stack
-  through documented interfaces.
+  `IShellView` APIs; the old `FCIDM_*` view command IDs are not used. View,
+  Sort by, and Group by show the current selection with a checkmark, and
+  Group by includes `(None)`.
+- Undo, "Expand/Collapse all groups", and the "More..." pickers are not
+  implemented: the shell does not expose them through documented interfaces.
 
 Menu models persist to disk (`menu-cache.bin` in the mod's storage directory)
 and are pre-warmed at Explorer start, so extension items survive restarts.

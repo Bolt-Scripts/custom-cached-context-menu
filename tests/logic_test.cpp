@@ -2715,6 +2715,45 @@ int main() {
         CHECK(everywhere);
     }
 
+    // v2.1 config encoding: round-trip, BOMs, BOM-less, invalid.
+    {
+        const std::wstring sample = L"; comment\r\n[appearance]\r\ncornerRadius = 4\r\n";
+        const std::vector<uint8_t> encoded = cmo::EncodeConfigText(sample);
+        CHECK(encoded.size() >= 3 && encoded[0] == 0xEF && encoded[1] == 0xBB &&
+              encoded[2] == 0xBF);
+        std::wstring decoded;
+        CHECK(cmo::DecodeConfigBytes(encoded, decoded));
+        CHECK(decoded == sample);
+
+        // UTF-16LE with BOM.
+        std::vector<uint8_t> utf16;
+        utf16.push_back(0xFF);
+        utf16.push_back(0xFE);
+        for (wchar_t c : sample) {
+            utf16.push_back(static_cast<uint8_t>(c & 0xFF));
+            utf16.push_back(static_cast<uint8_t>((c >> 8) & 0xFF));
+        }
+        CHECK(cmo::DecodeConfigBytes(utf16, decoded));
+        CHECK(decoded == sample);
+
+        // BOM-less UTF-8 and BOM-less UTF-16LE.
+        const std::string narrow = "; x\n";
+        std::vector<uint8_t> utf8(narrow.begin(), narrow.end());
+        CHECK(cmo::DecodeConfigBytes(utf8, decoded));
+        CHECK(decoded == L"; x\n");
+        std::vector<uint8_t> utf16NoBom;
+        for (wchar_t c : sample) {
+            utf16NoBom.push_back(static_cast<uint8_t>(c & 0xFF));
+            utf16NoBom.push_back(static_cast<uint8_t>((c >> 8) & 0xFF));
+        }
+        CHECK(cmo::DecodeConfigBytes(utf16NoBom, decoded));
+        CHECK(decoded == sample);
+
+        // Undecodable bytes fail without throwing.
+        std::vector<uint8_t> invalid = {0x81, 0xFE, 0xFF, 0x00, 0x80};
+        CHECK(!cmo::DecodeConfigBytes(invalid, decoded));
+    }
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

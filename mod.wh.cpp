@@ -2333,6 +2333,144 @@ void InsertCustomItems(MenuModel& model, const RulesConfig& config,
 // [CMO:ConfigStore] Live-reloaded menu.ini.
 // ===========================================================================
 
+std::vector<uint8_t> EncodeConfigText(const std::wstring& text) {
+    std::vector<uint8_t> bytes;
+    bytes.push_back(0xEF);
+    bytes.push_back(0xBB);
+    bytes.push_back(0xBF);
+    if (text.empty()) {
+        return bytes;
+    }
+    const int size = WideCharToMultiByte(CP_UTF8, 0, text.c_str(),
+                                         static_cast<int>(text.size()), nullptr, 0,
+                                         nullptr, nullptr);
+    if (size <= 0) {
+        return bytes;
+    }
+    const size_t offset = bytes.size();
+    bytes.resize(offset + static_cast<size_t>(size));
+    WideCharToMultiByte(CP_UTF8, 0, text.c_str(), static_cast<int>(text.size()),
+                        reinterpret_cast<char*>(bytes.data() + offset), size,
+                        nullptr, nullptr);
+    return bytes;
+}
+
+bool DecodeConfigBytes(const std::vector<uint8_t>& bytes, std::wstring& text) {
+    if (bytes.empty()) {
+        text.clear();
+        return true;
+    }
+
+    auto decodeUtf8 = [&](size_t offset, std::wstring& out) {
+        const int length = static_cast<int>(bytes.size() - offset);
+        if (length <= 0) {
+            out.clear();
+            return true;
+        }
+        const int wide = MultiByteToWideChar(
+            CP_UTF8, MB_ERR_INVALID_CHARS,
+            reinterpret_cast<const char*>(bytes.data() + offset), length, nullptr, 0);
+        if (wide <= 0) {
+            return false;
+        }
+        out.resize(static_cast<size_t>(wide));
+        MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
+                            reinterpret_cast<const char*>(bytes.data() + offset),
+                            length, out.data(), wide);
+        return true;
+    };
+    auto decodeUtf16 = [&](size_t offset, bool bigEndian, std::wstring& out) {
+        const size_t count = (bytes.size() - offset) / 2;
+        out.resize(count);
+        for (size_t i = 0; i < count; ++i) {
+            const uint8_t first = bytes[offset + i * 2];
+            const uint8_t second = bytes[offset + i * 2 + 1];
+            out[i] = static_cast<wchar_t>(bigEndian
+                                              ? (first << 8) | second
+                                              : first | (second << 8));
+        }
+        return true;
+    };
+
+    if (bytes.size() >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB &&
+        bytes[2] == 0xBF) {
+        return decodeUtf8(3, text);
+    }
+    if (bytes.size() >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE) {
+        return decodeUtf16(2, false, text);
+    }
+    if (bytes.size() >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF) {
+        return decodeUtf16(2, true, text);
+    }
+
+    // Strict UTF-8, but reject results containing embedded NULs: those are
+    // almost certainly UTF-16 read as bytes.
+    std::wstring utf8Text;
+    if (decodeUtf8(0, utf8Text) &&
+        utf8Text.find(L'\0') == std::wstring::npos) {
+        text = std::move(utf8Text);
+        return true;
+    }
+
+    // BOM-less UTF-16LE heuristic: even length and enough NUL high bytes.
+    if (bytes.size() % 2 == 0) {
+        size_t zeros = 0;
+        for (size_t i = 1; i < bytes.size(); i += 2) {
+            if (bytes[i] == 0) {
+                ++zeros;
+            }
+        }
+        if (zeros >= bytes.size() / 4) {
+            return decodeUtf16(0, false, text);
+        }
+    }
+
+    text.clear();
+    return false;
+}
+
+bool ReadConfigFile(const std::wstring& path, std::wstring& text) {
+    HANDLE file =
+        CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                    nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+    LARGE_INTEGER size = {};
+    if (!GetFileSizeEx(file, &size) || size.QuadPart > 1024 * 1024) {
+        CloseHandle(file);
+        return false;
+    }
+    std::vector<uint8_t> bytes(static_cast<size_t>(size.QuadPart));
+    DWORD read = 0;
+    const BOOL ok =
+        bytes.empty() ||
+        ReadFile(file, bytes.data(), static_cast<DWORD>(bytes.size()), &read,
+                 nullptr);
+    CloseHandle(file);
+    if (!ok) {
+        return false;
+    }
+    bytes.resize(read);
+    return DecodeConfigBytes(bytes, text);
+}
+
+bool WriteConfigFile(const std::wstring& path, const std::wstring& text) {
+    const std::vector<uint8_t> bytes = EncodeConfigText(text);
+    HANDLE file = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+                              FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+    DWORD written = 0;
+    const BOOL ok =
+        bytes.empty() ||
+        WriteFile(file, bytes.data(), static_cast<DWORD>(bytes.size()), &written,
+                  nullptr);
+    CloseHandle(file);
+    return ok && written == bytes.size();
+}
+
 std::wstring ConfigFilePath() {
     wchar_t storagePath[MAX_PATH] = {};
     if (!Wh_GetModStoragePath(storagePath, ARRAYSIZE(storagePath))) {

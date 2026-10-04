@@ -4860,6 +4860,7 @@ struct MenuSession {
     int margin = 0;
     int submenuDelayMs = 150;
     int hoverCandidate = -1;
+    int hoverLevel = -1;
     bool submenuTimerActive = false;
     bool done = false;
     LayoutMetrics metrics;
@@ -5168,6 +5169,17 @@ void OpenSubmenu(MenuSession* session, int index, int itemIndex) {
 
 constexpr UINT_PTR kMenuSubmenuTimerId = 1;
 
+std::vector<RECT> SessionWindowRects(const MenuSession* session) {
+    std::vector<RECT> rects;
+    rects.reserve(session->windows.size());
+    for (MenuWindow* menuWindow : session->windows) {
+        RECT rect = {};
+        GetWindowRect(menuWindow->Handle(), &rect);
+        rects.push_back(rect);
+    }
+    return rects;
+}
+
 LRESULT CustomMenuWindowProc(MenuWindow* window, HWND hwnd, UINT msg,
                              WPARAM wParam, LPARAM lParam) {
     MenuSession* session = g_menuSession;
@@ -5194,27 +5206,44 @@ LRESULT CustomMenuWindowProc(MenuWindow* window, HWND hwnd, UINT msg,
 
     switch (msg) {
         case WM_MOUSEMOVE: {
-            session->active = index;
-
-            TRACKMOUSEEVENT track = {};
-            track.cbSize = sizeof(track);
-            track.dwFlags = TME_LEAVE;
-            track.hwndTrack = hwnd;
-            TrackMouseEvent(&track);
-
-            const int hit = MenuStateItemAt(panel, state, panelPoint);
-            const bool isSubmenu =
-                hit >= 0 && panel.items[hit].kind == ItemKind::Submenu;
-            const bool ownsOpenChild =
-                state.openSubmenu >= 0 && hit >= 0 &&
-                panel.items[hit].submenuIndex == state.openSubmenu;
-            if (!ownsOpenChild) {
-                CloseSubmenusBelow(session, index);
+            const std::vector<RECT> rects = SessionWindowRects(session);
+            POINT screen = clientPoint;
+            ClientToScreen(hwnd, &screen);
+            const int level = SessionLevelAtPoint(rects, screen);
+            if (level < 0) {
+                if (session->active >= 0 &&
+                    session->active < static_cast<int>(session->states.size())) {
+                    MenuStateMouseLeave(session->states[session->active]);
+                    RepaintMenuWindow(session, session->active);
+                }
+                CloseSubmenusBelow(session, 0);
+                if (session->submenuTimerActive) {
+                    KillTimer(hwnd, kMenuSubmenuTimerId);
+                    session->submenuTimerActive = false;
+                    session->hoverCandidate = -1;
+                }
+                return 0;
             }
 
-            if (hit != state.hoverIndex) {
-                MenuStateMouseMove(state, panel, hit);
-                RepaintMenuWindow(session, index);
+            session->active = level;
+            const LayoutPanel& levelPanel = *session->windows[level]->Panel();
+            MenuInputState& levelState = session->states[level];
+            const POINT levelPoint =
+                PanelPointForWindow(rects[level], session->margin, screen);
+
+            const int hit = MenuStateItemAt(levelPanel, levelState, levelPoint);
+            const bool isSubmenu =
+                hit >= 0 && levelPanel.items[hit].kind == ItemKind::Submenu;
+            const bool ownsOpenChild =
+                levelState.openSubmenu >= 0 && hit >= 0 &&
+                levelPanel.items[hit].submenuIndex == levelState.openSubmenu;
+            if (!ownsOpenChild) {
+                CloseSubmenusBelow(session, level);
+            }
+
+            if (hit != levelState.hoverIndex) {
+                MenuStateMouseMove(levelState, levelPanel, hit);
+                RepaintMenuWindow(session, level);
             }
 
             if (isSubmenu) {
@@ -5222,6 +5251,7 @@ LRESULT CustomMenuWindowProc(MenuWindow* window, HWND hwnd, UINT msg,
                     (session->hoverCandidate != hit ||
                      !session->submenuTimerActive)) {
                     session->hoverCandidate = hit;
+                    session->hoverLevel = level;
                     session->submenuTimerActive = true;
                     SetTimer(hwnd, kMenuSubmenuTimerId,
                              static_cast<UINT>(session->submenuDelayMs <= 0
@@ -5236,15 +5266,66 @@ LRESULT CustomMenuWindowProc(MenuWindow* window, HWND hwnd, UINT msg,
             }
             return 0;
         }
-        case WM_MOUSELEAVE: {
-            if (index == session->active) {
-                MenuStateMouseLeave(state);
-                RepaintMenuWindow(session, index);
+        case WM_LBUTTONDOWN:
+        case WM_RBUTTONDOWN: {
+            const std::vector<RECT> rects = SessionWindowRects(session);
+            POINT screen = clientPoint;
+            ClientToScreen(hwnd, &screen);
+            if (SessionLevelAtPoint(rects, screen) < 0) {
+                if (msg == WM_RBUTTONDOWN) {
+                    const HWND target = WindowFromPoint(screen);
+                    bool ours = false;
+                    for (MenuWindow* menuWindow : session->windows) {
+                        if (menuWindow->Handle() == target) {
+                            ours = true;
+                            break;
+                        }
+                    }
+                    if (target && !ours) {
+                        PostMessageW(target, WM_RBUTTONUP, 0,
+                                     MAKELPARAM(screen.x, screen.y));
+                    }
+                }
+                session->done = true;
             }
-            if (session->submenuTimerActive) {
-                KillTimer(hwnd, kMenuSubmenuTimerId);
-                session->submenuTimerActive = false;
-                session->hoverCandidate = -1;
+            return 0;
+        }
+        case WM_LBUTTONUP: {
+            const std::vector<RECT> rects = SessionWindowRects(session);
+            POINT screen = clientPoint;
+            ClientToScreen(hwnd, &screen);
+            const int level = SessionLevelAtPoint(rects, screen);
+            if (level >= 0) {
+                const LayoutPanel& levelPanel = *session->windows[level]->Panel();
+                MenuInputState& levelState = session->states[level];
+                const POINT levelPoint =
+                    PanelPointForWindow(rects[level], session->margin, screen);
+                const int hit = MenuStateItemAt(levelPanel, levelState, levelPoint);
+                if (hit >= 0) {
+                    const LayoutItem& item = levelPanel.items[hit];
+                    if (item.kind == ItemKind::Submenu) {
+                        OpenSubmenu(session, level, hit);
+                    } else {
+                        session->result.chosenItemId = item.invocation.id;
+                        session->done = true;
+                    }
+                }
+            }
+            return 0;
+        }
+        case WM_RBUTTONUP:
+            return 0;
+        case WM_MOUSEWHEEL: {
+            const std::vector<RECT> rects = SessionWindowRects(session);
+            const POINT screen = {static_cast<short>(LOWORD(lParam)),
+                                  static_cast<short>(HIWORD(lParam))};
+            const int level = SessionLevelAtPoint(rects, screen);
+            if (level >= 0) {
+                const LayoutPanel& levelPanel = *session->windows[level]->Panel();
+                MenuStateWheel(session->states[level], levelPanel,
+                               static_cast<short>(HIWORD(wParam)),
+                               session->maxHeight);
+                RepaintMenuWindow(session, level);
             }
             return 0;
         }
@@ -5252,30 +5333,15 @@ LRESULT CustomMenuWindowProc(MenuWindow* window, HWND hwnd, UINT msg,
             if (wParam == kMenuSubmenuTimerId) {
                 session->submenuTimerActive = false;
                 KillTimer(hwnd, kMenuSubmenuTimerId);
-                if (index == session->active && session->hoverCandidate >= 0 &&
-                    session->hoverCandidate == state.hoverIndex) {
-                    OpenSubmenu(session, index, session->hoverCandidate);
+                const int level = session->hoverLevel;
+                if (level >= 0 && level == session->active &&
+                    level < static_cast<int>(session->windows.size()) &&
+                    session->hoverCandidate >= 0 &&
+                    session->hoverCandidate ==
+                        session->states[level].hoverIndex) {
+                    OpenSubmenu(session, level, session->hoverCandidate);
                 }
             }
-            return 0;
-        }
-        case WM_LBUTTONUP: {
-            const int hit = MenuStateItemAt(panel, state, panelPoint);
-            if (hit >= 0) {
-                const LayoutItem& item = panel.items[hit];
-                if (item.kind == ItemKind::Submenu) {
-                    OpenSubmenu(session, index, hit);
-                } else {
-                    session->result.chosenItemId = item.invocation.id;
-                    session->done = true;
-                }
-            }
-            return 0;
-        }
-        case WM_MOUSEWHEEL: {
-            const int delta = static_cast<short>(HIWORD(wParam));
-            MenuStateWheel(state, panel, delta, session->maxHeight);
-            RepaintMenuWindow(session, index);
             return 0;
         }
         case WM_KEYDOWN: {
@@ -5470,6 +5536,7 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
     root->Show();
     SetForegroundWindow(root->Handle());
     SetFocus(root->Handle());
+    SetCapture(root->Handle());
 
     MSG msg = {};
     while (!session.done) {
@@ -5494,6 +5561,9 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
             ApplyWindowAnimation(window->CompVisual(), closing, false);
         }
         Sleep(static_cast<DWORD>(closing.durationMs));
+    }
+    if (GetCapture() == root->Handle()) {
+        ReleaseCapture();
     }
     for (size_t i = session.windows.size(); i > 1; --i) {
         g_menuWindowPool.Release(session.windows[i - 1]);
@@ -10491,21 +10561,28 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
         const MenuMode mode = ResolveMenuMode(
             g_settings.menuMode, g_modeController.ConsecutiveFailures());
         if (mode == MenuMode::Custom) {
-            const RulesConfig emptyConfig;
-            const RulesConfig& effectiveRules = rules ? *rules : emptyConfig;
-            const LayoutKey layoutKey =
-                MakeLayoutKey(signature, effectiveRules, DpiForWindow(owner),
-                              IsDarkThemeActive(), model);
-
-            const CustomMenuResult custom =
-                ShowCustomMenu(model, layoutKey, owner, pt);
-            if (custom.failed) {
-                Wh_Log(L"Custom menu failed; using the HMENU path");
-                g_modeController.RecordFailure();
-            } else {
+            if (g_menuSession != nullptr) {
+                // A session already owns the mouse; never clobber it.
+                Wh_Log(L"Refusing a second custom menu session");
                 g_modeController.RecordSuccess();
                 customShown = true;
-                chosen = custom.chosenItemId;
+            } else {
+                const RulesConfig emptyConfig;
+                const RulesConfig& effectiveRules = rules ? *rules : emptyConfig;
+                const LayoutKey layoutKey =
+                    MakeLayoutKey(signature, effectiveRules, DpiForWindow(owner),
+                                  IsDarkThemeActive(), model);
+
+                const CustomMenuResult custom =
+                    ShowCustomMenu(model, layoutKey, owner, pt);
+                if (custom.failed) {
+                    Wh_Log(L"Custom menu failed; using the HMENU path");
+                    g_modeController.RecordFailure();
+                } else {
+                    g_modeController.RecordSuccess();
+                    customShown = true;
+                    chosen = custom.chosenItemId;
+                }
             }
         }
         if (!customShown) {

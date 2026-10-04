@@ -2,7 +2,7 @@
 // @id              context-menu-overhaul
 // @name            Context Menu Overhaul
 // @description     Replaces the Explorer context menu with an instantly-opening cached menu, then discovers and caches shell extension items asynchronously.
-// @version         0.3.24
+// @version         0.3.25
 // @include         explorer.exe
 // @architecture    x86-64
 // @compilerOptions -lole32 -lshlwapi -luuid -lcomctl32 -ladvapi32 -lgdi32 -luxtheme -lversion
@@ -5490,13 +5490,33 @@ public:
             return;
         }
         stopEvent_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-        if (!stopEvent_) {
+        checkEvent_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        if (!stopEvent_ || !checkEvent_) {
+            if (stopEvent_) {
+                CloseHandle(stopEvent_);
+            }
+            if (checkEvent_) {
+                CloseHandle(checkEvent_);
+            }
+            stopEvent_ = nullptr;
+            checkEvent_ = nullptr;
             return;
         }
         thread_ = CreateThread(nullptr, 0, &Invalidation::ThreadProc, this, 0, nullptr);
         if (!thread_) {
             CloseHandle(stopEvent_);
+            CloseHandle(checkEvent_);
             stopEvent_ = nullptr;
+            checkEvent_ = nullptr;
+        }
+    }
+
+    // Asks for a handler check. Called when a menu is opened: the registry is
+    // only inspected while menus are actually being used, not on a timer.
+    // Cheap (SetEvent) and safe from any thread.
+    void RequestCheck() {
+        if (checkEvent_) {
+            SetEvent(checkEvent_);
         }
     }
 
@@ -5512,6 +5532,10 @@ public:
         if (stopEvent_) {
             CloseHandle(stopEvent_);
             stopEvent_ = nullptr;
+        }
+        if (checkEvent_) {
+            CloseHandle(checkEvent_);
+            checkEvent_ = nullptr;
         }
     }
 
@@ -5594,11 +5618,25 @@ private:
 
     void Run() {
         uint64_t registryFingerprint = ComputeRegistryFingerprint();
+        ULONGLONG lastCheck = GetTickCount64();
 
         for (;;) {
-            if (WaitForSingleObject(stopEvent_, 5000) == WAIT_OBJECT_0) {
+            HANDLE events[] = {stopEvent_, checkEvent_};
+            const DWORD wait = WaitForMultipleObjects(2, events, FALSE, INFINITE);
+            if (wait == WAIT_OBJECT_0) {
                 break;
             }
+            if (wait != WAIT_OBJECT_0 + 1) {
+                continue;
+            }
+
+            // Menus can open in bursts; never fingerprint more than once per
+            // debounce window.
+            const ULONGLONG now = GetTickCount64();
+            if (now - lastCheck < 5000) {
+                continue;
+            }
+            lastCheck = now;
 
             const uint64_t current = ComputeRegistryFingerprint();
             if (current != registryFingerprint) {
@@ -5606,8 +5644,8 @@ private:
                 InvalidateNow(L"Context menu handlers changed");
             }
 
-            if (GetTickCount64() >= nextRevalidationTick_) {
-                nextRevalidationTick_ = GetTickCount64() + 3600000;
+            if (now >= nextRevalidationTick_) {
+                nextRevalidationTick_ = now + 3600000;
                 if (g_cache.RevalidateStamps()) {
                     Wh_Log(L"Handler modules changed; cache invalidated");
                     g_warmup.Stop();
@@ -5621,6 +5659,7 @@ private:
 
     HANDLE thread_ = nullptr;
     HANDLE stopEvent_ = nullptr;
+    HANDLE checkEvent_ = nullptr;
     std::atomic<uint64_t> generation_{0};
     uint64_t nextRevalidationTick_ = 0;
 };
@@ -5651,6 +5690,8 @@ MenuPath DecidePath(bool shiftHeld, ShellViewKind kind, bool hasPendingCapture,
 
 bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner, POINT pt) {
     g_perf.MarkOpenPathStart();
+    // Handler changes are checked while menus are used, not on a timer.
+    g_invalidation.RequestCheck();
 
     SelectionInfo info = GetSelection(owner, kind);
     std::vector<std::wstring>& paths = info.paths;

@@ -106,8 +106,9 @@ untouched native menu, including extended verbs.
 
 Menu models persist to disk (`menu-cache.bin` in the mod's storage directory)
 and are pre-warmed at Explorer start, so extension items survive restarts.
-Handler registration changes are detected by polling, which keeps the cache
-stable during normal shell activity.
+Handler registration changes are checked when a menu is opened (debounced to
+once per 5 seconds), so the mod does no background polling while Explorer is
+idle; an hourly revalidation catches handler DLL updates.
 
 ## Reporting issues
 

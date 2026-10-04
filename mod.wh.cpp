@@ -2482,6 +2482,57 @@ RulesApplication ApplyRulesConfigToModel(MenuModel& model,
     return application;
 }
 
+// ===========================================================================
+// [CMO:Layout] Appearance resolution, metrics, and render-ready layout.
+// ===========================================================================
+
+Appearance ResolveAppearance(const RulesConfig& config, bool darkTheme) {
+    if (darkTheme) {
+        return config.hasDarkAppearance ? config.darkAppearance : config.appearance;
+    }
+    return config.hasLightAppearance ? config.lightAppearance : config.appearance;
+}
+
+struct LayoutMetrics {
+    int itemHeight = 28;
+    int separatorHeight = 7;
+    int iconSize = 16;
+    int padding = 6;
+    int gutterWidth = 22;
+    int submenuArrowWidth = 16;
+    float fontSize = 9.0f;
+    std::wstring fontFace = L"Segoe UI";
+    uint32_t textColor = 0xFFFFFFFF;
+    uint32_t disabledTextColor = 0x66FFFFFF;
+    uint32_t hoverBackground = 0x14FFFFFF;
+    uint32_t pressedBackground = 0x22FFFFFF;
+    uint32_t separator = 0x18FFFFFF;
+    uint32_t submenuArrow = 0x99FFFFFF;
+};
+
+LayoutMetrics ResolveLayoutMetrics(const Appearance& appearance, uint32_t dpi,
+                                   bool darkTheme) {
+    (void)darkTheme;
+    const int scale = dpi == 0 ? 96 : static_cast<int>(dpi);
+
+    LayoutMetrics metrics;
+    metrics.itemHeight = MulDiv(appearance.itemHeight, scale, 96);
+    metrics.iconSize = MulDiv(appearance.iconSize, scale, 96);
+    metrics.padding = MulDiv(appearance.padding, scale, 96);
+    metrics.gutterWidth = metrics.iconSize + metrics.padding;
+    metrics.separatorHeight = MulDiv(7, scale, 96);
+    metrics.submenuArrowWidth = MulDiv(16, scale, 96);
+    metrics.fontFace = appearance.fontFace;
+    metrics.fontSize = appearance.fontSize * (static_cast<float>(scale) / 96.0f);
+    metrics.textColor = appearance.textColor;
+    metrics.disabledTextColor = appearance.disabledTextColor;
+    metrics.hoverBackground = appearance.hoverBackground;
+    metrics.pressedBackground = appearance.pressedBackground;
+    metrics.separator = appearance.separator;
+    metrics.submenuArrow = appearance.submenuArrow;
+    return metrics;
+}
+
 // Shell property keys used by the Sort by and Group by submenus (all in the
 // shell's System property set, defined here so no SDK propkey.h is needed).
 const PROPERTYKEY kShellPropertyKeys[] = {

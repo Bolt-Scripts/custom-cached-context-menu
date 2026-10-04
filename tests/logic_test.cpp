@@ -2361,6 +2361,27 @@ int main() {
         CHECK(foundEcho);
     }
 
+    // v2 appearance resolution and DPI scaling.
+    {
+        cmo::RulesConfig config;
+        config.appearance.cornerRadius = 8;
+        config.appearance.textColor = 0xFFFFFFFFu;
+        config.appearance.itemHeight = 28;
+        config.hasLightAppearance = true;
+        config.lightAppearance.textColor = 0xFF202020u;
+        const cmo::Appearance dark = cmo::ResolveAppearance(config, true);
+        CHECK(dark.textColor == 0xFFFFFFFFu);
+        const cmo::Appearance light = cmo::ResolveAppearance(config, false);
+        CHECK(light.textColor == 0xFF202020u);
+        CHECK(light.itemHeight == 28);  // inherited from base
+
+        cmo::LayoutMetrics at96 = cmo::ResolveLayoutMetrics(dark, 96, true);
+        cmo::LayoutMetrics at144 = cmo::ResolveLayoutMetrics(dark, 144, true);
+        CHECK(at96.itemHeight == 28);
+        CHECK(at144.itemHeight == 42);
+        CHECK(at144.fontSize == at96.fontSize * 1.5f);
+    }
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

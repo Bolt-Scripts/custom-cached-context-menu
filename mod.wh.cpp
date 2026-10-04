@@ -4737,6 +4737,25 @@ int MenuStateItemAt(const LayoutPanel& panel, const MenuInputState& state,
     return -1;
 }
 
+// Highest (deepest) open level whose screen rect contains the point, or -1.
+int SessionLevelAtPoint(const std::vector<RECT>& windowScreenRects,
+                        POINT screenPoint) {
+    for (size_t i = windowScreenRects.size(); i > 0; --i) {
+        const RECT& rect = windowScreenRects[i - 1];
+        if (screenPoint.x >= rect.left && screenPoint.x < rect.right &&
+            screenPoint.y >= rect.top && screenPoint.y < rect.bottom) {
+            return static_cast<int>(i - 1);
+        }
+    }
+    return -1;
+}
+
+POINT PanelPointForWindow(const RECT& windowScreenRect, int margin,
+                          POINT screenPoint) {
+    return POINT{screenPoint.x - windowScreenRect.left - margin,
+                 screenPoint.y - windowScreenRect.top - margin};
+}
+
 // ===========================================================================
 // [CMO:MenuWindow] Custom menu session: window wiring and invocation.
 // ===========================================================================

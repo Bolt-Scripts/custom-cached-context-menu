@@ -3032,6 +3032,19 @@ int main() {
         CHECK(cmo::MenuStateItemAt(panel, state, POINT{5, 10}) == 0);
     }
 
+    // v2.1 session routing: deepest level, margin-adjusted panel points.
+    {
+        std::vector<RECT> rects = {{0, 0, 200, 300}, {180, 50, 380, 200}};
+        CHECK(cmo::SessionLevelAtPoint(rects, POINT{10, 10}) == 0);
+        CHECK(cmo::SessionLevelAtPoint(rects, POINT{190, 60}) == 1);
+        CHECK(cmo::SessionLevelAtPoint(rects, POINT{400, 10}) == -1);
+
+        const POINT panel = cmo::PanelPointForWindow(
+            RECT{100, 100, 400, 400}, 12, POINT{120, 150});
+        CHECK(panel.x == 8);
+        CHECK(panel.y == 38);
+    }
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

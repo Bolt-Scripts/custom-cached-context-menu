@@ -640,6 +640,47 @@ int main() {
     }
     CHECK(cutAdopted);
 
+    // A cached submenu must not donate its empty descriptor to a matching core
+    // command ("New"): that cleared the verb and invoked offset 0, which
+    // dispatched whatever command happened to sit there.
+    {
+        cmo::MenuModel newCore =
+            cmo::BuildCoreModel(cmo::Scope::Desktop, {}, cmo::Shape::Single);
+        cmo::MenuModel newCached{};
+        newCached.sig = newCore.sig;
+        cmo::MenuItem newSubmenu{};
+        newSubmenu.id = 21001;
+        newSubmenu.kind = cmo::ItemKind::Submenu;
+        newSubmenu.action = cmo::ActionKind::Submenu;
+        newSubmenu.label = L"&New";
+        cmo::MenuItem newChild{};
+        newChild.id = 21002;
+        newChild.kind = cmo::ItemKind::Command;
+        newChild.action = cmo::ActionKind::ShellVerb;
+        newChild.label = L"Folder";
+        newChild.canonicalVerb = L"shellnew";
+        newChild.verbOffset = 12;
+        newSubmenu.children.push_back(newChild);
+        newCached.items.push_back(newSubmenu);
+
+        cmo::MenuModel newMerged = cmo::MergeCoreWithCached(newCore, newCached);
+        bool foundNewCommand = false;
+        int newSubmenuCount = 0;
+        for (const cmo::MenuItem& item : newMerged.items) {
+            if (cmo::NormalizeMenuLabel(item.label) == L"New") {
+                if (item.kind == cmo::ItemKind::Submenu) {
+                    ++newSubmenuCount;
+                } else {
+                    foundNewCommand = true;
+                    CHECK(item.canonicalVerb == L"new");
+                    CHECK((item.flags & cmo::kModelHasOffset) == 0);
+                }
+            }
+        }
+        CHECK(foundNewCommand);
+        CHECK(newSubmenuCount == 0);
+    }
+
     // Native items carry a valid offset; core items look up the native item's
     // offset before falling back to verb invocation.
     {

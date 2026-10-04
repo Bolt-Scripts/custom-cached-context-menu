@@ -2,7 +2,7 @@
 // @id              context-menu-overhaul
 // @name            Context Menu Overhaul
 // @description     Replaces the Explorer context menu with an instantly-opening cached menu, then discovers and caches shell extension items asynchronously.
-// @version         0.3.14
+// @version         0.3.15
 // @include         explorer.exe
 // @architecture    x86-64
 // @compilerOptions -lole32 -lshlwapi -luuid -lcomctl32 -ladvapi32 -lgdi32 -luxtheme -lversion
@@ -754,7 +754,12 @@ MenuModel MergeCoreWithCached(const MenuModel& core, const MenuModel& cached) {
 
         bool matchedCore = false;
         for (MenuItem& coreItem : result.items) {
-            if (coreItem.action != ActionKind::ShellVerb || !matches(coreItem, item)) {
+            // Only invokable commands donate a descriptor; a matching submenu
+            // has none and would otherwise clear the core verb and point the
+            // item at offset 0.
+            if (coreItem.action != ActionKind::ShellVerb ||
+                item.action != ActionKind::ShellVerb ||
+                item.kind != ItemKind::Command || !matches(coreItem, item)) {
                 continue;
             }
             // Adopt the native invocation descriptor: the shell rejects some
@@ -1521,6 +1526,7 @@ struct PendingCapture {
     uint64_t sourceStamp = 0;
     bool discoveryDone = false;
     bool reopenRequested = false;
+    bool menuInitialized = false;
 };
 
 // Releases every resource a capture owns.
@@ -2496,7 +2502,10 @@ void DiscoverIntoCache(PendingCapture& capture, const ContextSignature& signatur
                                             signature, capture.obj);
 
     // Initialize like a real host, then rebuild for dynamic labels/children.
-    InitializeMenuRecursive(capture, capture.populatedMenu, 0);
+    if (!capture.menuInitialized) {
+        InitializeMenuRecursive(capture, capture.populatedMenu, 0);
+        capture.menuInitialized = true;
+    }
     MenuModel model = BuildModelFromHMenu(capture.populatedMenu, capture.idCmdFirst,
                                           signature, capture.obj);
     MergePreInitIcons(model.items, preInit.items);
@@ -4111,6 +4120,14 @@ std::optional<uint32_t> ShowNativeReplay(PendingCapture& capture, HWND owner, PO
     if (!EnsureContextPopulated(capture) || !capture.populatedMenu ||
         !TrackPopupMenuEx_Original) {
         return std::nullopt;
+    }
+
+    // Submenus are populated on WM_INITMENUPOPUP; initialize the retained menu
+    // before showing it or placeholders (such as the New submenu's) would be
+    // displayed and their invocation would fail.
+    if (!capture.menuInitialized) {
+        InitializeMenuRecursive(capture, capture.populatedMenu, 0);
+        capture.menuInitialized = true;
     }
 
     OwnerSubclass subclass(owner, &capture, /*forwardMenuMessages=*/true);

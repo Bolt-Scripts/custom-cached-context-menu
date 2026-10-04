@@ -2,7 +2,7 @@
 // @id              context-menu-overhaul
 // @name            Context Menu Overhaul
 // @description     Replaces the Explorer context menu with an instantly-opening cached menu, then discovers and caches shell extension items asynchronously.
-// @version         0.2.1
+// @version         0.2.2
 // @include         explorer.exe
 // @architecture    x86-64
 // @compilerOptions -lole32 -lshlwapi -luuid -lcomctl32 -ladvapi32 -lgdi32
@@ -203,6 +203,7 @@ enum ModelFlags : uint32_t {
     kModelOwnerDraw = 1u << 4,
     kModelSeparator = 1u << 5,
     kModelExtension = 1u << 6,
+    kModelHasOffset = 1u << 7,
 };
 
 struct MenuItem {
@@ -453,14 +454,12 @@ MenuModel MergeCoreWithCached(const MenuModel& core, const MenuModel& cached) {
             if (coreItem.action != ActionKind::ShellVerb || !matches(coreItem, item)) {
                 continue;
             }
-            // Adopt the native descriptor: the shell knows how to invoke its
-            // own items, including offset-only ones.
-            if (!item.canonicalVerb.empty()) {
-                coreItem.canonicalVerb = item.canonicalVerb;
-            } else {
-                coreItem.canonicalVerb.clear();
-                coreItem.verbOffset = item.verbOffset;
-            }
+            // Adopt the native descriptor: the shell rejects some canonical
+            // verb strings, but its own offsets always dispatch. Remember
+            // the offset so cached opens invoke exactly like the native menu.
+            coreItem.canonicalVerb = item.canonicalVerb;
+            coreItem.verbOffset = item.verbOffset;
+            coreItem.flags |= kModelHasOffset;
             matchedCore = true;
             break;
         }
@@ -1342,7 +1341,10 @@ void BuildItemsFromHMenu(HMENU menu, UINT idCmdFirst, IContextMenu* context,
         } else {
             item.kind = ItemKind::Command;
             item.action = ActionKind::ShellVerb;
-            item.verbOffset = (info.wID >= idCmdFirst) ? (info.wID - idCmdFirst) : 0;
+            if (info.wID >= idCmdFirst) {
+                item.verbOffset = info.wID - idCmdFirst;
+                item.flags |= kModelHasOffset;
+            }
             if (context) {
                 wchar_t verbBuffer[256] = {};
                 if (SUCCEEDED(context->GetCommandString(
@@ -2075,8 +2077,8 @@ bool EnsureContextPopulated(PendingCapture& capture) {
     return true;
 }
 
-// Invokes a cached extension item through the live context object, falling
-// back to the native menu when the item is owner-draw or invocation fails.
+// Invokes a cached extension item through the live context object, preferring
+// its native offset (verb strings are rejected by the shell's own menu).
 InvokeResult InvokeExtensionItem(const MenuItem& item, const InvocationContext& ctx,
                                  PendingCapture& capture) {
     if (item.flags & kModelOwnerDraw) {
@@ -2086,17 +2088,66 @@ InvokeResult InvokeExtensionItem(const MenuItem& item, const InvocationContext& 
         return InvokeResult::FallbackNative;
     }
 
+    if (item.flags & kModelHasOffset) {
+        MenuItem offsetItem = item;
+        offsetItem.canonicalVerb.clear();
+        if (InvokeContextItem(ctx.liveContext, offsetItem, ctx)) {
+            return InvokeResult::Handled;
+        }
+    }
     if (InvokeContextItem(ctx.liveContext, item, ctx)) {
         return InvokeResult::Handled;
     }
-
-    // The verb failed; retry once by offset now that the object is populated.
-    MenuItem offsetItem = item;
-    offsetItem.canonicalVerb.clear();
-    if (InvokeContextItem(ctx.liveContext, offsetItem, ctx)) {
-        return InvokeResult::Handled;
-    }
     return InvokeResult::FallbackNative;
+}
+
+// Finds the offset of the native item matching a core item, by canonical
+// verb first and label second. Recurses into submenus.
+std::optional<uint32_t> FindNativeOffsetInMenu(HMENU menu, UINT idCmdFirst,
+                                               IContextMenu* context,
+                                               const MenuItem& target) {
+    const int count = GetMenuItemCount(menu);
+    for (int i = 0; i < count; ++i) {
+        MENUITEMINFOW info = {};
+        info.cbSize = sizeof(info);
+        info.fMask = MIIM_ID | MIIM_FTYPE | MIIM_SUBMENU;
+        if (!GetMenuItemInfoW(menu, static_cast<UINT>(i), TRUE, &info)) {
+            continue;
+        }
+        if (info.fType & MFT_SEPARATOR) {
+            continue;
+        }
+        if (info.hSubMenu) {
+            if (auto found = FindNativeOffsetInMenu(info.hSubMenu, idCmdFirst, context,
+                                                    target)) {
+                return found;
+            }
+            continue;
+        }
+        if (info.wID < idCmdFirst) {
+            continue;
+        }
+        const uint32_t offset = info.wID - idCmdFirst;
+
+        if (context && !target.canonicalVerb.empty()) {
+            wchar_t verb[128] = {};
+            if (SUCCEEDED(context->GetCommandString(
+                    static_cast<UINT_PTR>(offset), GCS_VERBW, nullptr,
+                    reinterpret_cast<LPSTR>(verb), ARRAYSIZE(verb))) &&
+                _wcsicmp(verb, target.canonicalVerb.c_str()) == 0) {
+                return offset;
+            }
+        }
+        if (!target.label.empty()) {
+            wchar_t label[512] = {};
+            const int length = GetMenuStringW(menu, static_cast<UINT>(i), label,
+                                              ARRAYSIZE(label), MF_BYPOSITION);
+            if (length > 0 && _wcsicmp(label, target.label.c_str()) == 0) {
+                return offset;
+            }
+        }
+    }
+    return std::nullopt;
 }
 
 InvokeResult InvokeItem(const MenuItem& item, const InvocationContext& ctx,
@@ -2137,19 +2188,31 @@ InvokeResult InvokeItem(const MenuItem& item, const InvocationContext& ctx,
                 }
             }
             // The shell only knows its own commands once the object has been
-            // populated; standard verbs fail on an empty object.
+            // populated. Verb strings are rejected by the default context
+            // menu on real Windows, while its own offsets always dispatch,
+            // so prefer the offset and fall back to the verb last.
             if (!EnsureContextPopulated(capture)) {
                 return InvokeResult::FallbackNative;
             }
-            if (InvokeContextItem(ctx.liveContext, item, ctx)) {
-                return InvokeResult::Handled;
-            }
-            if (!item.canonicalVerb.empty() && item.verbOffset != 0) {
+            if (item.flags & kModelHasOffset) {
                 MenuItem offsetItem = item;
                 offsetItem.canonicalVerb.clear();
                 if (InvokeContextItem(ctx.liveContext, offsetItem, ctx)) {
                     return InvokeResult::Handled;
                 }
+            } else if (auto nativeOffset = FindNativeOffsetInMenu(
+                           capture.populatedMenu, capture.idCmdFirst, ctx.liveContext,
+                           item)) {
+                MenuItem offsetItem = item;
+                offsetItem.canonicalVerb.clear();
+                offsetItem.verbOffset = *nativeOffset;
+                if (InvokeContextItem(ctx.liveContext, offsetItem, ctx)) {
+                    return InvokeResult::Handled;
+                }
+            }
+            if (!item.canonicalVerb.empty() &&
+                InvokeContextItem(ctx.liveContext, item, ctx)) {
+                return InvokeResult::Handled;
             }
             return InvokeResult::FallbackNative;
     }

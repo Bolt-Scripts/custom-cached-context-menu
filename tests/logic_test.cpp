@@ -549,10 +549,44 @@ int main() {
     bool cutAdopted = false;
     for (const cmo::MenuItem& item : adopted.items) {
         if (item.label == L"Cut") {
-            cutAdopted = item.canonicalVerb.empty() && item.verbOffset == 7;
+            cutAdopted = (item.flags & cmo::kModelHasOffset) != 0 &&
+                         item.verbOffset == 7;
         }
     }
     CHECK(cutAdopted);
+
+    // Native items carry a valid offset; core items look up the native item's
+    // offset before falling back to verb invocation.
+    {
+        HMENU nativeMenu = CreatePopupMenu();
+        AppendMenuW(nativeMenu, MF_STRING, 11, L"Open");
+        AppendMenuW(nativeMenu, MF_SEPARATOR, 0, nullptr);
+        HMENU nativeSubmenu = CreatePopupMenu();
+        AppendMenuW(nativeSubmenu, MF_STRING, 13, L"Copy");
+        AppendMenuW(nativeMenu, MF_POPUP, reinterpret_cast<UINT_PTR>(nativeSubmenu),
+                    L"More");
+        cmo::MenuItem copyTarget{};
+        copyTarget.label = L"Copy";
+        auto foundCopy = cmo::FindNativeOffsetInMenu(nativeMenu, 10, nullptr, copyTarget);
+        CHECK(foundCopy.has_value() && *foundCopy == 3);
+        cmo::MenuItem missingTarget{};
+        missingTarget.label = L"Nope";
+        CHECK(!cmo::FindNativeOffsetInMenu(nativeMenu, 10, nullptr, missingTarget)
+                   .has_value());
+        DestroyMenu(nativeMenu);
+
+        HMENU flagMenu = CreatePopupMenu();
+        AppendMenuW(flagMenu, MF_STRING, 21, L"Item");
+        cmo::MenuModel flagModel = cmo::BuildModelFromHMenu(
+            flagMenu, 20,
+            cmo::ContextSignature{cmo::Scope::Files, L".x", cmo::Shape::Single,
+                                  cmo::Variant::Normal},
+            nullptr);
+        CHECK(!flagModel.items.empty());
+        CHECK((flagModel.items.front().flags & cmo::kModelHasOffset) != 0);
+        CHECK(flagModel.items.front().verbOffset == 1);
+        DestroyMenu(flagMenu);
+    }
 
     // Fix: only main file/folder menus are deferred. Flags are the exact
     // values seen in the on-device log.
@@ -623,37 +657,20 @@ int main() {
                 reinterpret_cast<CMINVOKECOMMANDINFO*>(&wideOnly));
             CHECK(FAILED(wideOnlyResult));
 
-            // Find the native "copy" command and dispatch it with both
-            // fields set (a harmless clipboard action).
-            UINT copyOffset = UINT_MAX;
-            const int itemCount = GetMenuItemCount(shellHMenu);
-            for (int i = 0; i < itemCount; ++i) {
-                MENUITEMINFOW itemInfo = {};
-                itemInfo.cbSize = sizeof(itemInfo);
-                itemInfo.fMask = MIIM_ID | MIIM_FTYPE;
-                if (!GetMenuItemInfoW(shellHMenu, static_cast<UINT>(i), TRUE,
-                                      &itemInfo)) {
-                    continue;
-                }
-                if ((itemInfo.fType & MFT_SEPARATOR) || itemInfo.wID < 1) {
-                    continue;
-                }
-                wchar_t verb[128] = {};
-                if (SUCCEEDED(shellMenu->GetCommandString(
-                        static_cast<UINT_PTR>(itemInfo.wID - 1), GCS_VERBW, nullptr,
-                        reinterpret_cast<LPSTR>(verb), ARRAYSIZE(verb))) &&
-                    _wcsicmp(verb, L"copy") == 0) {
-                    copyOffset = itemInfo.wID - 1;
-                    break;
-                }
-            }
-            if (copyOffset != UINT_MAX) {
+            // Find the native "copy" command with the production lookup and
+            // dispatch it through the production descriptor (a harmless
+            // clipboard action).
+            cmo::MenuItem copyTarget{};
+            copyTarget.canonicalVerb = L"copy";
+            auto copyOffset =
+                cmo::FindNativeOffsetInMenu(shellHMenu, 1, shellMenu, copyTarget);
+            if (copyOffset.has_value()) {
+                cmo::MenuItem copyItem{};
+                copyItem.verbOffset = *copyOffset;
+                cmo::InvocationContext copyCtx{};
+                std::string copyAnsi;
                 CMINVOKECOMMANDINFOEX copyInfo = {};
-                copyInfo.cbSize = sizeof(copyInfo);
-                copyInfo.fMask = CMIC_MASK_UNICODE;
-                copyInfo.lpVerb = MAKEINTRESOURCEA(copyOffset);
-                copyInfo.lpVerbW = MAKEINTRESOURCEW(copyOffset);
-                copyInfo.nShow = SW_SHOWNORMAL;
+                cmo::FillInvokeCommandInfo(copyItem, copyCtx, copyAnsi, copyInfo);
                 const HRESULT copyResult = shellMenu->InvokeCommand(
                     reinterpret_cast<CMINVOKECOMMANDINFO*>(&copyInfo));
                 CHECK(copyResult != E_INVALIDARG);

@@ -3027,15 +3027,19 @@ class MenuWindow {
 public:
     ~MenuWindow() { Destroy(); }
 
-    bool Create(HWND owner, const LayoutPanel* panel, bool isRoot) {
+    bool Create(HWND owner, const LayoutPanel* panel, bool isRoot,
+                int margin = 0) {
         owner_ = owner;
         panel_ = panel;
         isRoot_ = isRoot;
+        margin_ = margin > 0 ? margin : 0;
 
         RegisterClassOnce();
 
-        const int width = panel && panel->size.cx > 0 ? panel->size.cx : 100;
-        const int height = panel && panel->size.cy > 0 ? panel->size.cy : 100;
+        const int width = (panel && panel->size.cx > 0 ? panel->size.cx : 100) +
+                          2 * margin_;
+        const int height = (panel && panel->size.cy > 0 ? panel->size.cy : 100) +
+                           2 * margin_;
         hwnd_ = CreateWindowExW(MenuWindowExStyle(), kMenuWindowClass, L"",
                                 MenuWindowStyle(), 0, 0, width, height, owner, nullptr,
                                 GetModuleHandleW(nullptr), this);
@@ -3096,6 +3100,7 @@ public:
     HWND Handle() const { return hwnd_; }
     const LayoutPanel* Panel() const { return panel_; }
     bool IsRoot() const { return isRoot_; }
+    int Margin() const { return margin_; }
     IDXGISwapChain1* SwapChain() const { return swapChain_; }
     IDCompositionTarget* CompTarget() const { return target_; }
     IDCompositionVisual* CompVisual() const { return visual_; }
@@ -3204,6 +3209,7 @@ private:
     HWND owner_ = nullptr;
     const LayoutPanel* panel_ = nullptr;
     bool isRoot_ = false;
+    int margin_ = 0;
     IDXGISwapChain1* swapChain_ = nullptr;
     IDCompositionTarget* target_ = nullptr;
     IDCompositionVisual* visual_ = nullptr;
@@ -3269,6 +3275,187 @@ struct BackdropBitmap {
     int width = 0;
     int height = 0;
 };
+
+void DownscaleAndBlur(const uint32_t* src, int srcW, int srcH, int factor,
+                      int passes, std::vector<uint32_t>& out, int& outW,
+                      int& outH) {
+    out.clear();
+    outW = 0;
+    outH = 0;
+    if (!src || srcW <= 0 || srcH <= 0 || factor <= 0) {
+        return;
+    }
+
+    outW = (srcW + factor - 1) / factor;
+    outH = (srcH + factor - 1) / factor;
+    out.assign(static_cast<size_t>(outW) * static_cast<size_t>(outH), 0);
+
+    for (int y = 0; y < outH; ++y) {
+        for (int x = 0; x < outW; ++x) {
+            uint32_t a = 0;
+            uint32_t r = 0;
+            uint32_t g = 0;
+            uint32_t b = 0;
+            uint32_t count = 0;
+            for (int dy = 0; dy < factor && y * factor + dy < srcH; ++dy) {
+                for (int dx = 0; dx < factor && x * factor + dx < srcW; ++dx) {
+                    const uint32_t pixel =
+                        src[static_cast<size_t>(y * factor + dy) * srcW +
+                            (x * factor + dx)];
+                    a += (pixel >> 24) & 0xFF;
+                    r += (pixel >> 16) & 0xFF;
+                    g += (pixel >> 8) & 0xFF;
+                    b += pixel & 0xFF;
+                    ++count;
+                }
+            }
+            if (count == 0) {
+                continue;
+            }
+            out[static_cast<size_t>(y) * outW + x] =
+                ((a / count) << 24) | ((r / count) << 16) | ((g / count) << 8) |
+                (b / count);
+        }
+    }
+
+    for (int pass = 0; pass < passes; ++pass) {
+        std::vector<uint32_t> blurred = out;
+        for (int y = 0; y < outH; ++y) {
+            for (int x = 0; x < outW; ++x) {
+                uint32_t a = 0;
+                uint32_t r = 0;
+                uint32_t g = 0;
+                uint32_t b = 0;
+                uint32_t count = 0;
+                for (int dy = -1; dy <= 1; ++dy) {
+                    const int sy = y + dy;
+                    if (sy < 0 || sy >= outH) {
+                        continue;
+                    }
+                    for (int dx = -1; dx <= 1; ++dx) {
+                        const int sx = x + dx;
+                        if (sx < 0 || sx >= outW) {
+                            continue;
+                        }
+                        const uint32_t pixel =
+                            out[static_cast<size_t>(sy) * outW + sx];
+                        a += (pixel >> 24) & 0xFF;
+                        r += (pixel >> 16) & 0xFF;
+                        g += (pixel >> 8) & 0xFF;
+                        b += pixel & 0xFF;
+                        ++count;
+                    }
+                }
+                if (count == 0) {
+                    continue;
+                }
+                blurred[static_cast<size_t>(y) * outW + x] =
+                    ((a / count) << 24) | ((r / count) << 16) |
+                    ((g / count) << 8) | (b / count);
+            }
+        }
+        out.swap(blurred);
+    }
+}
+
+void BuildRoundedRectMask(int width, int height, int radius,
+                          std::vector<uint8_t>& alpha) {
+    if (width <= 0 || height <= 0) {
+        alpha.clear();
+        return;
+    }
+    alpha.assign(static_cast<size_t>(width) * static_cast<size_t>(height), 0);
+    if (radius <= 0) {
+        std::fill(alpha.begin(), alpha.end(), 255);
+        return;
+    }
+
+    const float r = static_cast<float>(radius);
+    const float w = static_cast<float>(width);
+    const float h = static_cast<float>(height);
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            const float px = static_cast<float>(x) + 0.5f;
+            const float py = static_cast<float>(y) + 0.5f;
+            const float cx = std::clamp(px, r, std::max(r, w - r));
+            const float cy = std::clamp(py, r, std::max(r, h - r));
+            const float dx = px - cx;
+            const float dy = py - cy;
+            const float distance = std::sqrt(dx * dx + dy * dy);
+            const float coverage = std::clamp(r - distance + 0.5f, 0.0f, 1.0f);
+            alpha[static_cast<size_t>(y) * width + x] =
+                static_cast<uint8_t>(coverage * 255.0f + 0.5f);
+        }
+    }
+}
+
+constexpr int kBackdropDownscaleFactor = 4;
+constexpr int kBackdropBlurPasses = 2;
+
+bool CaptureBackdrop(const RECT& screenRect, int factor, BackdropBitmap& out) {
+    const int width = screenRect.right - screenRect.left;
+    const int height = screenRect.bottom - screenRect.top;
+    if (width <= 0 || height <= 0) {
+        return false;
+    }
+
+    HDC screen = GetDC(nullptr);
+    if (!screen) {
+        return false;
+    }
+    HDC memory = CreateCompatibleDC(screen);
+    if (!memory) {
+        ReleaseDC(nullptr, screen);
+        return false;
+    }
+
+    BITMAPINFO info = {};
+    info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    info.bmiHeader.biWidth = width;
+    info.bmiHeader.biHeight = -height;
+    info.bmiHeader.biPlanes = 1;
+    info.bmiHeader.biBitCount = 32;
+    info.bmiHeader.biCompression = BI_RGB;
+    void* bits = nullptr;
+    HBITMAP dib = CreateDIBSection(screen, &info, DIB_RGB_COLORS, &bits, nullptr, 0);
+    if (!dib || !bits) {
+        if (dib) {
+            DeleteObject(dib);
+        }
+        DeleteDC(memory);
+        ReleaseDC(nullptr, screen);
+        return false;
+    }
+
+    HGDIOBJ oldBitmap = SelectObject(memory, dib);
+    const BOOL copied =
+        BitBlt(memory, 0, 0, width, height, screen, screenRect.left,
+               screenRect.top, SRCCOPY);
+    SelectObject(memory, oldBitmap);
+
+    bool result = false;
+    if (copied) {
+        std::vector<uint32_t> src(static_cast<size_t>(width) *
+                                  static_cast<size_t>(height));
+        memcpy(src.data(), bits, src.size() * sizeof(uint32_t));
+        int outW = 0;
+        int outH = 0;
+        std::vector<uint32_t> blurred;
+        DownscaleAndBlur(src.data(), width, height, factor > 0 ? factor : 1,
+                         kBackdropBlurPasses, blurred, outW, outH);
+        if (outW > 0 && outH > 0) {
+            out.pixels = std::move(blurred);
+            out.width = outW;
+            out.height = outH;
+            result = true;
+        }
+    }
+
+    DeleteObject(dib);
+    DeleteDC(memory);
+    ReleaseDC(nullptr, screen);
+    return result;
+}
 
 D2D1_COLOR_F ColorFromArgb(uint32_t argb) {
     D2D1_COLOR_F color = {};
@@ -3517,9 +3704,17 @@ void DrawSubmenuArrow(ID2D1DeviceContext* dc, const LayoutItem& item,
 
 void DrawPanel(ID2D1DeviceContext* dc, const LayoutPanel& panel,
                const MenuInputState& state, const LayoutMetrics& metrics,
-               const Appearance& appearance, const BackdropBitmap* backdrop) {
+               const Appearance& appearance, const BackdropBitmap* backdrop,
+               int margin = 0) {
     if (!dc) {
         return;
+    }
+
+    if (margin > 0) {
+        const D2D1_MATRIX_3X2_F transform = {
+            1.0f, 0.0f, 0.0f, 1.0f, static_cast<float>(margin),
+            static_cast<float>(margin)};
+        dc->SetTransform(&transform);
     }
 
     const D2D1_RECT_F rect = {0.0f, 0.0f, static_cast<float>(panel.size.cx),
@@ -3527,15 +3722,55 @@ void DrawPanel(ID2D1DeviceContext* dc, const LayoutPanel& panel,
     const float radius = static_cast<float>(appearance.cornerRadius);
     const D2D1_ROUNDED_RECT rounded = {rect, radius, radius};
 
+    // Drop shadow: stroke rings drawn in the margin outside the panel.
+    if (appearance.shadow && appearance.shadowSize > 0 && margin > 0) {
+        const float size = static_cast<float>(appearance.shadowSize);
+        const int layers = std::max(1, appearance.shadowSize / 4);
+        for (int layer = layers; layer >= 1; --layer) {
+            const float grow =
+                size * static_cast<float>(layer) / static_cast<float>(layers);
+            const float alpha = 0.10f * static_cast<float>(layer) /
+                                static_cast<float>(layers);
+            const D2D1_ROUNDED_RECT ring = {
+                {-grow, -grow + grow * 0.25f,
+                 static_cast<float>(panel.size.cx) + grow,
+                 static_cast<float>(panel.size.cy) + grow + grow * 0.25f},
+                radius + grow, radius + grow};
+            ID2D1SolidColorBrush* shadowBrush = nullptr;
+            const D2D1_COLOR_F color = {0.0f, 0.0f, 0.0f, alpha};
+            if (SUCCEEDED(dc->CreateSolidColorBrush(color, &shadowBrush)) &&
+                shadowBrush) {
+                dc->DrawRoundedRectangle(&ring, shadowBrush, grow);
+                shadowBrush->Release();
+            }
+        }
+    }
+
     if (backdrop && backdrop->width > 0 && backdrop->height > 0 &&
         !backdrop->pixels.empty()) {
+        const float scaleX = static_cast<float>(backdrop->width) /
+                             static_cast<float>(std::max(1L, panel.size.cx));
+        const int maskRadius = static_cast<int>(
+            static_cast<float>(appearance.cornerRadius) * scaleX);
+        std::vector<uint8_t> mask;
+        BuildRoundedRectMask(backdrop->width, backdrop->height, maskRadius, mask);
+        std::vector<uint32_t> pixels = backdrop->pixels;
+        for (size_t i = 0; i < pixels.size() && i < mask.size(); ++i) {
+            const uint32_t alpha = (((pixels[i] >> 24) & 0xFF) * mask[i]) / 255;
+            const uint32_t r = ((((pixels[i] >> 16) & 0xFF) * alpha) / 255) << 16;
+            const uint32_t g = ((((pixels[i] >> 8) & 0xFF) * alpha) / 255) << 8;
+            const uint32_t b = ((pixels[i] & 0xFF) * alpha) / 255;
+            pixels[i] = (alpha << 24) | r | g | b;
+        }
+
         ID2D1Bitmap* bitmap = nullptr;
         const D2D1_SIZE_U size = {static_cast<UINT32>(backdrop->width),
                                   static_cast<UINT32>(backdrop->height)};
         const D2D1_BITMAP_PROPERTIES props = {
-            {DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE}, 96.0f, 96.0f};
+            {DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED}, 96.0f,
+            96.0f};
         if (SUCCEEDED(dc->CreateBitmap(
-                size, backdrop->pixels.data(),
+                size, pixels.data(),
                 static_cast<UINT32>(backdrop->width * sizeof(uint32_t)), props,
                 &bitmap)) &&
             bitmap) {
@@ -3920,8 +4155,10 @@ struct MenuSession {
     const MenuModel* model = nullptr;
     std::vector<MenuWindow*> windows;
     std::vector<MenuInputState> states;
+    std::vector<BackdropBitmap> backdrops;
     int active = 0;
     int maxHeight = 0;
+    int margin = 0;
     int submenuDelayMs = 150;
     int hoverCandidate = -1;
     bool submenuTimerActive = false;
@@ -3935,7 +4172,7 @@ inline MenuSession* g_menuSession = nullptr;
 void RenderMenuWindow(MenuWindow* window, const LayoutPanel& panel,
                       const MenuInputState& state, const LayoutMetrics& metrics,
                       const Appearance& appearance,
-                      const BackdropBitmap* backdrop) {
+                      const BackdropBitmap* backdrop, int margin) {
     if (!window || !window->SwapChain() || !g_renderDevice.D2DDevice()) {
         return;
     }
@@ -3961,7 +4198,7 @@ void RenderMenuWindow(MenuWindow* window, const LayoutPanel& panel,
         dc->SetTarget(target);
         dc->BeginDraw();
         dc->Clear(nullptr);
-        DrawPanel(dc, panel, state, metrics, appearance, backdrop);
+        DrawPanel(dc, panel, state, metrics, appearance, backdrop, margin);
         dc->EndDraw();
         target->Release();
     }
@@ -3979,8 +4216,14 @@ void RepaintMenuWindow(MenuSession* session, int index) {
     if (!window || !window->Panel()) {
         return;
     }
+    const BackdropBitmap* backdrop = nullptr;
+    if (index < static_cast<int>(session->backdrops.size()) &&
+        session->backdrops[index].width > 0) {
+        backdrop = &session->backdrops[index];
+    }
     RenderMenuWindow(window, *window->Panel(), session->states[index],
-                     session->metrics, session->appearance, nullptr);
+                     session->metrics, session->appearance, backdrop,
+                     session->margin);
 }
 
 void CloseSubmenusBelow(MenuSession* session, int index) {
@@ -3988,6 +4231,9 @@ void CloseSubmenusBelow(MenuSession* session, int index) {
         MenuWindow* window = session->windows.back();
         session->windows.pop_back();
         session->states.pop_back();
+        if (session->backdrops.size() >= session->windows.size() + 1) {
+            session->backdrops.pop_back();
+        }
         g_menuWindowPool.Release(window);
     }
     session->active = index;
@@ -4017,30 +4263,50 @@ void OpenSubmenu(MenuSession* session, int index, int itemIndex) {
 
     MenuWindow* child = g_menuWindowPool.Acquire();
     if (!child ||
-        !child->Create(session->windows[index]->Handle(), &childPanel, false)) {
+        !child->Create(session->windows[index]->Handle(), &childPanel, false,
+                       session->margin)) {
         if (child) {
             g_menuWindowPool.Release(child);
         }
         return;
     }
 
-    POINT topLeft = {item.rect.left, item.rect.top};
+    POINT topLeft = {item.rect.left + session->margin,
+                     item.rect.top + session->margin};
     ClientToScreen(session->windows[index]->Handle(), &topLeft);
     const RECT itemScreen = {topLeft.x, topLeft.y,
                              topLeft.x + (item.rect.right - item.rect.left),
                              topLeft.y + (item.rect.bottom - item.rect.top)};
     const RECT workArea = WorkAreaForPoint(topLeft);
-    child->Move(SubmenuPosition(itemScreen, childPanel.size, workArea, 4));
+    POINT childPos =
+        SubmenuPosition(itemScreen, childPanel.size, workArea, 4);
+    childPos.x -= session->margin;
+    childPos.y -= session->margin;
+    child->Move(childPos);
+
+    BackdropBitmap backdrop;
+    const POINT panelTopLeft = {childPos.x + session->margin,
+                                childPos.y + session->margin};
+    const RECT captureRect = {panelTopLeft.x, panelTopLeft.y,
+                              panelTopLeft.x + childPanel.size.cx,
+                              panelTopLeft.y + childPanel.size.cy};
+    const bool hasBackdrop =
+        session->appearance.blur &&
+        CaptureBackdrop(captureRect, kBackdropDownscaleFactor, backdrop);
 
     session->windows.push_back(child);
     session->states.push_back(MenuInputState{});
+    session->backdrops.push_back(hasBackdrop ? std::move(backdrop)
+                                             : BackdropBitmap{});
     session->active = static_cast<int>(session->windows.size()) - 1;
     session->states[index].openSubmenu = item.submenuIndex;
     session->states[index].hoverIndex = itemIndex;
 
     RepaintMenuWindow(session, index);
     RenderMenuWindow(child, childPanel, session->states.back(), session->metrics,
-                     session->appearance, nullptr);
+                     session->appearance,
+                     hasBackdrop ? &session->backdrops.back() : nullptr,
+                     session->margin);
     child->Show();
     SetFocus(child->Handle());
 }
@@ -4068,6 +4334,8 @@ LRESULT CustomMenuWindowProc(MenuWindow* window, HWND hwnd, UINT msg,
     MenuInputState& state = session->states[index];
     const POINT clientPoint = {static_cast<short>(LOWORD(lParam)),
                                static_cast<short>(HIWORD(lParam))};
+    const POINT panelPoint = {clientPoint.x - session->margin,
+                              clientPoint.y - session->margin};
 
     switch (msg) {
         case WM_MOUSEMOVE: {
@@ -4080,7 +4348,7 @@ LRESULT CustomMenuWindowProc(MenuWindow* window, HWND hwnd, UINT msg,
             track.hwndTrack = hwnd;
             TrackMouseEvent(&track);
 
-            const int hit = MenuStateItemAt(panel, state, clientPoint);
+            const int hit = MenuStateItemAt(panel, state, panelPoint);
             if (hit != state.hoverIndex) {
                 MenuStateMouseMove(state, panel, hit);
                 RepaintMenuWindow(session, index);
@@ -4121,7 +4389,7 @@ LRESULT CustomMenuWindowProc(MenuWindow* window, HWND hwnd, UINT msg,
             return 0;
         }
         case WM_LBUTTONUP: {
-            const int hit = MenuStateItemAt(panel, state, clientPoint);
+            const int hit = MenuStateItemAt(panel, state, panelPoint);
             if (hit >= 0) {
                 const LayoutItem& item = panel.items[hit];
                 if (item.kind == ItemKind::Submenu) {
@@ -4275,7 +4543,10 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
     }
 
     MenuWindow* root = g_menuWindowPool.Acquire();
-    if (!root || !root->Create(owner, panel.get(), true)) {
+    const int margin = appearance.shadow && appearance.shadowSize > 0
+                           ? std::min(appearance.shadowSize, 24)
+                           : 0;
+    if (!root || !root->Create(owner, panel.get(), true, margin)) {
         if (root) {
             g_menuWindowPool.Release(root);
         }
@@ -4284,6 +4555,7 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
     }
 
     const RECT workArea = WorkAreaForPoint(pt);
+    const POINT panelPos = ClampPanelPosition(pt, panel->size, workArea);
 
     MenuSession session;
     session.config = config;
@@ -4292,14 +4564,26 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
     session.appearance = appearance;
     session.submenuDelayMs = g_settings.submenuDelayMs;
     session.maxHeight = workArea.bottom - workArea.top;
+    session.margin = margin;
     session.windows.push_back(root);
     session.states.push_back(MenuInputState{});
+
+    BackdropBitmap backdrop;
+    const RECT captureRect = {panelPos.x, panelPos.y,
+                              panelPos.x + panel->size.cx,
+                              panelPos.y + panel->size.cy};
+    const bool hasBackdrop =
+        appearance.blur &&
+        CaptureBackdrop(captureRect, kBackdropDownscaleFactor, backdrop);
+    session.backdrops.push_back(hasBackdrop ? std::move(backdrop)
+                                            : BackdropBitmap{});
 
     g_menuSession = &session;
     g_menuWindowMessageHook = &CustomMenuWindowProc;
 
-    root->Move(ClampPanelPosition(pt, panel->size, workArea));
-    RenderMenuWindow(root, *panel, session.states[0], metrics, appearance, nullptr);
+    root->Move(POINT{panelPos.x - margin, panelPos.y - margin});
+    RenderMenuWindow(root, *panel, session.states[0], metrics, appearance,
+                     hasBackdrop ? &session.backdrops[0] : nullptr, margin);
     root->Show();
     SetForegroundWindow(root->Handle());
     SetFocus(root->Handle());

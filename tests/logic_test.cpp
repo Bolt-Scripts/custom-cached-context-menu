@@ -2608,6 +2608,26 @@ int main() {
         CHECK((resolved.flags & cmo::kModelExtension) != 0);
     }
 
+    // v2 backdrop blur and corner mask.
+    {
+        std::vector<uint32_t> src(8 * 8, 0xFF000000u);
+        src[0] = 0xFFFFFFFFu;
+        std::vector<uint32_t> out;
+        int outW = 0;
+        int outH = 0;
+        cmo::DownscaleAndBlur(src.data(), 8, 8, 2, 1, out, outW, outH);
+        CHECK(outW == 4 && outH == 4);
+        CHECK(out.size() == 16);
+        CHECK(out[0] != out[15]);
+
+        std::vector<uint8_t> mask;
+        cmo::BuildRoundedRectMask(20, 20, 6, mask);
+        CHECK(mask.size() == 400);
+        CHECK(mask[10 * 20 + 10] == 255);
+        CHECK(mask[0] == 0);
+        CHECK(mask[19] == 0);
+    }
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

@@ -2400,13 +2400,13 @@ public:
     }
 
     std::shared_ptr<const RulesConfig> Snapshot() const {
-        return config_.load(std::memory_order_acquire);
+        std::lock_guard<std::mutex> lock(mutex_);
+        return config_;
     }
 
     uint64_t Revision() const {
-        std::shared_ptr<const RulesConfig> snapshot =
-            config_.load(std::memory_order_acquire);
-        return snapshot ? snapshot->revision : 0;
+        std::lock_guard<std::mutex> lock(mutex_);
+        return config_ ? config_->revision : 0;
     }
 
     bool ApplyTextForTesting(const std::wstring& text) {
@@ -2423,11 +2423,15 @@ private:
             }
             return false;
         }
-        std::shared_ptr<const RulesConfig> previous =
-            config_.load(std::memory_order_acquire);
-        parsed.revision = previous ? previous->revision + 1 : 1;
-        config_.store(std::make_shared<const RulesConfig>(std::move(parsed)),
-                      std::memory_order_release);
+        uint64_t previousRevision = 0;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            previousRevision = config_ ? config_->revision : 0;
+        }
+        parsed.revision = previousRevision + 1;
+        auto snapshot = std::make_shared<const RulesConfig>(std::move(parsed));
+        std::lock_guard<std::mutex> lock(mutex_);
+        config_ = std::move(snapshot);
         return true;
     }
 
@@ -2559,7 +2563,8 @@ private:
         CloseHandle(dirHandle);
     }
 
-    std::atomic<std::shared_ptr<const RulesConfig>> config_;
+    mutable std::mutex mutex_;
+    std::shared_ptr<const RulesConfig> config_;
     HANDLE thread_ = nullptr;
     HANDLE stopEvent_ = nullptr;
 };

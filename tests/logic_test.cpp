@@ -2103,6 +2103,44 @@ int main() {
         RemoveDirectoryW(dir.c_str());
     }
 
+    // v2 config: colors, booleans, fonts, sections, comments, errors.
+    {
+        uint32_t color = 0;
+        CHECK(cmo::ParseColor(L"#11223344", color) && color == 0x11223344u);
+        CHECK(cmo::ParseColor(L"#AABBCC", color) && color == 0xFFAABBCCu);
+        CHECK(!cmo::ParseColor(L"#12345", color));
+        bool flag = false;
+        CHECK(cmo::ParseBool(L"yes", flag) && flag);
+        CHECK(cmo::ParseBool(L"0", flag) && !flag);
+        CHECK(!cmo::ParseBool(L"maybe", flag));
+        std::wstring face;
+        float size = 0;
+        CHECK(cmo::ParseFont(L"Segoe UI, 9.5", face, size) && face == L"Segoe UI" &&
+              size == 9.5f);
+
+        cmo::RulesConfig config;
+        std::vector<cmo::ConfigParseError> errors;
+        const std::wstring text =
+            L"; comment\n[appearance]\nbackground = #1E1E1EF0\nblur = true\n"
+            L"cornerRadius = 10\nfont = Segoe UI, 9\n"
+            L"[appearance.light]\ntextColor = #202020\n";
+        CHECK(cmo::ParseRulesConfig(text, config, errors));
+        CHECK(errors.empty());
+        CHECK(config.appearance.background == 0x1E1E1EF0u);
+        CHECK(config.appearance.blur);
+        CHECK(config.appearance.cornerRadius == 10);
+        CHECK(config.hasLightAppearance);
+        CHECK(config.lightAppearance.textColor == 0xFF202020u);
+
+        cmo::RulesConfig bad;
+        std::vector<cmo::ConfigParseError> badErrors;
+        CHECK(!cmo::ParseRulesConfig(L"[appearance]\nbackground = nope\n", bad, badErrors));
+        CHECK(!badErrors.empty() && badErrors[0].line == 2);
+        std::vector<cmo::ConfigParseError> unknownErrors;
+        CHECK(!cmo::ParseRulesConfig(L"[appearance]\nnotAKey = 1\n", bad, unknownErrors));
+        CHECK(!unknownErrors.empty() && unknownErrors[0].line == 2);
+    }
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

@@ -1084,6 +1084,337 @@ void DumpSuspiciousItems(const std::vector<MenuItem>& items, int depth) {
     }
 }
 
+// ===========================================================================
+// [CMO:CustomConfig] v2 config file structures and parser.
+// ===========================================================================
+
+enum class AnimationKind : uint8_t { None, Fade, Slide };
+
+struct Appearance {
+    uint32_t background = 0xF01E1E1E;
+    bool blur = true;
+    int blurStrength = 12;
+    int cornerRadius = 8;
+    uint32_t border = 0x22FFFFFF;
+    int borderWidth = 1;
+    bool shadow = true;
+    int shadowSize = 12;
+    std::wstring fontFace = L"Segoe UI";
+    float fontSize = 9.0f;
+    int itemHeight = 28;
+    int iconSize = 16;
+    int padding = 6;
+    uint32_t separator = 0x18FFFFFF;
+    uint32_t hoverBackground = 0x14FFFFFF;
+    uint32_t pressedBackground = 0x22FFFFFF;
+    uint32_t textColor = 0xFFFFFFFF;
+    uint32_t disabledTextColor = 0x66FFFFFF;
+    uint32_t submenuArrow = 0x99FFFFFF;
+    AnimationKind animation = AnimationKind::None;
+    int animationDuration = 120;
+};
+
+struct ConfigParseError {
+    int line = 0;
+    std::wstring message;
+};
+
+struct RulesConfig {
+    Appearance appearance;
+    Appearance lightAppearance;
+    Appearance darkAppearance;
+    bool hasLightAppearance = false;
+    bool hasDarkAppearance = false;
+    uint64_t revision = 0;
+};
+
+std::wstring ToLowerCopy(const std::wstring& text) {
+    std::wstring lower = text;
+    std::transform(lower.begin(), lower.end(), lower.begin(), towlower);
+    return lower;
+}
+
+bool ParseColor(const std::wstring& text, uint32_t& argb) {
+    const std::wstring trimmed = TrimWhitespace(text);
+    if (trimmed.size() != 7 && trimmed.size() != 9) {
+        return false;
+    }
+    if (trimmed[0] != L'#') {
+        return false;
+    }
+    uint32_t value = 0;
+    for (size_t i = 1; i < trimmed.size(); ++i) {
+        const wchar_t c = trimmed[i];
+        uint32_t digit = 0;
+        if (c >= L'0' && c <= L'9') {
+            digit = static_cast<uint32_t>(c - L'0');
+        } else if (c >= L'a' && c <= L'f') {
+            digit = 10u + static_cast<uint32_t>(c - L'a');
+        } else if (c >= L'A' && c <= L'F') {
+            digit = 10u + static_cast<uint32_t>(c - L'A');
+        } else {
+            return false;
+        }
+        value = (value << 4) | digit;
+    }
+    argb = trimmed.size() == 7 ? (0xFF000000u | value) : value;
+    return true;
+}
+
+bool ParseBool(const std::wstring& text, bool& value) {
+    const std::wstring trimmed = ToLowerCopy(TrimWhitespace(text));
+    if (trimmed == L"true" || trimmed == L"1" || trimmed == L"yes") {
+        value = true;
+        return true;
+    }
+    if (trimmed == L"false" || trimmed == L"0" || trimmed == L"no") {
+        value = false;
+        return true;
+    }
+    return false;
+}
+
+bool ParseIntValue(const std::wstring& text, int& value) {
+    const std::wstring trimmed = TrimWhitespace(text);
+    if (trimmed.empty()) {
+        return false;
+    }
+    wchar_t* end = nullptr;
+    const long parsed = wcstol(trimmed.c_str(), &end, 10);
+    if (end == trimmed.c_str() || *end != L'\0') {
+        return false;
+    }
+    value = static_cast<int>(parsed);
+    return true;
+}
+
+bool ParseFont(const std::wstring& text, std::wstring& face, float& size) {
+    const size_t comma = text.find(L',');
+    if (comma == std::wstring::npos) {
+        return false;
+    }
+    face = TrimWhitespace(text.substr(0, comma));
+    const std::wstring sizeText = TrimWhitespace(text.substr(comma + 1));
+    if (face.empty() || sizeText.empty()) {
+        return false;
+    }
+    wchar_t* end = nullptr;
+    const double parsed = wcstod(sizeText.c_str(), &end);
+    if (end == sizeText.c_str() || *end != L'\0' || parsed <= 0.0) {
+        return false;
+    }
+    size = static_cast<float>(parsed);
+    return true;
+}
+
+bool ParseAnimationKind(const std::wstring& text, AnimationKind& kind) {
+    const std::wstring lower = ToLowerCopy(TrimWhitespace(text));
+    if (lower == L"none") {
+        kind = AnimationKind::None;
+        return true;
+    }
+    if (lower == L"fade") {
+        kind = AnimationKind::Fade;
+        return true;
+    }
+    if (lower == L"slide") {
+        kind = AnimationKind::Slide;
+        return true;
+    }
+    return false;
+}
+
+// Applies one appearance key/value; false means invalid key or value.
+bool ApplyAppearanceValue(Appearance& appearance, const std::wstring& key,
+                          const std::wstring& value) {
+    if (key == L"background") return ParseColor(value, appearance.background);
+    if (key == L"blur") return ParseBool(value, appearance.blur);
+    if (key == L"blurstrength") {
+        return ParseIntValue(value, appearance.blurStrength) && appearance.blurStrength >= 0;
+    }
+    if (key == L"cornerradius") {
+        return ParseIntValue(value, appearance.cornerRadius) && appearance.cornerRadius >= 0;
+    }
+    if (key == L"border") return ParseColor(value, appearance.border);
+    if (key == L"borderwidth") {
+        return ParseIntValue(value, appearance.borderWidth) && appearance.borderWidth >= 0;
+    }
+    if (key == L"shadow") return ParseBool(value, appearance.shadow);
+    if (key == L"shadowsize") {
+        return ParseIntValue(value, appearance.shadowSize) && appearance.shadowSize >= 0;
+    }
+    if (key == L"font") return ParseFont(value, appearance.fontFace, appearance.fontSize);
+    if (key == L"itemheight") {
+        return ParseIntValue(value, appearance.itemHeight) && appearance.itemHeight > 0;
+    }
+    if (key == L"iconsize") {
+        return ParseIntValue(value, appearance.iconSize) && appearance.iconSize > 0;
+    }
+    if (key == L"padding") {
+        return ParseIntValue(value, appearance.padding) && appearance.padding >= 0;
+    }
+    if (key == L"separator") return ParseColor(value, appearance.separator);
+    if (key == L"hoverbackground") return ParseColor(value, appearance.hoverBackground);
+    if (key == L"pressedbackground") return ParseColor(value, appearance.pressedBackground);
+    if (key == L"textcolor") return ParseColor(value, appearance.textColor);
+    if (key == L"disabledtextcolor") return ParseColor(value, appearance.disabledTextColor);
+    if (key == L"submenuarrow") return ParseColor(value, appearance.submenuArrow);
+    if (key == L"animation") return ParseAnimationKind(value, appearance.animation);
+    if (key == L"animationduration") {
+        return ParseIntValue(value, appearance.animationDuration) &&
+               appearance.animationDuration >= 0;
+    }
+    return false;
+}
+
+std::wstring DefaultRulesConfigText() {
+    return L"; Context Menu Overhaul v2 configuration\n"
+           L"; Colors are #RRGGBB or #AARRGGBB. Comments start with ';'.\n"
+           L"\n"
+           L"[appearance]\n"
+           L"; background = #1E1E1EF0\n"
+           L"; blur = true\n"
+           L"; cornerRadius = 8\n"
+           L"; border = #FFFFFF22\n"
+           L"; shadow = true\n"
+           L"; font = Segoe UI, 9\n"
+           L"; itemHeight = 28\n"
+           L"; iconSize = 16\n"
+           L"; padding = 6\n"
+           L"; hoverBackground = #FFFFFF14\n"
+           L"; textColor = #FFFFFF\n"
+           L"; animation = none\n"
+           L"\n"
+           L"; [appearance.light]\n"
+           L"; background = #F5F5F5F2\n"
+           L"; textColor = #202020\n"
+           L"\n"
+           L"; [rules]\n"
+           L"; hide = label:\"Cast to Device\"\n"
+           L"; move = thirdParty -> \"More options\"\n";
+}
+
+bool ParseRulesConfig(const std::wstring& text, RulesConfig& out,
+                      std::vector<ConfigParseError>& errors) {
+    errors.clear();
+
+    enum class Section : uint8_t { None, Appearance, AppearanceLight, AppearanceDark, Ignored };
+    Section section = Section::None;
+
+    std::vector<std::pair<std::wstring, std::wstring>> baseValues;
+    std::vector<std::pair<std::wstring, std::wstring>> lightValues;
+    std::vector<std::pair<std::wstring, std::wstring>> darkValues;
+    bool hasLight = false;
+    bool hasDark = false;
+
+    int lineNumber = 0;
+    size_t pos = 0;
+    while (pos <= text.size()) {
+        const size_t newline = text.find(L'\n', pos);
+        std::wstring line =
+            text.substr(pos, newline == std::wstring::npos ? std::wstring::npos
+                                                           : newline - pos);
+        pos = newline == std::wstring::npos ? text.size() + 1 : newline + 1;
+        ++lineNumber;
+        if (!line.empty() && line.back() == L'\r') {
+            line.pop_back();
+        }
+
+        const std::wstring trimmed = TrimWhitespace(line);
+        if (trimmed.empty() || trimmed[0] == L';') {
+            continue;
+        }
+
+        if (trimmed[0] == L'[') {
+            if (trimmed.back() != L']') {
+                errors.push_back({lineNumber, L"malformed section header"});
+                section = Section::Ignored;
+                continue;
+            }
+            const std::wstring name = ToLowerCopy(TrimWhitespace(
+                trimmed.substr(1, trimmed.size() - 2)));
+            if (name == L"appearance") {
+                section = Section::Appearance;
+            } else if (name == L"appearance.light") {
+                section = Section::AppearanceLight;
+                hasLight = true;
+            } else if (name == L"appearance.dark") {
+                section = Section::AppearanceDark;
+                hasDark = true;
+            } else if (name == L"rules" || name.rfind(L"command ", 0) == 0 ||
+                       name.rfind(L"submenu ", 0) == 0) {
+                // Parsed by later tasks; values are ignored here.
+                section = Section::Ignored;
+            } else {
+                errors.push_back({lineNumber, L"unknown section '" + name + L"'"});
+                section = Section::Ignored;
+            }
+            continue;
+        }
+
+        const size_t equals = trimmed.find(L'=');
+        if (equals == std::wstring::npos) {
+            errors.push_back({lineNumber, L"expected key = value"});
+            continue;
+        }
+        const std::wstring key = ToLowerCopy(TrimWhitespace(trimmed.substr(0, equals)));
+        const std::wstring value = TrimWhitespace(trimmed.substr(equals + 1));
+
+        if (section == Section::Appearance) {
+            Appearance scratch = Appearance{};
+            if (!ApplyAppearanceValue(scratch, key, value)) {
+                errors.push_back({lineNumber, L"invalid value for '" + key + L"'"});
+            } else {
+                baseValues.emplace_back(key, value);
+            }
+        } else if (section == Section::AppearanceLight) {
+            Appearance scratch = Appearance{};
+            if (!ApplyAppearanceValue(scratch, key, value)) {
+                errors.push_back({lineNumber, L"invalid value for '" + key + L"'"});
+            } else {
+                lightValues.emplace_back(key, value);
+            }
+        } else if (section == Section::AppearanceDark) {
+            Appearance scratch = Appearance{};
+            if (!ApplyAppearanceValue(scratch, key, value)) {
+                errors.push_back({lineNumber, L"invalid value for '" + key + L"'"});
+            } else {
+                darkValues.emplace_back(key, value);
+            }
+        } else if (section == Section::Ignored) {
+            // Intentionally ignored for now.
+        } else {
+            errors.push_back({lineNumber, L"key outside a section"});
+        }
+    }
+
+    if (!errors.empty()) {
+        return false;
+    }
+
+    RulesConfig config;
+    for (const auto& pair : baseValues) {
+        ApplyAppearanceValue(config.appearance, pair.first, pair.second);
+    }
+    config.hasLightAppearance = hasLight;
+    if (hasLight) {
+        config.lightAppearance = config.appearance;
+        for (const auto& pair : lightValues) {
+            ApplyAppearanceValue(config.lightAppearance, pair.first, pair.second);
+        }
+    }
+    config.hasDarkAppearance = hasDark;
+    if (hasDark) {
+        config.darkAppearance = config.appearance;
+        for (const auto& pair : darkValues) {
+            ApplyAppearanceValue(config.darkAppearance, pair.first, pair.second);
+        }
+    }
+
+    out = std::move(config);
+    return true;
+}
+
 // Shell property keys used by the Sort by and Group by submenus (all in the
 // shell's System property set, defined here so no SDK propkey.h is needed).
 const PROPERTYKEY kShellPropertyKeys[] = {

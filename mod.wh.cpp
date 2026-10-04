@@ -2,7 +2,7 @@
 // @id              context-menu-overhaul
 // @name            Context Menu Overhaul
 // @description     Replaces the Explorer context menu with an instantly-opening cached menu, then discovers and caches shell extension items asynchronously.
-// @version         0.3.18
+// @version         0.3.19
 // @include         explorer.exe
 // @architecture    x86-64
 // @compilerOptions -lole32 -lshlwapi -luuid -lcomctl32 -ladvapi32 -lgdi32 -luxtheme -lversion
@@ -596,13 +596,24 @@ bool RegKeyExists(HKEY root, const std::wstring& subkey) {
 }
 
 std::wstring ReadRegString(HKEY root, const std::wstring& subkey, const wchar_t* name) {
+    HKEY key = nullptr;
+    if (RegOpenKeyExW(root, subkey.c_str(), 0, KEY_READ, &key) != ERROR_SUCCESS) {
+        return L"";
+    }
     wchar_t buffer[1024] = {};
     DWORD bytes = sizeof(buffer);
-    if (RegGetValueW(root, subkey.c_str(), name, RRF_RT_REG_SZ, nullptr, buffer,
-                     &bytes) == ERROR_SUCCESS) {
-        return buffer;
+    DWORD type = 0;
+    const LONG rc =
+        RegQueryValueExW(key, name, nullptr, &type, reinterpret_cast<LPBYTE>(buffer),
+                         &bytes);
+    RegCloseKey(key);
+    if (rc != ERROR_SUCCESS) {
+        return L"";
     }
-    return L"";
+    if (type == REG_EXPAND_SZ) {
+        return ExpandEnv(buffer);
+    }
+    return type == REG_SZ ? buffer : L"";
 }
 
 void AddShellNewTemplate(HKEY root, const std::wstring& ext,
@@ -640,31 +651,48 @@ void AddShellNewTemplate(HKEY root, const std::wstring& ext,
         return;
     }
 
-    if (RegQueryValueExW(key, L"NullFile", nullptr, nullptr, nullptr, nullptr) ==
+    // Existence checks pass a size pointer; a NULL/NULL query is not reliable
+    // for this on all Windows versions.
+    DWORD valueType = 0;
+    DWORD valueSize = 0;
+    if (RegQueryValueExW(key, L"NullFile", nullptr, &valueType, nullptr, &valueSize) ==
         ERROR_SUCCESS) {
         tmpl.kind = NewTemplate::Kind::NullFile;
         out.push_back(std::move(tmpl));
-    } else {
-        DWORD type = 0;
-        DWORD bytes = 0;
-        if (RegQueryValueExW(key, L"Data", nullptr, &type, nullptr, &bytes) ==
-                ERROR_SUCCESS &&
-            type == REG_BINARY && bytes > 0 && bytes <= 65536) {
+    } else if (RegQueryValueExW(key, L"Data", nullptr, &valueType, nullptr,
+                                &valueSize) == ERROR_SUCCESS &&
+               valueSize > 0 && valueSize <= 65536) {
+        if (valueType == REG_BINARY) {
             tmpl.kind = NewTemplate::Kind::Data;
-            tmpl.data.resize(bytes);
+            tmpl.data.resize(valueSize);
             if (RegQueryValueExW(key, L"Data", nullptr, nullptr, tmpl.data.data(),
-                                 &bytes) == ERROR_SUCCESS) {
+                                 &valueSize) == ERROR_SUCCESS) {
                 out.push_back(std::move(tmpl));
             }
-        } else if (!(tmpl.fileName = ReadRegString(root, shellNew, L"FileName"))
-                        .empty()) {
-            tmpl.kind = NewTemplate::Kind::FileName;
-            tmpl.fileName = ExpandEnv(tmpl.fileName);
-            out.push_back(std::move(tmpl));
-        } else if (!(tmpl.command = ReadRegString(root, shellNew, L"Command")).empty()) {
-            tmpl.kind = NewTemplate::Kind::Command;
-            out.push_back(std::move(tmpl));
+        } else if (valueType == REG_SZ || valueType == REG_EXPAND_SZ) {
+            // Some templates store the payload as text; the shell converts it
+            // to ANSI bytes.
+            const std::wstring text = ReadRegString(root, shellNew, L"Data");
+            if (!text.empty()) {
+                const int needed = WideCharToMultiByte(CP_ACP, 0, text.c_str(), -1,
+                                                       nullptr, 0, nullptr, nullptr);
+                if (needed > 1) {
+                    std::string narrow(static_cast<size_t>(needed - 1), '\0');
+                    WideCharToMultiByte(CP_ACP, 0, text.c_str(), -1, narrow.data(),
+                                        needed, nullptr, nullptr);
+                    tmpl.kind = NewTemplate::Kind::Data;
+                    tmpl.data.assign(narrow.begin(), narrow.end());
+                    out.push_back(std::move(tmpl));
+                }
+            }
         }
+    } else if (!(tmpl.fileName = ReadRegString(root, shellNew, L"FileName")).empty()) {
+        tmpl.kind = NewTemplate::Kind::FileName;
+        tmpl.fileName = ExpandEnv(tmpl.fileName);
+        out.push_back(std::move(tmpl));
+    } else if (!(tmpl.command = ReadRegString(root, shellNew, L"Command")).empty()) {
+        tmpl.kind = NewTemplate::Kind::Command;
+        out.push_back(std::move(tmpl));
     }
     RegCloseKey(key);
 }
@@ -746,6 +774,30 @@ void EnsureNewTemplates() {
         filtered.push_back(std::move(tmpl));
     }
 
+    // "Compressed (zipped) Folder" is provided by the zip folder extension,
+    // not always by a ShellNew key. Add it ourselves when the registry has no
+    // .zip template: an empty ZIP end-of-central-directory record.
+    bool hasZip = false;
+    for (const NewTemplate& tmpl : filtered) {
+        if (_wcsicmp(tmpl.extension.c_str(), L".zip") == 0) {
+            hasZip = true;
+            break;
+        }
+    }
+    if (!hasZip) {
+        NewTemplate zip;
+        zip.kind = NewTemplate::Kind::Data;
+        zip.displayName = L"Compressed (zipped) Folder";
+        zip.extension = L".zip";
+        zip.data = {0x50, 0x4B, 0x05, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+        filtered.push_back(std::move(zip));
+    }
+    std::sort(filtered.begin(), filtered.end(),
+              [](const NewTemplate& a, const NewTemplate& b) {
+                  return _wcsicmp(a.displayName.c_str(), b.displayName.c_str()) < 0;
+              });
+
     std::vector<NewTemplate> built;
     NewTemplate folder;
     folder.kind = NewTemplate::Kind::Folder;
@@ -763,6 +815,13 @@ void EnsureNewTemplates() {
     g_shortcutCommand = std::move(shortcutCommand);
     g_newTemplates = std::move(built);
     g_newTemplatesReady.store(true, std::memory_order_release);
+
+    if (g_settings.debugLogging) {
+        for (const NewTemplate& tmpl : g_newTemplates) {
+            Wh_Log(L"New template: ext='%s' name='%s' kind=%d", tmpl.extension.c_str(),
+                   tmpl.displayName.c_str(), static_cast<int>(tmpl.kind));
+        }
+    }
 }
 
 #ifdef CMO_TESTING

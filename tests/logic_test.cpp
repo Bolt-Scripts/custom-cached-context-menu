@@ -1714,6 +1714,32 @@ int main() {
                            sizeof(dataBytes));
             RegCloseKey(key);
         }
+        // REG_EXPAND_SZ FileName templates (Office uses these).
+        HKEY expandKey = nullptr;
+        const bool expandKeyOk =
+            RegCreateKeyExW(HKEY_CURRENT_USER,
+                            L"Software\\Classes\\.cmoexp\\ShellNew", 0, nullptr, 0,
+                            KEY_WRITE, nullptr, &expandKey, nullptr) == ERROR_SUCCESS;
+        if (expandKeyOk) {
+            const wchar_t templatePath[] = L"%SystemRoot%\\explorer.exe";
+            RegSetValueExW(expandKey, L"FileName", 0, REG_EXPAND_SZ,
+                           reinterpret_cast<const BYTE*>(templatePath),
+                           sizeof(templatePath));
+            RegCloseKey(expandKey);
+        }
+        // Data stored as REG_SZ text.
+        HKEY stringKey = nullptr;
+        const bool stringKeyOk =
+            RegCreateKeyExW(HKEY_CURRENT_USER,
+                            L"Software\\Classes\\.cmostr\\ShellNew", 0, nullptr, 0,
+                            KEY_WRITE, nullptr, &stringKey, nullptr) == ERROR_SUCCESS;
+        if (stringKeyOk) {
+            const wchar_t textData[] = L"abc";
+            RegSetValueExW(stringKey, L"Data", 0, REG_SZ,
+                           reinterpret_cast<const BYTE*>(textData),
+                           sizeof(textData));
+            RegCloseKey(stringKey);
+        }
         // An HKCU extension key without ShellNew must not shadow the HKLM
         // template for the same extension.
         HKEY shadowKey = nullptr;
@@ -1743,6 +1769,9 @@ int main() {
         bool foundNull = false;
         bool foundData = false;
         bool foundShadow = false;
+        bool foundExpand = false;
+        bool foundStringData = false;
+        bool foundZip = false;
         for (const cmo::NewTemplate& tmpl : cmo::g_newTemplates) {
             if (tmpl.extension == L".cmonull" &&
                 tmpl.kind == cmo::NewTemplate::Kind::NullFile) {
@@ -1756,10 +1785,24 @@ int main() {
                 tmpl.kind == cmo::NewTemplate::Kind::NullFile) {
                 foundShadow = true;
             }
+            if (tmpl.extension == L".cmoexp" &&
+                tmpl.kind == cmo::NewTemplate::Kind::FileName) {
+                foundExpand = !tmpl.fileName.empty();
+            }
+            if (tmpl.extension == L".cmostr" &&
+                tmpl.kind == cmo::NewTemplate::Kind::Data) {
+                foundStringData = tmpl.data.size() == 3 && tmpl.data[0] == 'a';
+            }
+            if (tmpl.extension == L".zip") {
+                foundZip = true;
+            }
         }
         CHECK(foundNull);
         CHECK(foundData);
         CHECK(foundShadow);
+        CHECK(foundExpand);
+        CHECK(foundStringData);
+        CHECK(foundZip);
 
         // The core background model exposes New as a submenu with children.
         cmo::MenuModel background =
@@ -1828,6 +1871,12 @@ int main() {
         }
         if (shadowHklmOk) {
             RegDeleteTreeW(HKEY_LOCAL_MACHINE, L"Software\\Classes\\.cmoshadow");
+        }
+        if (expandKeyOk) {
+            RegDeleteTreeW(HKEY_CURRENT_USER, L"Software\\Classes\\.cmoexp");
+        }
+        if (stringKeyOk) {
+            RegDeleteTreeW(HKEY_CURRENT_USER, L"Software\\Classes\\.cmostr");
         }
     }
 

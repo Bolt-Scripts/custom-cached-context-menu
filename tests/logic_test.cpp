@@ -2901,6 +2901,40 @@ int main() {
         CHECK(model.items[1].displayLabel == L"SVN");
     }
 
+    // v2.1 separators and headers: parse, insert, not selectable.
+    {
+        cmo::RulesConfig config;
+        std::vector<cmo::ConfigParseError> errors;
+        CHECK(cmo::ParseRulesConfig(
+            L"[command \"Tools\"]\ntype = header\n"
+            L"[command \"---\"]\ntype = separator\n",
+            config, errors));
+        CHECK(config.commands.size() == 2);
+        CHECK(config.commands[0].type == cmo::CommandType::Header);
+        CHECK(config.commands[1].type == cmo::CommandType::Separator);
+
+        cmo::MenuModel model{};
+        cmo::MenuItem fb{};
+        fb.id = 1;
+        fb.kind = cmo::ItemKind::Command;
+        fb.action = cmo::ActionKind::Fallback;
+        fb.label = L"Show classic menu";
+        model.items.push_back(fb);
+        cmo::ItemContext ctx{};
+        ctx.scope = cmo::Scope::Files;
+        cmo::InsertCustomItems(model, config, ctx);
+        CHECK(model.items.size() == 3);
+        CHECK(model.items[0].kind == cmo::ItemKind::Header);
+        CHECK(model.items[0].label == L"Tools");
+        CHECK(model.items[1].kind == cmo::ItemKind::Separator);
+
+        cmo::LayoutMetrics metrics{};
+        cmo::LayoutPanel panel = cmo::BuildLayoutPanel(model.items, metrics);
+        cmo::MenuInputState state{};
+        cmo::MenuStateKey(state, panel, cmo::MenuInputEvent::KeyDown);
+        CHECK(state.keyboardIndex == 2);  // header and separator skipped
+    }
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

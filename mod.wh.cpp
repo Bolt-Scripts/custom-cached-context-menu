@@ -287,7 +287,7 @@ inline std::wstring MakeTypeKey(const std::vector<std::wstring>& paths) {
 // ===========================================================================
 namespace cmo {
 
-enum class ItemKind : uint8_t { Command, Submenu, Separator };
+enum class ItemKind : uint8_t { Command, Submenu, Separator, Header };
 enum class ActionKind : uint8_t {
     ViewAction,
     ShellVerb,
@@ -1194,11 +1194,13 @@ struct Rule {
 enum class RunAs : uint8_t { None, Admin };
 enum class ShowWindow : uint8_t { Normal, Maximized, Minimized, Hidden };
 enum class CommandSeparator : uint8_t { None, Before, After };
+enum class CommandType : uint8_t { Command, Separator, Header };
 enum class SubmenuPositionKind : uint8_t { Top, Bottom, After, Before };
 
 struct CustomCommand {
     std::wstring label;
     std::wstring command;
+    CommandType type = CommandType::Command;
     std::wstring workingDir;
     std::wstring iconRef;
     PredicateExpr match;
@@ -1688,6 +1690,22 @@ bool ApplyCommandValue(CustomCommand& command, const std::wstring& key,
         }
         if (lower == L"after") {
             command.separator = CommandSeparator::After;
+            return true;
+        }
+        return false;
+    }
+    if (key == L"type") {
+        const std::wstring lower = ToLowerCopy(TrimWhitespace(value));
+        if (lower == L"command") {
+            command.type = CommandType::Command;
+            return true;
+        }
+        if (lower == L"separator") {
+            command.type = CommandType::Separator;
+            return true;
+        }
+        if (lower == L"header") {
+            command.type = CommandType::Header;
             return true;
         }
         return false;
@@ -2488,11 +2506,19 @@ void InsertCustomItems(MenuModel& model, const RulesConfig& config,
 
         MenuItem item{};
         item.id = 0xF200 + static_cast<uint32_t>(i);
-        item.kind = ItemKind::Command;
-        item.action = ActionKind::CustomCommand;
         item.label = command.label;
-        item.iconRef = command.iconRef;
-        item.customCommandIndex = static_cast<uint32_t>(i);
+        if (command.type == CommandType::Separator) {
+            item.kind = ItemKind::Separator;
+            item.action = ActionKind::ViewAction;
+        } else if (command.type == CommandType::Header) {
+            item.kind = ItemKind::Header;
+            item.action = ActionKind::ViewAction;
+        } else {
+            item.kind = ItemKind::Command;
+            item.action = ActionKind::CustomCommand;
+            item.iconRef = command.iconRef;
+            item.customCommandIndex = static_cast<uint32_t>(i);
+        }
 
         std::vector<MenuItem>* container = nullptr;
         if (!command.menuPath.empty()) {
@@ -2507,14 +2533,16 @@ void InsertCustomItems(MenuModel& model, const RulesConfig& config,
             continue;
         }
 
-        if (command.separator == CommandSeparator::Before) {
+        if (command.type == CommandType::Command &&
+            command.separator == CommandSeparator::Before) {
             MenuItem separator{};
             separator.id = 0xF500 + static_cast<uint32_t>(i);
             separator.kind = ItemKind::Separator;
             container->push_back(std::move(separator));
         }
         container->push_back(std::move(item));
-        if (command.separator == CommandSeparator::After) {
+        if (command.type == CommandType::Command &&
+            command.separator == CommandSeparator::After) {
             MenuItem separator{};
             separator.id = 0xF501 + static_cast<uint32_t>(i);
             separator.kind = ItemKind::Separator;
@@ -4360,6 +4388,22 @@ void DrawPanel(ID2D1DeviceContext* dc, const LayoutPanel& panel,
             continue;
         }
 
+        if (item.kind == ItemKind::Header) {
+            ID2D1SolidColorBrush* headerBrush = nullptr;
+            if (item.resources && item.resources->text &&
+                SUCCEEDED(dc->CreateSolidColorBrush(
+                    ColorFromArgb(metrics.headerColor), &headerBrush)) &&
+                headerBrush) {
+                dc->DrawTextLayout(
+                    D2D1_POINT_2F{static_cast<float>(item.rect.left) +
+                                      static_cast<float>(metrics.padding),
+                                  static_cast<float>(item.textRect.top)},
+                    item.resources->text, headerBrush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
+                headerBrush->Release();
+            }
+            continue;
+        }
+
         if (hovered && (appearance.hoverBackground >> 24) != 0) {
             ID2D1SolidColorBrush* brush = nullptr;
             if (SUCCEEDED(dc->CreateSolidColorBrush(
@@ -4440,7 +4484,8 @@ enum class MenuInputEvent : uint8_t {
 };
 
 bool MenuItemIsSelectable(const LayoutItem& item) {
-    return item.kind != ItemKind::Separator && (item.flags & kModelDisabled) == 0;
+    return item.kind != ItemKind::Separator && item.kind != ItemKind::Header &&
+           (item.flags & kModelDisabled) == 0;
 }
 
 void MenuStateMouseMove(MenuInputState& state, const LayoutPanel& panel,

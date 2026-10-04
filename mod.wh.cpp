@@ -2,10 +2,10 @@
 // @id              context-menu-overhaul
 // @name            Context Menu Overhaul
 // @description     Replaces the Explorer context menu with an instantly-opening cached menu, then discovers and caches shell extension items asynchronously.
-// @version         0.3.0
+// @version         0.3.1
 // @include         explorer.exe
 // @architecture    x86-64
-// @compilerOptions -lole32 -lshlwapi -luuid -lcomctl32 -ladvapi32 -lgdi32
+// @compilerOptions -lole32 -lshlwapi -luuid -lcomctl32 -ladvapi32 -lgdi32 -luxtheme
 // @license         MIT
 // ==/WindhawkMod==
 
@@ -57,6 +57,9 @@ Design document: `docs/superpowers/specs/2026-10-04-context-menu-overhaul-design
 #include <shlobj.h>
 #include <shlwapi.h>
 #include <shobjidl.h>
+#include <uxtheme.h>
+#include <vsstyle.h>
+#include <vssym32.h>
 
 #include <commctrl.h>
 #include <tlhelp32.h>
@@ -400,10 +403,9 @@ MenuModel BuildCoreModel(Scope scope, const std::vector<std::wstring>& paths, Sh
                                                    ViewAction::ViewDetails, kModelNone));
 
         addCommand(L"Sort by", L"sortby");
-        addViewAction(L"Refresh", L"refresh", ViewAction::Refresh, kModelNone,
-                      L"@glyph:E72C");
+        addViewAction(L"Refresh", L"refresh", ViewAction::Refresh);
         addSeparator();
-        addCommand(L"Paste", L"paste", kModelNone, L"@glyph:E77F");
+        addCommand(L"Paste", L"paste");
         addCommand(L"Paste shortcut", L"pastelink");
         addSeparator();
         addCommand(L"New", L"new");
@@ -418,32 +420,31 @@ MenuModel BuildCoreModel(Scope scope, const std::vector<std::wstring>& paths, Sh
     }
 
     if (scope == Scope::Drive) {
-        addCommand(openLabel, L"open", kModelDefault, L"@folder");
+        addCommand(openLabel, L"open", kModelDefault);
         addCommand(L"Open in new window", L"opennew");
         addCommand(L"Pin to Quick access", L"pintohome");
         addSeparator();
-        addCommand(L"Properties", L"properties", kModelNone, L"@glyph:E713");
+        addCommand(L"Properties", L"properties");
         addSeparator();
         addFallback();
         return model;
     }
 
     if (scope == Scope::Folders) {
-        addCommand(openLabel, L"open", kModelDefault, L"@folder");
+        addCommand(openLabel, L"open", kModelDefault);
         addCommand(L"Open in new window", L"opennew");
         addCommand(L"Pin to Quick access", L"pintohome");
         addSeparator();
     } else {
-        addCommand(openLabel, L"open", kModelDefault, L"@file");
-        addCommand(L"Open with", L"openwith", kModelNone, L"@glyph:E8E5");
+        addCommand(openLabel, L"open", kModelDefault);
+        addCommand(L"Open with", L"openwith");
         addSeparator();
     }
 
-    addCommand(L"Cut", L"cut", kModelNone, L"@glyph:E8C6");
-    addCommand(L"Copy", L"copy", kModelNone, L"@glyph:E8C8");
-    addViewAction(L"Rename", L"rename", ViewAction::Rename, multiDisabled,
-                  L"@glyph:E8AC");
-    addCommand(L"Delete", L"delete", kModelNone, L"@glyph:E74D");
+    addCommand(L"Cut", L"cut");
+    addCommand(L"Copy", L"copy");
+    addViewAction(L"Rename", L"rename", ViewAction::Rename, multiDisabled);
+    addCommand(L"Delete", L"delete");
     addSeparator();
     addCommand(L"Create shortcut", L"createshortcut", multiDisabled);
     addSubmenu(L"Send to");
@@ -504,12 +505,15 @@ MenuModel MergeCoreWithCached(const MenuModel& core, const MenuModel& cached) {
             if (coreItem.action != ActionKind::ShellVerb || !matches(coreItem, item)) {
                 continue;
             }
-            // Adopt the native descriptor: the shell rejects some canonical
-            // verb strings, but its own offsets always dispatch. Remember
-            // the offset so cached opens invoke exactly like the native menu.
+            // Adopt the native descriptor and icon: the shell rejects some
+            // canonical verb strings but its own offsets always dispatch,
+            // and its captured bitmap is exactly what the classic menu shows.
             coreItem.canonicalVerb = item.canonicalVerb;
             coreItem.verbOffset = item.verbOffset;
             coreItem.flags |= kModelHasOffset;
+            if (!item.iconPixels.empty()) {
+                coreItem.iconPixels = item.iconPixels;
+            }
             matchedCore = true;
             break;
         }
@@ -547,7 +551,7 @@ MenuModel MergeCoreWithCached(const MenuModel& core, const MenuModel& cached) {
 namespace cmo {
 
 constexpr uint32_t kCacheMagic = 0x434F4D4F;  // "COMO"
-constexpr uint32_t kCacheVersion = 6;
+constexpr uint32_t kCacheVersion = 7;
 constexpr uint32_t kMaxCacheEntries = 1024;
 constexpr uint32_t kMaxModelItems = 4096;
 constexpr uint32_t kMaxMenuDepth = 16;
@@ -1370,35 +1374,44 @@ uint32_t MapMenuState(UINT state) {
     return flags;
 }
 
-// Copies a shell menu bitmap (32bpp, small-icon sized) into BGRA pixels.
+// Copies a shell menu bitmap into BGRA pixels (any bit depth, top-down).
 void CaptureBitmapPixels(HBITMAP bitmap, std::vector<uint8_t>& out) {
     out.clear();
     BITMAP bitmapInfo = {};
-    if (!GetObjectW(bitmap, sizeof(bitmapInfo), &bitmapInfo)) {
+    if (!GetObjectW(bitmap, sizeof(bitmapInfo), &bitmapInfo) ||
+        bitmapInfo.bmWidth <= 0 || bitmapInfo.bmHeight <= 0 ||
+        bitmapInfo.bmWidth > 64 || bitmapInfo.bmHeight > 64) {
         return;
     }
 
-    const int expected = GetSystemMetrics(SM_CXSMICON);
-    if (bitmapInfo.bmWidth != expected || bitmapInfo.bmHeight != expected ||
-        bitmapInfo.bmBitsPixel != 32) {
-        return;
-    }
+    const int width = bitmapInfo.bmWidth;
+    const int height = bitmapInfo.bmHeight;
 
     BITMAPINFO dibInfo = {};
     dibInfo.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    dibInfo.bmiHeader.biWidth = expected;
-    dibInfo.bmiHeader.biHeight = -expected;
+    dibInfo.bmiHeader.biWidth = width;
+    dibInfo.bmiHeader.biHeight = height;  // bottom-up
     dibInfo.bmiHeader.biPlanes = 1;
     dibInfo.bmiHeader.biBitCount = 32;
     dibInfo.bmiHeader.biCompression = BI_RGB;
 
-    std::vector<uint8_t> pixels(static_cast<size_t>(expected) * expected * 4);
+    std::vector<uint8_t> buffer(static_cast<size_t>(width) * height * 4);
     HDC screen = GetDC(nullptr);
-    const int lines = GetDIBits(screen, bitmap, 0, expected, pixels.data(), &dibInfo,
-                                DIB_RGB_COLORS);
+    const int lines =
+        GetDIBits(screen, bitmap, 0, height, buffer.data(), &dibInfo, DIB_RGB_COLORS);
     ReleaseDC(nullptr, screen);
-    if (lines == expected) {
-        out = std::move(pixels);
+    if (lines != height) {
+        Wh_Log(L"Bitmap capture failed: %dx%d %dbpp", width, height,
+               bitmapInfo.bmBitsPixel);
+        return;
+    }
+
+    // Flip to top-down for the rest of the pipeline.
+    out.resize(buffer.size());
+    for (int y = 0; y < height; ++y) {
+        memcpy(out.data() + static_cast<size_t>(y) * width * 4,
+               buffer.data() + static_cast<size_t>(height - 1 - y) * width * 4,
+               static_cast<size_t>(width) * 4);
     }
 }
 
@@ -1435,6 +1448,13 @@ void BuildItemsFromHMenu(HMENU menu, UINT idCmdFirst, IContextMenu* context,
             ownerDraw = true;
         }
 
+        // Capture icons the shell itself provides, for commands and submenu
+        // parents alike. HBMMENU_* sentinels are small integers; real
+        // bitmaps are pointers.
+        if (info.hbmpItem && reinterpret_cast<INT_PTR>(info.hbmpItem) > 16) {
+            CaptureBitmapPixels(info.hbmpItem, item.iconPixels);
+        }
+
         if (info.hSubMenu) {
             item.kind = ItemKind::Submenu;
             item.action = ActionKind::Submenu;
@@ -1446,12 +1466,6 @@ void BuildItemsFromHMenu(HMENU menu, UINT idCmdFirst, IContextMenu* context,
             if (info.wID >= idCmdFirst) {
                 item.verbOffset = info.wID - idCmdFirst;
                 item.flags |= kModelHasOffset;
-            }
-            // Capture icons the shell itself provides. HBMMENU_* sentinels
-            // are small integers; real bitmaps are pointers.
-            if (info.hbmpItem &&
-                reinterpret_cast<INT_PTR>(info.hbmpItem) > 16) {
-                CaptureBitmapPixels(info.hbmpItem, item.iconPixels);
             }
             if (context) {
                 wchar_t verbBuffer[256] = {};
@@ -1518,10 +1532,10 @@ void InitializeMenuRecursive(PendingCapture& capture, HMENU menu, UINT position)
 void DumpModelItems(const std::vector<MenuItem>& items, int depth) {
     for (const MenuItem& item : items) {
         Wh_Log(L"[d%d] kind=%d action=%d flags=%04X offset=%u verb='%s' label='%s' "
-               L"children=%zu",
+               L"children=%zu icons=%zu",
                depth, static_cast<int>(item.kind), static_cast<int>(item.action),
                item.flags, item.verbOffset, item.canonicalVerb.c_str(),
-               item.label.c_str(), item.children.size());
+               item.label.c_str(), item.children.size(), item.iconPixels.size());
         DumpModelItems(item.children, depth + 1);
     }
 }
@@ -2495,30 +2509,17 @@ class IconCache {
 public:
     ~IconCache() { Clear(); }
 
-    // Returns a menu bitmap for the item's icon, or nullptr. `paths` is the
-    // captured selection, used to resolve "@file".
-    HBITMAP GetBitmap(const MenuItem& item, const std::vector<std::wstring>& paths,
-                      int sizePx) {
+    // Returns a menu bitmap for the item's captured icon, or nullptr. The
+    // bitmap is composited over the menu background so classic (alpha-less)
+    // menu drawing shows it correctly.
+    HBITMAP GetBitmap(const MenuItem& item, int sizePx) {
         if (!item.iconPixels.empty()) {
             return BitmapFromPixels(item.iconPixels, sizePx);
         }
         if (item.iconRef.empty()) {
             return nullptr;
         }
-        return BitmapFromRef(item.iconRef, paths, sizePx);
-    }
-
-    // Pre-renders the core glyphs and the stock folder icon, so the open path
-    // only ever attaches already-cached bitmaps.
-    void PreloadCoreIcons(int sizePx) {
-        static const wchar_t* kGlyphRefs[] = {
-            L"@glyph:E8C6", L"@glyph:E8C8", L"@glyph:E8AC", L"@glyph:E74D",
-            L"@glyph:E713", L"@glyph:E8E5", L"@glyph:E72C", L"@glyph:E77F",
-        };
-        for (const wchar_t* ref : kGlyphRefs) {
-            BitmapFromRef(ref, {}, sizePx);
-        }
-        BitmapFromRef(L"@folder", {}, sizePx);
+        return BitmapFromRef(item.iconRef, sizePx);
     }
 
     void Clear() {
@@ -2537,56 +2538,18 @@ public:
     }
 
 private:
-    HBITMAP BitmapFromRef(const std::wstring& ref,
-                          const std::vector<std::wstring>& paths, int sizePx) {
-        // "@file" resolves to a type icon, so key it by extension rather than
-        // sharing one bitmap across every file type.
-        const std::wstring cacheRef =
-            ref == L"@file"
-                ? (L"@file:" +
-                   (paths.empty() ? std::wstring(L"")
-                                  : MakeExtensionKey(paths.front())))
-                : ref;
-        const std::wstring key = cacheRef + L"#" + std::to_wstring(sizePx);
+    HBITMAP BitmapFromRef(const std::wstring& ref, int sizePx) {
+        const std::wstring key = ref + L"#" + std::to_wstring(sizePx);
         auto it = bitmaps_.find(key);
         if (it != bitmaps_.end()) {
             return it->second;
         }
 
         HBITMAP bitmap = nullptr;
-        if (ref == L"@file") {
-            if (!paths.empty()) {
-                SHFILEINFOW fileInfo = {};
-                if (SHGetFileInfoW(paths.front().c_str(), FILE_ATTRIBUTE_NORMAL,
-                                   &fileInfo, sizeof(fileInfo),
-                                   SHGFI_ICON | SHGFI_SMALLICON |
-                                       SHGFI_USEFILEATTRIBUTES) &&
-                    fileInfo.hIcon) {
-                    bitmap = BitmapFromIcon(fileInfo.hIcon, sizePx);
-                    DestroyIcon(fileInfo.hIcon);
-                }
-            }
-        } else if (ref == L"@folder") {
-            SHSTOCKICONINFO stockInfo = {};
-            stockInfo.cbSize = sizeof(stockInfo);
-            if (SUCCEEDED(SHGetStockIconInfo(SIID_FOLDER,
-                                             SHGSI_ICON | SHGSI_SMALLICON,
-                                             &stockInfo)) &&
-                stockInfo.hIcon) {
-                bitmap = BitmapFromIcon(stockInfo.hIcon, sizePx);
-                DestroyIcon(stockInfo.hIcon);
-            }
-        } else if (ref.rfind(L"@glyph:", 0) == 0) {
-            const wchar_t codepoint =
-                static_cast<wchar_t>(wcstoul(ref.c_str() + 7, nullptr, 16));
-            bitmap = GlyphBitmap(codepoint, sizePx);
-        } else {
-            HICON icon = GetIcon(ref, sizePx);
-            if (icon) {
-                bitmap = BitmapFromIcon(icon, sizePx);
-            }
+        HICON icon = GetIcon(ref, sizePx);
+        if (icon) {
+            bitmap = BitmapFromIcon(icon, sizePx);
         }
-
         bitmaps_[key] = bitmap;
         return bitmap;
     }
@@ -2608,7 +2571,7 @@ private:
         if (it != bitmaps_.end()) {
             return it->second;
         }
-        HBITMAP bitmap = ScaledBitmapFromBgra(pixels, side, side, sizePx);
+        HBITMAP bitmap = OpaqueBitmapFromBgra(pixels, side, side, sizePx);
         bitmaps_[key] = bitmap;
         return bitmap;
     }
@@ -2680,7 +2643,24 @@ private:
         return bitmap;
     }
 
-    static HBITMAP ScaledBitmapFromBgra(const std::vector<uint8_t>& pixels, int width,
+    static COLORREF MenuBackgroundColor() {
+        HTHEME theme = OpenThemeData(nullptr, L"Menu");
+        if (theme) {
+            COLORREF color = 0;
+            if (SUCCEEDED(GetThemeColor(theme, MENU_POPUPBACKGROUND, 0, TMT_FILLCOLOR,
+                                        &color))) {
+                CloseThemeData(theme);
+                return color;
+            }
+            CloseThemeData(theme);
+        }
+        return GetSysColor(COLOR_MENU);
+    }
+
+    // Composites captured BGRA pixels over the actual themed menu background
+    // into an opaque 32bpp bitmap. Classic menus draw MIM_BITMAP bitmaps
+    // without alpha blending, so transparency must be baked in here.
+    static HBITMAP OpaqueBitmapFromBgra(const std::vector<uint8_t>& pixels, int width,
                                         int height, int sizePx) {
         HDC screen = GetDC(nullptr);
         HDC sourceDc = CreateCompatibleDC(screen);
@@ -2706,9 +2686,46 @@ private:
         if (source && target && targetBits) {
             HGDIOBJ oldSource = SelectObject(sourceDc, source);
             HGDIOBJ oldTarget = SelectObject(targetDc, target);
-            SetStretchBltMode(targetDc, HALFTONE);
-            StretchBlt(targetDc, 0, 0, sizePx, sizePx, sourceDc, 0, 0, width, height,
-                       SRCCOPY);
+
+            RECT rect = {0, 0, sizePx, sizePx};
+            HBRUSH backgroundBrush = CreateSolidBrush(MenuBackgroundColor());
+            FillRect(targetDc, &rect, backgroundBrush);
+            DeleteObject(backgroundBrush);
+
+            bool hasAlpha = false;
+            for (size_t i = 3; i < pixels.size(); i += 4) {
+                if (pixels[i] != 0 && pixels[i] != 255) {
+                    hasAlpha = true;
+                    break;
+                }
+            }
+
+            if (hasAlpha) {
+                // Premultiply for GdiAlphaBlend with AC_SRC_ALPHA.
+                std::vector<uint8_t> premultiplied = pixels;
+                for (size_t i = 0; i < premultiplied.size(); i += 4) {
+                    const uint32_t alpha = premultiplied[i + 3];
+                    premultiplied[i] =
+                        static_cast<uint8_t>(premultiplied[i] * alpha / 255);
+                    premultiplied[i + 1] =
+                        static_cast<uint8_t>(premultiplied[i + 1] * alpha / 255);
+                    premultiplied[i + 2] =
+                        static_cast<uint8_t>(premultiplied[i + 2] * alpha / 255);
+                }
+                memcpy(sourceBits, premultiplied.data(), premultiplied.size());
+
+                BLENDFUNCTION blend = {};
+                blend.BlendOp = AC_SRC_OVER;
+                blend.SourceConstantAlpha = 255;
+                blend.AlphaFormat = AC_SRC_ALPHA;
+                GdiAlphaBlend(targetDc, 0, 0, sizePx, sizePx, sourceDc, 0, 0, width,
+                              height, blend);
+            } else {
+                SetStretchBltMode(targetDc, HALFTONE);
+                StretchBlt(targetDc, 0, 0, sizePx, sizePx, sourceDc, 0, 0, width,
+                           height, SRCCOPY);
+            }
+
             SelectObject(targetDc, oldTarget);
             SelectObject(sourceDc, oldSource);
         } else if (target) {
@@ -2725,115 +2742,6 @@ private:
         return target;
     }
 
-    static bool FontExists(const wchar_t* faceName) {
-        HDC dc = GetDC(nullptr);
-        LOGFONTW logFont = {};
-        logFont.lfCharSet = DEFAULT_CHARSET;
-        wcsncpy(logFont.lfFaceName, faceName, LF_FACESIZE - 1);
-        bool found = false;
-        EnumFontFamiliesExW(
-            dc, &logFont,
-            [](const LOGFONTW*, const TEXTMETRICW*, DWORD, LPARAM lParam) -> int {
-                *reinterpret_cast<bool*>(lParam) = true;
-                return 0;
-            },
-            reinterpret_cast<LPARAM>(&found), 0);
-        ReleaseDC(nullptr, dc);
-        return found;
-    }
-
-    static bool IsDarkThemeActive() {
-        DWORD lightTheme = 1;
-        DWORD size = sizeof(lightTheme);
-        HKEY key = nullptr;
-        if (RegOpenKeyExW(
-                HKEY_CURRENT_USER,
-                L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
-                0, KEY_READ, &key) == ERROR_SUCCESS) {
-            RegQueryValueExW(key, L"AppsUseLightTheme", nullptr, nullptr,
-                             reinterpret_cast<LPBYTE>(&lightTheme), &size);
-            RegCloseKey(key);
-        }
-        return lightTheme == 0;
-    }
-
-    static HBITMAP GlyphBitmap(wchar_t codepoint, int sizePx) {
-        static const wchar_t* kFonts[] = {L"Segoe Fluent Icons",
-                                          L"Segoe MDL2 Assets"};
-        for (const wchar_t* font : kFonts) {
-            if (!FontExists(font)) {
-                continue;
-            }
-
-            HDC screen = GetDC(nullptr);
-            HDC memory = CreateCompatibleDC(screen);
-            BITMAPV5HEADER header = {};
-            FillBitmapHeader(header, sizePx, sizePx);
-            void* bits = nullptr;
-            HBITMAP bitmap = CreateDIBSection(
-                screen, reinterpret_cast<BITMAPINFO*>(&header), DIB_RGB_COLORS,
-                &bits, nullptr, 0);
-            if (!bitmap || !bits) {
-                if (bitmap) {
-                    DeleteObject(bitmap);
-                }
-                DeleteDC(memory);
-                ReleaseDC(nullptr, screen);
-                continue;
-            }
-
-            memset(bits, 0, static_cast<size_t>(sizePx) * sizePx * 4);
-            HGDIOBJ oldBitmap = SelectObject(memory, bitmap);
-            HFONT fontHandle = CreateFontW(
-                -sizePx, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
-                OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-                DEFAULT_PITCH | FF_DONTCARE, font);
-            HGDIOBJ oldFont = SelectObject(memory, fontHandle);
-            SetBkMode(memory, TRANSPARENT);
-            SetTextColor(memory, RGB(255, 255, 255));
-            RECT rect = {0, 0, sizePx, sizePx};
-            DrawTextW(memory, &codepoint, 1, &rect,
-                      DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
-            SelectObject(memory, oldFont);
-            DeleteObject(fontHandle);
-            SelectObject(memory, oldBitmap);
-            DeleteDC(memory);
-            ReleaseDC(nullptr, screen);
-
-            // Derive coverage from the white rendering and store a
-            // premultiplied monochrome glyph in the menu text color.
-            const bool darkTheme = IsDarkThemeActive();
-            const COLORREF textColor = GetSysColor(COLOR_MENUTEXT);
-            const uint8_t red = darkTheme ? 255 : GetRValue(textColor);
-            const uint8_t green = darkTheme ? 255 : GetGValue(textColor);
-            const uint8_t blue = darkTheme ? 255 : GetBValue(textColor);
-
-            uint8_t* pixels = static_cast<uint8_t*>(bits);
-            bool anyCoverage = false;
-            for (int i = 0; i < sizePx * sizePx; ++i) {
-                uint8_t coverage = pixels[i * 4];
-                if (pixels[i * 4 + 1] > coverage) {
-                    coverage = pixels[i * 4 + 1];
-                }
-                if (pixels[i * 4 + 2] > coverage) {
-                    coverage = pixels[i * 4 + 2];
-                }
-                if (coverage > 0) {
-                    anyCoverage = true;
-                }
-                pixels[i * 4] = static_cast<uint8_t>(blue * coverage / 255);
-                pixels[i * 4 + 1] = static_cast<uint8_t>(green * coverage / 255);
-                pixels[i * 4 + 2] = static_cast<uint8_t>(red * coverage / 255);
-                pixels[i * 4 + 3] = coverage;
-            }
-            if (anyCoverage) {
-                return bitmap;
-            }
-            DeleteObject(bitmap);
-        }
-        return nullptr;
-    }
-
     std::unordered_map<std::wstring, HBITMAP> bitmaps_;
     std::unordered_map<std::wstring, HICON> icons_;
 };
@@ -2843,7 +2751,6 @@ inline IconCache g_iconCache;
 class NativeMenuView {
 public:
     static std::optional<uint32_t> Show(const MenuModel& model, HWND owner, POINT pt,
-                                        const std::vector<std::wstring>& paths,
                                         bool* creationFailed = nullptr) {
         if (creationFailed) {
             *creationFailed = false;
@@ -2857,7 +2764,7 @@ public:
             return std::nullopt;
         }
         const int iconSize = GetSystemMetrics(SM_CXSMICON);
-        AppendItems(menu, model.items, paths, iconSize);
+        AppendItems(menu, model.items, iconSize);
 
         if (!TrackPopupMenuEx_Original) {
             if (creationFailed) {
@@ -2880,7 +2787,7 @@ public:
 
 private:
     static void AppendItems(HMENU menu, const std::vector<MenuItem>& items,
-                            const std::vector<std::wstring>& paths, int iconSize) {
+                            int iconSize) {
         int index = 0;
         for (const MenuItem& item : items) {
             if (item.kind == ItemKind::Separator) {
@@ -2906,7 +2813,7 @@ private:
                     ++index;
                     continue;
                 }
-                AppendItems(submenu, item.children, paths, iconSize);
+                AppendItems(submenu, item.children, iconSize);
                 AppendMenuW(menu, flags | MF_POPUP,
                             reinterpret_cast<UINT_PTR>(submenu), item.label.c_str());
             } else {
@@ -2916,7 +2823,7 @@ private:
             // Checked items keep the checkmark gutter; everything else may
             // carry a cached icon bitmap.
             if (!(item.flags & kModelChecked)) {
-                HBITMAP bitmap = g_iconCache.GetBitmap(item, paths, iconSize);
+                HBITMAP bitmap = g_iconCache.GetBitmap(item, iconSize);
                 if (bitmap) {
                     MENUITEMINFOW bitmapInfo = {};
                     bitmapInfo.cbSize = sizeof(bitmapInfo);
@@ -3615,11 +3522,11 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
         // Cache hits skip population entirely; extension items populate
         // lazily if they are clicked.
         if (cached) {
-            chosen = NativeMenuView::Show(model, owner, pt, paths, &creationFailed);
+            chosen = NativeMenuView::Show(model, owner, pt, &creationFailed);
         } else {
             OwnerSubclass subclass(owner, &capture, /*forwardMenuMessages=*/false);
             subclass.StartDiscoveryTimer(signature);
-            chosen = NativeMenuView::Show(model, owner, pt, paths, &creationFailed);
+            chosen = NativeMenuView::Show(model, owner, pt, &creationFailed);
         }
     }
 
@@ -3878,7 +3785,6 @@ BOOL Wh_ModInit() {
     }
 
     cmo::LoadSettings();
-    cmo::g_iconCache.PreloadCoreIcons(GetSystemMetrics(SM_CXSMICON));
 
     const std::wstring cachePath = cmo::CacheFilePath();
     if (!cachePath.empty()) {

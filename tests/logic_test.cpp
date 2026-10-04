@@ -514,7 +514,7 @@ int main() {
 
     // A failed menu construction is distinguishable from a dismissal.
     bool showFailed = false;
-    auto showResult = cmo::NativeMenuView::Show(single, nullptr, POINT{0, 0}, {},
+    auto showResult = cmo::NativeMenuView::Show(single, nullptr, POINT{0, 0},
                                                 &showFailed);
     CHECK(!showResult.has_value());
     CHECK(showFailed);
@@ -781,25 +781,6 @@ int main() {
         CHECK(unlabeled.items[2].children.size() == 1);
     }
 
-    // Icons: core items carry icon references.
-    bool openFileIcon = false;
-    bool cutGlyph = false;
-    bool renameGlyph = false;
-    for (const cmo::MenuItem& item : single.items) {
-        if (item.label == L"Open") {
-            openFileIcon = item.iconRef == L"@file";
-        }
-        if (item.label == L"Cut") {
-            cutGlyph = item.iconRef == L"@glyph:E8C6";
-        }
-        if (item.label == L"Rename") {
-            renameGlyph = item.iconRef == L"@glyph:E8AC";
-        }
-    }
-    CHECK(openFileIcon);
-    CHECK(cutGlyph);
-    CHECK(renameGlyph);
-
     // Icons: pixel blobs round-trip through the cache format.
     {
         cmo::Cache pixelCache;
@@ -827,13 +808,13 @@ int main() {
         }
         cmo::MenuItem iconItem{};
         iconItem.iconPixels = pixels;
-        HBITMAP bitmap = cmo::g_iconCache.GetBitmap(iconItem, {}, 16);
+        HBITMAP bitmap = cmo::g_iconCache.GetBitmap(iconItem, 16);
         CHECK(bitmap != nullptr);
         if (bitmap) {
             BITMAP bitmapInfo = {};
             CHECK(GetObjectW(bitmap, sizeof(bitmapInfo), &bitmapInfo) != 0);
             CHECK(bitmapInfo.bmWidth == 16 && bitmapInfo.bmHeight == 16);
-            CHECK(cmo::g_iconCache.GetBitmap(iconItem, {}, 16) == bitmap);
+            CHECK(cmo::g_iconCache.GetBitmap(iconItem, 16) == bitmap);
         }
     }
 
@@ -885,12 +866,27 @@ int main() {
         ReleaseDC(nullptr, screen);
     }
 
-    // Icons: glyph rendering must not crash when the icon font is absent.
+    // Icons: captured pixels are adopted for matching core items.
     {
-        cmo::MenuItem glyphItem{};
-        glyphItem.iconRef = L"@glyph:E8C6";
-        HBITMAP glyph = cmo::g_iconCache.GetBitmap(glyphItem, {}, 16);
-        (void)glyph;
+        cmo::MenuModel iconCore = cmo::BuildCoreFileModel(onePath, cmo::Shape::Single);
+        cmo::MenuModel iconCached{};
+        iconCached.sig = iconCore.sig;
+        cmo::MenuItem nativeCutItem{};
+        nativeCutItem.id = 16000;
+        nativeCutItem.kind = cmo::ItemKind::Command;
+        nativeCutItem.action = cmo::ActionKind::ShellVerb;
+        nativeCutItem.label = L"Cut";
+        nativeCutItem.verbOffset = 4;
+        nativeCutItem.iconPixels.assign(16 * 16 * 4, 0x33);
+        iconCached.items.push_back(nativeCutItem);
+        cmo::MenuModel iconMerged = cmo::MergeCoreWithCached(iconCore, iconCached);
+        bool cutIconAdopted = false;
+        for (const cmo::MenuItem& item : iconMerged.items) {
+            if (item.label == L"Cut") {
+                cutIconAdopted = item.iconPixels.size() == 16 * 16 * 4;
+            }
+        }
+        CHECK(cutIconAdopted);
     }
 
     // Instant menu open: while the suppressor is active the master menu

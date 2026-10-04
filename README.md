@@ -48,10 +48,11 @@ untouched native menu, including extended verbs.
   native fallback.
 - On Windows 11 the modern XAML menu is suppressed; the classic menu (and this
   replacement) is always used.
-- Icons are drawn for core commands (the selected item's type icon and
-  icon-font glyphs for Cut/Copy/Rename/Delete/Properties) and for extension
-  entries that provide a bitmap; entries without an icon stay text-only, and
-  checked items keep the checkmark gutter instead of an icon.
+- Icons mirror the classic menu: each item's bitmap is captured from the
+  shell during discovery and composited over the themed menu background, so
+  entries the classic menu decorates get the same icon. Entries the classic
+  menu shows without an icon stay text-only, and checked items keep the
+  checkmark gutter.
 - Core menu labels are English; cached extension labels come from the shell and
   are localized.
 - "Sort by" / "New" / "Paste shortcut" fall back to the native menu on builds

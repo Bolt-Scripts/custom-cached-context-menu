@@ -2,7 +2,7 @@
 // @id              context-menu-overhaul
 // @name            Context Menu Overhaul
 // @description     Replaces the Explorer context menu with an instantly-opening cached menu, then discovers and caches shell extension items asynchronously.
-// @version         0.2.6
+// @version         0.2.7
 // @include         explorer.exe
 // @architecture    x86-64
 // @compilerOptions -lole32 -lshlwapi -luuid -lcomctl32 -ladvapi32 -lgdi32
@@ -45,8 +45,8 @@ Design document: `docs/superpowers/specs/2026-10-04-context-menu-overhaul-design
   $name: Debug logging
   $description: Log timing and diagnostics for troubleshooting.
 - instantMenuFade: true
-  $name: Instant menu fade
-  $description: Temporarily disable the system menu fade while this mod's menu opens, so it appears instantly. Session-only; the previous setting is restored immediately.
+  $name: Instant menu open
+  $description: Temporarily disables system menu animation (fade and slide) while this mod's menu opens, so it appears instantly. Session-only; the previous setting is restored immediately.
 */
 // ==/WindhawkModSettings==
 
@@ -2314,36 +2314,39 @@ inline TrackPopupMenuEx_t TrackPopupMenuEx_Original = nullptr;
 using TrackPopupMenu_t = decltype(&TrackPopupMenu);
 inline TrackPopupMenu_t TrackPopupMenu_Original = nullptr;
 
-// Temporarily disables the per-user menu fade while a menu we display is
-// opening, so it appears instantly. The previous value is restored on scope
-// exit; the change is session-only (never written to disk, no broadcast).
-std::atomic<bool> g_fadeSuppressed{false};
+// Temporarily disables menu animation (the master switch) while a menu we
+// display is opening, so it appears instantly. Disabling only the fade is not
+// enough: per the SPI_SETMENUFADE contract, menus then fall back to the slide
+// animation. The previous value is restored on scope exit; the change is
+// session-only (never written to disk, no broadcast).
+std::atomic<bool> g_animationSuppressed{false};
 
-class MenuFadeSuppressor {
+class MenuAnimationSuppressor {
 public:
-    MenuFadeSuppressor() {
+    MenuAnimationSuppressor() {
         if (!g_settings.instantMenuFade) {
             return;
         }
         BOOL enabled = FALSE;
-        if (!SystemParametersInfoW(SPI_GETMENUFADE, 0, &enabled, 0) || !enabled) {
+        if (!SystemParametersInfoW(SPI_GETMENUANIMATION, 0, &enabled, 0) || !enabled) {
             return;
         }
-        if (SystemParametersInfoW(SPI_SETMENUFADE, 0,
-                                  reinterpret_cast<PVOID>(static_cast<ULONG_PTR>(FALSE)),
-                                  0)) {
+        if (SystemParametersInfoW(
+                SPI_SETMENUANIMATION, 0,
+                reinterpret_cast<PVOID>(static_cast<ULONG_PTR>(FALSE)), 0)) {
             active_ = true;
-            g_fadeSuppressed.store(true);
+            g_animationSuppressed.store(true);
         }
     }
 
-    ~MenuFadeSuppressor() {
+    ~MenuAnimationSuppressor() {
         if (!active_) {
             return;
         }
-        SystemParametersInfoW(SPI_SETMENUFADE, 0,
-                              reinterpret_cast<PVOID>(static_cast<ULONG_PTR>(TRUE)), 0);
-        g_fadeSuppressed.store(false);
+        SystemParametersInfoW(
+            SPI_SETMENUANIMATION, 0,
+            reinterpret_cast<PVOID>(static_cast<ULONG_PTR>(TRUE)), 0);
+        g_animationSuppressed.store(false);
     }
 
 private:
@@ -2351,10 +2354,11 @@ private:
 };
 
 // Defensive restore in case a suppressor was active when the mod unloaded.
-void RestoreMenuFade() {
-    if (g_fadeSuppressed.exchange(false)) {
-        SystemParametersInfoW(SPI_SETMENUFADE, 0,
-                              reinterpret_cast<PVOID>(static_cast<ULONG_PTR>(TRUE)), 0);
+void RestoreMenuAnimation() {
+    if (g_animationSuppressed.exchange(false)) {
+        SystemParametersInfoW(
+            SPI_SETMENUANIMATION, 0,
+            reinterpret_cast<PVOID>(static_cast<ULONG_PTR>(TRUE)), 0);
     }
 }
 
@@ -2384,7 +2388,7 @@ public:
         }
 
         const UINT flags = TPM_RETURNCMD | TPM_NONOTIFY | TPM_LEFTALIGN | TPM_TOPALIGN;
-        MenuFadeSuppressor fadeSuppressor;
+        MenuAnimationSuppressor animationSuppressor;
         int command = TrackPopupMenuEx_Original(menu, flags, pt.x, pt.y, owner, nullptr);
         DestroyMenu(menu);
 
@@ -2531,7 +2535,7 @@ std::optional<uint32_t> ShowNativeReplay(PendingCapture& capture, HWND owner, PO
     OwnerSubclass subclass(owner, &capture, /*forwardMenuMessages=*/true);
 
     const UINT flags = TPM_RETURNCMD | TPM_NONOTIFY | TPM_LEFTALIGN | TPM_TOPALIGN;
-    MenuFadeSuppressor fadeSuppressor;
+    MenuAnimationSuppressor animationSuppressor;
     int command = TrackPopupMenuEx_Original(capture.populatedMenu, flags, pt.x, pt.y, owner,
                                             nullptr);
     if (command == 0 || !capture.obj) {
@@ -3517,7 +3521,7 @@ void Wh_ModAfterInit() {
 
 void Wh_ModUninit() {
     Wh_Log(L"Context Menu Overhaul uninit");
-    cmo::RestoreMenuFade();
+    cmo::RestoreMenuAnimation();
     cmo::g_warmup.Stop();
     cmo::g_invalidation.Stop();
     cmo::g_iconCache.Clear();

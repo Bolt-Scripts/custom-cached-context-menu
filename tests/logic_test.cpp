@@ -780,21 +780,22 @@ int main() {
         CHECK(unlabeled.items[2].children.size() == 1);
     }
 
-    // Instant fade: while the suppressor is active the per-user menu fade is
-    // off, and it is restored afterwards. Skipped when the environment does
-    // not implement the SPI.
+    // Instant menu open: while the suppressor is active the master menu
+    // animation switch is off, and it is restored afterwards. Skipped when
+    // the environment does not implement the SPI.
     {
-        BOOL originalFade = TRUE;
-        if (SystemParametersInfoW(SPI_GETMENUFADE, 0, &originalFade, 0)) {
+        BOOL originalAnimation = TRUE;
+        if (SystemParametersInfoW(SPI_GETMENUANIMATION, 0, &originalAnimation, 0)) {
             {
-                cmo::MenuFadeSuppressor suppressor;
-                BOOL duringFade = TRUE;
-                CHECK(SystemParametersInfoW(SPI_GETMENUFADE, 0, &duringFade, 0));
-                CHECK(duringFade == FALSE);
+                cmo::MenuAnimationSuppressor suppressor;
+                BOOL duringAnimation = TRUE;
+                CHECK(SystemParametersInfoW(SPI_GETMENUANIMATION, 0, &duringAnimation,
+                                            0));
+                CHECK(duringAnimation == FALSE);
             }
-            BOOL restoredFade = !originalFade;
-            CHECK(SystemParametersInfoW(SPI_GETMENUFADE, 0, &restoredFade, 0));
-            CHECK(restoredFade == originalFade);
+            BOOL restoredAnimation = !originalAnimation;
+            CHECK(SystemParametersInfoW(SPI_GETMENUANIMATION, 0, &restoredAnimation, 0));
+            CHECK(restoredAnimation == originalAnimation);
         }
     }
 

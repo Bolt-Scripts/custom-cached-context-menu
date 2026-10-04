@@ -38,7 +38,7 @@ untouched native menu, including extended verbs.
 | Warm-up delay | 5 s | Delay before background warm-up starts. |
 | Clear cache | off | Turn on to delete cached models; they rebuild on next use. |
 | Debug logging | off | Logs timings and diagnostics. |
-| Instant menu fade | on | Temporarily disables the system menu fade while this mod's menu opens, so it appears instantly. Session-only; restored immediately. |
+| Instant menu open | on | Temporarily disables system menu animation (fade and slide) while this mod's menu opens, so it appears instantly. Session-only; restored immediately. |
 
 ## Known limitations (v1)
 

@@ -178,7 +178,7 @@ int main() {
     cmo::MenuModel single = cmo::BuildCoreFileModel(onePath, cmo::Shape::Single);
     CHECK(!single.items.empty());
     CHECK_EQ(single.items.front().label, std::wstring(L"Open"));
-    CHECK_EQ(single.items.back().label, std::wstring(L"Show more options"));
+    CHECK_EQ(single.items.back().label, std::wstring(L"Show classic menu"));
     CHECK_EQ(single.sig.typeKey, std::wstring(L".txt"));
 
     std::vector<std::wstring> threePaths{L"a.txt", L"b.txt", L"c.txt"};
@@ -271,7 +271,7 @@ int main() {
     CHECK(openCount == 1);
     CHECK(winrarCount == 1);
     CHECK(separatorCount >= 3);
-    CHECK_EQ(mergedModel.items.back().label, std::wstring(L"Show more options"));
+    CHECK_EQ(mergedModel.items.back().label, std::wstring(L"Show classic menu"));
 
     cmo::MenuItem verbInvoke{};
     verbInvoke.canonicalVerb = L"open";
@@ -334,7 +334,7 @@ int main() {
     std::optional<cmo::MenuModel> restoredModel = restoredCache.Find(roundTrip.sig);
     CHECK(restoredModel.has_value());
     CHECK(restoredModel && restoredModel->items.size() == roundTrip.items.size());
-    CHECK(restoredModel && restoredModel->items.back().label == L"Show more options");
+    CHECK(restoredModel && restoredModel->items.back().label == L"Show classic menu");
     CHECK(restoredModel && restoredModel->handlerModules.size() == 1);
     CHECK(restoredModel && restoredModel->sourceStamp == 42);
     const cmo::MenuItem* restoredChild =
@@ -1335,7 +1335,7 @@ int main() {
             model.items.push_back(makeCommand(4, L"Pin to Start", L"", 0));
             model.items.push_back(makeCommand(5, L"Share", L"Windows.ModernShare", 0));
             model.items.push_back(makeSeparator(6));
-            cmo::MenuItem fallback = makeCommand(7, L"Show more options", L"", 0);
+            cmo::MenuItem fallback = makeCommand(7, L"Show classic menu", L"", 0);
             fallback.action = cmo::ActionKind::Fallback;
             model.items.push_back(fallback);
             return model;
@@ -1508,6 +1508,55 @@ int main() {
             BOOL restoredAnimation = !originalAnimation;
             CHECK(SystemParametersInfoW(SPI_GETMENUANIMATION, 0, &restoredAnimation, 0));
             CHECK(restoredAnimation == originalAnimation);
+        }
+    }
+
+    // Submenu open delay: while the replacement menu is shown the system
+    // MenuShowDelay is lowered and restored afterwards; it is never lengthened
+    // and -1 leaves it alone. Skipped when the SPI is unavailable.
+    {
+        DWORD systemDelay = 0;
+        if (SystemParametersInfoW(SPI_GETMENUSHOWDELAY, 0, &systemDelay, 0)) {
+            const int previousDelay = cmo::g_settings.submenuDelayMs;
+            DWORD check = 0;
+            if (SystemParametersInfoW(SPI_SETMENUSHOWDELAY, 400, nullptr, 0) &&
+                SystemParametersInfoW(SPI_GETMENUSHOWDELAY, 0, &check, 0) &&
+                check == 400) {
+                cmo::g_settings.submenuDelayMs = 100;
+                {
+                    cmo::MenuDelaySuppressor suppressor;
+                    DWORD during = 0;
+                    CHECK(SystemParametersInfoW(SPI_GETMENUSHOWDELAY, 0, &during, 0));
+                    CHECK(during <= 100);
+                }
+                DWORD restored = 0;
+                CHECK(SystemParametersInfoW(SPI_GETMENUSHOWDELAY, 0, &restored, 0));
+                CHECK(restored == 400);
+
+                // Never lengthens the delay.
+                SystemParametersInfoW(SPI_SETMENUSHOWDELAY, 50, nullptr, 0);
+                cmo::g_settings.submenuDelayMs = 150;
+                {
+                    cmo::MenuDelaySuppressor suppressor;
+                    DWORD during = 0;
+                    CHECK(SystemParametersInfoW(SPI_GETMENUSHOWDELAY, 0, &during, 0));
+                    CHECK(during == 50);
+                }
+                CHECK(SystemParametersInfoW(SPI_GETMENUSHOWDELAY, 0, &restored, 0));
+                CHECK(restored == 50);
+
+                // -1 leaves the system value untouched.
+                SystemParametersInfoW(SPI_SETMENUSHOWDELAY, 400, nullptr, 0);
+                cmo::g_settings.submenuDelayMs = -1;
+                {
+                    cmo::MenuDelaySuppressor suppressor;
+                    DWORD during = 0;
+                    CHECK(SystemParametersInfoW(SPI_GETMENUSHOWDELAY, 0, &during, 0));
+                    CHECK(during == 400);
+                }
+            }
+            SystemParametersInfoW(SPI_SETMENUSHOWDELAY, systemDelay, nullptr, 0);
+            cmo::g_settings.submenuDelayMs = previousDelay;
         }
     }
 

@@ -18,7 +18,7 @@ from the interactive path:
 4. Common contexts are pre-built in the background shortly after Explorer
    starts.
 
-Hold **Shift** while right-clicking (or use **Show more options**) to get the
+Hold **Shift** while right-clicking (or use **Show classic menu**) to get the
 untouched native menu, including extended verbs.
 
 ## Install
@@ -33,12 +33,13 @@ untouched native menu, including extended verbs.
 | Setting | Default | Description |
 |---|---|---|
 | Shift bypass | on | Hold Shift while right-clicking for the native menu. |
-| Show more options item | on | Adds a fallback entry at the bottom of the menu. |
+| Show classic menu item | on | Adds a "Show classic menu" entry at the bottom of the menu. |
 | Warm-up extensions | common list | File types pre-built at Explorer startup. |
 | Warm-up delay | 5 s | Delay before background warm-up starts. |
 | Clear cache | off | Turn on to delete cached models; they rebuild on next use. |
 | Debug logging | off | Logs timings and diagnostics. |
 | Instant menu open | on | Temporarily disables system menu animation (fade and slide) while this mod's menu opens, so it appears instantly. Session-only; restored immediately. |
+| Submenu open delay | 150 ms | Hover delay before a submenu opens while the replacement menu is shown; restored afterwards. 0 = instant, -1 = keep the Windows setting. |
 | More options submenu | on | Moves Windows extras and third-party shell extension entries into one submenu. |
 | More options submenu label | `More options` | Label of that submenu. |
 | Windows items to move | Share, Add to Favorites, … | Comma-separated labels or verbs of Windows items to move into the submenu. |
@@ -94,8 +95,8 @@ stable during normal shell activity.
 
 Enable **Debug logging**, reproduce the problem, and include the Windhawk log
 output. It records cache hit/miss, menu preparation time, population and
-discovery durations, the chosen item and invocation result, and fallback
-reasons.
+discovery durations, the chosen item and invocation result, fallback reasons,
+and which items the More options submenu moved or kept (with their verbs).
 
 ## Development
 

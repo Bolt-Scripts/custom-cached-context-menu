@@ -138,3 +138,114 @@
 00:25:33.603 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4661:TrackPopupMenu_Hook]: Replacing context menu: kind=2
 00:25:33.603 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4500:ShowReplacementMenu]: Cache hit: scope=0 key=.log shape=0 paths=1
 00:25:33.604 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4532:ShowReplacementMenu]: Menu prep: 0 ms
+00:26:35.058 53744 explorer.exe  [WH] [local@context-menu-overhaul] [4863:Wh_ModUninit]: Context Menu Overhaul uninit
+00:26:35.088 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4863:Wh_ModUninit]: Context Menu Overhaul uninit
+00:26:35.092 53744 explorer.exe  [WH] [local@context-menu-overhaul] [4801:Wh_ModInit]: Context Menu Overhaul init
+00:26:35.110 53744 explorer.exe  [WH] [local@context-menu-overhaul] [4831:Wh_ModInit]: Loaded menu cache
+00:26:35.111 53744 explorer.exe  [WH] [local@context-menu-overhaul] [4842:Wh_ModInit]: Population hook installed
+00:26:35.240 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4801:Wh_ModInit]: Context Menu Overhaul init
+00:26:35.257 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4831:Wh_ModInit]: Loaded menu cache
+00:26:35.257 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4842:Wh_ModInit]: Population hook installed
+00:26:41.291 11560 explorer.exe  [WH] [local@context-menu-overhaul] [2054:ApplyRegistryIcons]: Registry icon for '&Pin to Start' (verb 'PinToStartScreen'): C:\WINDOWS\System32\StartMenuHelper64.dll,0
+00:26:41.376 53744 explorer.exe  [WH] [local@context-menu-overhaul] [2054:ApplyRegistryIcons]: Registry icon for '&Pin to Start' (verb 'PinToStartScreen'): C:\WINDOWS\System32\StartMenuHelper64.dll,0
+00:26:42.324 11560 explorer.exe  [WH] [local@context-menu-overhaul] [2054:ApplyRegistryIcons]: Registry icon for '&Pin to Start' (verb 'PinToStartScreen'): C:\WINDOWS\System32\StartMenuHelper64.dll,0
+00:26:42.579 53744 explorer.exe  [WH] [local@context-menu-overhaul] [2054:ApplyRegistryIcons]: Registry icon for '&Pin to Start' (verb 'PinToStartScreen'): C:\WINDOWS\System32\StartMenuHelper64.dll,0
+00:26:47.901 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4199:Run]: Warm-up finished
+00:26:48.761 53744 explorer.exe  [WH] [local@context-menu-overhaul] [4199:Run]: Warm-up finished
+00:26:58.177 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4730:IUnknown_QueryService_Hook]: Blocking modern context menu presenter
+00:26:58.177 11560 explorer.exe  [WH] [local@context-menu-overhaul] [1525:QueryContextMenu_Hook]: QueryContextMenu deferred: this=000000007CA94B10 idFirst=30977 flags=00020494
+00:26:58.178 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4661:TrackPopupMenu_Hook]: Replacing context menu: kind=2
+00:26:58.178 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4500:ShowReplacementMenu]: Cache hit: scope=1 key=* shape=0 paths=1
+00:26:58.178 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4532:ShowReplacementMenu]: Menu prep: 0 ms
+00:27:03.588 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4730:IUnknown_QueryService_Hook]: Blocking modern context menu presenter
+00:27:03.589 11560 explorer.exe  [WH] [local@context-menu-overhaul] [1525:QueryContextMenu_Hook]: QueryContextMenu deferred: this=00000000C3528F20 idFirst=30977 flags=00020494
+00:27:03.589 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4661:TrackPopupMenu_Hook]: Replacing context menu: kind=2
+00:27:03.589 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4500:ShowReplacementMenu]: Cache warm: scope=0 key=* shape=0 paths=1
+00:27:03.589 11560 explorer.exe  [WH] [local@context-menu-overhaul] [455:DumpSuspiciousItems]: [suspicious d1] kind=0 action=1 flags=00C0 offset=125 verb='' children=0
+00:27:03.590 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4532:ShowReplacementMenu]: Menu prep: 0 ms
+00:27:03.920 11560 explorer.exe  [WH] [local@context-menu-overhaul] [3080:EnsureContextPopulated]: Population: 172 ms, 29 items
+00:27:04.173 11560 explorer.exe  [WH] [local@context-menu-overhaul] [2361:CaptureOwnerDrawIcons]: Owner-draw draw not handled for '&Open' (verb 'open')
+00:27:04.173 11560 explorer.exe  [WH] [local@context-menu-overhaul] [2361:CaptureOwnerDrawIcons]: Owner-draw draw not handled for 'Add to &Favorites' (verb 'pintohomefile')
+00:27:04.173 11560 explorer.exe  [WH] [local@context-menu-overhaul] [2361:CaptureOwnerDrawIcons]: Owner-draw draw not handled for 'Open wit&h...' (verb 'openas')
+00:27:04.173 11560 explorer.exe  [WH] [local@context-menu-overhaul] [2361:CaptureOwnerDrawIcons]: Owner-draw draw not handled for 'Copy &as path' (verb 'copyaspath')
+00:27:04.175 11560 explorer.exe  [WH] [local@context-menu-overhaul] [2361:CaptureOwnerDrawIcons]: Owner-draw draw not handled for 'Restore previous &versions' (verb 'PreviousVersions')
+00:27:04.175 11560 explorer.exe  [WH] [local@context-menu-overhaul] [2361:CaptureOwnerDrawIcons]: Owner-draw draw not handled for 'Cu&t' (verb 'cut')
+00:27:04.175 11560 explorer.exe  [WH] [local@context-menu-overhaul] [2361:CaptureOwnerDrawIcons]: Owner-draw draw not handled for '&Copy' (verb 'copy')
+00:27:04.175 11560 explorer.exe  [WH] [local@context-menu-overhaul] [2361:CaptureOwnerDrawIcons]: Owner-draw draw not handled for 'Create &shortcut' (verb 'link')
+00:27:04.175 11560 explorer.exe  [WH] [local@context-menu-overhaul] [2361:CaptureOwnerDrawIcons]: Owner-draw draw not handled for '&Delete' (verb 'delete')
+00:27:04.176 11560 explorer.exe  [WH] [local@context-menu-overhaul] [2361:CaptureOwnerDrawIcons]: Owner-draw draw not handled for 'Rena&me' (verb 'rename')
+00:27:04.176 11560 explorer.exe  [WH] [local@context-menu-overhaul] [2361:CaptureOwnerDrawIcons]: Owner-draw draw not handled for 'P&roperties' (verb 'properties')
+00:27:04.176 11560 explorer.exe  [WH] [local@context-menu-overhaul] [2396:DiscoverIntoCache]: Discovered 29 menu items in 266 ms
+00:27:04.181 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4500:ShowReplacementMenu]: Cache hit: scope=0 key=* shape=0 paths=1
+00:27:04.182 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4532:ShowReplacementMenu]: Menu prep: 0 ms
+00:27:04.415 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4588:ShowReplacementMenu]: Invoke 'Create &shortcut' -> 0
+00:27:14.448 11560 explorer.exe  [WH] [local@context-menu-overhaul] [1500:QueryContextMenu_Hook]: QueryContextMenu pass-through: flags=00000800
+00:27:14.554 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4730:IUnknown_QueryService_Hook]: Blocking modern context menu presenter
+00:27:14.555 11560 explorer.exe  [WH] [local@context-menu-overhaul] [1525:QueryContextMenu_Hook]: QueryContextMenu deferred: this=00000000D8E98700 idFirst=30977 flags=00020494
+00:27:14.555 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4661:TrackPopupMenu_Hook]: Replacing context menu: kind=2
+00:27:14.555 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4500:ShowReplacementMenu]: Cache hit: scope=0 key=* shape=0 paths=1
+00:27:14.555 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4532:ShowReplacementMenu]: Menu prep: 0 ms
+00:27:14.855 11560 explorer.exe  [WH] [local@context-menu-overhaul] [1500:QueryContextMenu_Hook]: QueryContextMenu pass-through: flags=00008100
+00:27:16.177 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4730:IUnknown_QueryService_Hook]: Blocking modern context menu presenter
+00:27:16.177 11560 explorer.exe  [WH] [local@context-menu-overhaul] [1525:QueryContextMenu_Hook]: QueryContextMenu deferred: this=00000000C89C6670 idFirst=30977 flags=00020494
+00:27:16.178 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4661:TrackPopupMenu_Hook]: Replacing context menu: kind=2
+00:27:16.178 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4500:ShowReplacementMenu]: Cache hit: scope=0 key=* shape=0 paths=1
+00:27:16.178 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4532:ShowReplacementMenu]: Menu prep: 0 ms
+00:27:21.564 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4730:IUnknown_QueryService_Hook]: Blocking modern context menu presenter
+00:27:21.566 11560 explorer.exe  [WH] [local@context-menu-overhaul] [1525:QueryContextMenu_Hook]: QueryContextMenu deferred: this=00000000C89C39F0 idFirst=30977 flags=00020494
+00:27:21.566 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4661:TrackPopupMenu_Hook]: Replacing context menu: kind=2
+00:27:21.566 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4500:ShowReplacementMenu]: Cache hit: scope=0 key=.log shape=0 paths=1
+00:27:21.566 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4532:ShowReplacementMenu]: Menu prep: 0 ms
+00:35:47.748 53744 explorer.exe  [WH] [local@context-menu-overhaul] [4863:Wh_ModUninit]: Context Menu Overhaul uninit
+00:35:47.772 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4863:Wh_ModUninit]: Context Menu Overhaul uninit
+00:35:47.786 53744 explorer.exe  [WH] [local@context-menu-overhaul] [4876:Wh_ModInit]: Context Menu Overhaul init
+00:35:47.804 53744 explorer.exe  [WH] [local@context-menu-overhaul] [4906:Wh_ModInit]: Loaded menu cache
+00:35:47.806 53744 explorer.exe  [WH] [local@context-menu-overhaul] [4917:Wh_ModInit]: Population hook installed
+00:35:47.959 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4876:Wh_ModInit]: Context Menu Overhaul init
+00:35:47.976 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4906:Wh_ModInit]: Loaded menu cache
+00:35:47.978 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4917:Wh_ModInit]: Population hook installed
+00:35:54.095 11560 explorer.exe  [WH] [local@context-menu-overhaul] [2129:ApplyRegistryIcons]: Registry icon for '&Pin to Start' (verb 'PinToStartScreen'): C:\WINDOWS\System32\StartMenuHelper64.dll,0
+00:35:54.166 53744 explorer.exe  [WH] [local@context-menu-overhaul] [2129:ApplyRegistryIcons]: Registry icon for '&Pin to Start' (verb 'PinToStartScreen'): C:\WINDOWS\System32\StartMenuHelper64.dll,0
+00:35:55.146 11560 explorer.exe  [WH] [local@context-menu-overhaul] [2129:ApplyRegistryIcons]: Registry icon for '&Pin to Start' (verb 'PinToStartScreen'): C:\WINDOWS\System32\StartMenuHelper64.dll,0
+00:35:55.411 53744 explorer.exe  [WH] [local@context-menu-overhaul] [2129:ApplyRegistryIcons]: Registry icon for '&Pin to Start' (verb 'PinToStartScreen'): C:\WINDOWS\System32\StartMenuHelper64.dll,0
+00:36:00.731 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4274:Run]: Warm-up finished
+00:36:01.692 53744 explorer.exe  [WH] [local@context-menu-overhaul] [4274:Run]: Warm-up finished
+00:36:44.588 53744 explorer.exe  [WH] [local@context-menu-overhaul] [4951:Wh_ModSettingsChanged]: Context Menu Overhaul settings changed
+00:36:44.593 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4951:Wh_ModSettingsChanged]: Context Menu Overhaul settings changed
+00:36:46.449 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4805:IUnknown_QueryService_Hook]: Blocking modern context menu presenter
+00:36:46.450 11560 explorer.exe  [WH] [local@context-menu-overhaul] [1600:QueryContextMenu_Hook]: QueryContextMenu deferred: this=00000000C89C6C00 idFirst=30977 flags=00020494
+00:36:46.450 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4736:TrackPopupMenu_Hook]: Replacing context menu: kind=2
+00:36:46.450 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4575:ShowReplacementMenu]: Cache hit: scope=0 key=.log shape=0 paths=1
+00:36:46.451 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4607:ShowReplacementMenu]: Menu prep: 0 ms
+00:37:00.750 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4805:IUnknown_QueryService_Hook]: Blocking modern context menu presenter
+00:37:00.759 11560 explorer.exe  [WH] [local@context-menu-overhaul] [1600:QueryContextMenu_Hook]: QueryContextMenu deferred: this=00000000C89C60E0 idFirst=30977 flags=00020494
+00:37:00.759 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4736:TrackPopupMenu_Hook]: Replacing context menu: kind=2
+00:37:00.759 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4575:ShowReplacementMenu]: Cache hit: scope=0 key=.log shape=0 paths=1
+00:37:00.759 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4607:ShowReplacementMenu]: Menu prep: 0 ms
+00:37:09.061 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4805:IUnknown_QueryService_Hook]: Blocking modern context menu presenter
+00:37:09.061 11560 explorer.exe  [WH] [local@context-menu-overhaul] [1600:QueryContextMenu_Hook]: QueryContextMenu deferred: this=00000000C35262A0 idFirst=30977 flags=00020494
+00:37:09.062 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4736:TrackPopupMenu_Hook]: Replacing context menu: kind=2
+00:37:09.062 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4575:ShowReplacementMenu]: Cache hit: scope=1 key=* shape=0 paths=1
+00:37:09.062 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4607:ShowReplacementMenu]: Menu prep: 0 ms
+00:37:22.121 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4805:IUnknown_QueryService_Hook]: Blocking modern context menu presenter
+00:37:22.121 11560 explorer.exe  [WH] [local@context-menu-overhaul] [1600:QueryContextMenu_Hook]: QueryContextMenu deferred: this=00000000C89C6C00 idFirst=30977 flags=00020494
+00:37:22.121 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4736:TrackPopupMenu_Hook]: Replacing context menu: kind=2
+00:37:22.121 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4575:ShowReplacementMenu]: Cache hit: scope=1 key=* shape=0 paths=1
+00:37:22.122 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4607:ShowReplacementMenu]: Menu prep: 0 ms
+00:37:28.608 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4805:IUnknown_QueryService_Hook]: Blocking modern context menu presenter
+00:37:28.608 11560 explorer.exe  [WH] [local@context-menu-overhaul] [1600:QueryContextMenu_Hook]: QueryContextMenu deferred: this=00000000C89C60E0 idFirst=31013 flags=00020424
+00:37:28.609 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4736:TrackPopupMenu_Hook]: Replacing context menu: kind=2
+00:37:28.609 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4575:ShowReplacementMenu]: Cache hit: scope=2 key=* shape=0 paths=0
+00:37:28.609 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4607:ShowReplacementMenu]: Menu prep: 0 ms
+00:37:31.446 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4805:IUnknown_QueryService_Hook]: Blocking modern context menu presenter
+00:37:31.446 11560 explorer.exe  [WH] [local@context-menu-overhaul] [1600:QueryContextMenu_Hook]: QueryContextMenu deferred: this=00000000C89C3460 idFirst=30977 flags=00020494
+00:37:31.447 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4736:TrackPopupMenu_Hook]: Replacing context menu: kind=2
+00:37:31.447 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4575:ShowReplacementMenu]: Cache hit: scope=0 key=* shape=0 paths=1
+00:37:31.447 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4607:ShowReplacementMenu]: Menu prep: 0 ms
+00:37:43.601 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4951:Wh_ModSettingsChanged]: Context Menu Overhaul settings changed
+00:37:43.638 53744 explorer.exe  [WH] [local@context-menu-overhaul] [4951:Wh_ModSettingsChanged]: Context Menu Overhaul settings changed
+00:37:45.313 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4805:IUnknown_QueryService_Hook]: Blocking modern context menu presenter
+00:37:45.314 11560 explorer.exe  [WH] [local@context-menu-overhaul] [1600:QueryContextMenu_Hook]: QueryContextMenu deferred: this=00000000C89C6670 idFirst=30977 flags=00020494
+00:37:45.314 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4736:TrackPopupMenu_Hook]: Replacing context menu: kind=2
+00:37:45.314 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4575:ShowReplacementMenu]: Cache hit: scope=0 key=* shape=0 paths=1
+00:37:45.315 11560 explorer.exe  [WH] [local@context-menu-overhaul] [4607:ShowReplacementMenu]: Menu prep: 0 ms

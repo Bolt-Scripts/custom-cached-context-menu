@@ -2,7 +2,7 @@
 // @id              context-menu-overhaul
 // @name            Context Menu Overhaul
 // @description     Replaces the Explorer context menu with an instantly-opening cached menu, then discovers and caches shell extension items asynchronously.
-// @version         0.3.10
+// @version         0.3.11
 // @include         explorer.exe
 // @architecture    x86-64
 // @compilerOptions -lole32 -lshlwapi -luuid -lcomctl32 -ladvapi32 -lgdi32 -luxtheme -lversion
@@ -30,8 +30,11 @@ Design document: `docs/superpowers/specs/2026-10-04-context-menu-overhaul-design
   $name: Shift bypass
   $description: Hold Shift while right-clicking to show the untouched native menu.
 - showMoreOptionsItem: true
-  $name: Show more options item
-  $description: Add a "Show more options" entry at the bottom of the replacement menu.
+  $name: Show classic menu item
+  $description: Add a "Show classic menu" entry at the bottom of the replacement menu.
+- submenuDelayMs: 150
+  $name: Submenu open delay
+  $description: Milliseconds before a hovered submenu opens while the replacement menu is shown. 0 opens instantly; -1 keeps the Windows setting.
 - warmupExtensions: [".txt", ".pdf", ".zip", ".rar", ".7z", ".jpg", ".png", ".mp4", ".mp3", ".docx", ".xlsx", ".exe", ".lnk"]
   $name: Warm-up extensions
   $description: File types whose menus are pre-built at Explorer startup.
@@ -99,6 +102,7 @@ namespace cmo {
 struct Settings {
     bool enableShiftBypass = true;
     bool showMoreOptionsItem = true;
+    int submenuDelayMs = 150;
     int warmupDelaySeconds = 5;
     bool clearCache = false;
     bool debugLogging = false;
@@ -165,6 +169,7 @@ std::vector<std::wstring> ParseAdvancedItems(const std::wstring& text) {
 void LoadSettings() {
     g_settings.enableShiftBypass = Wh_GetIntSetting(L"enableShiftBypass") != 0;
     g_settings.showMoreOptionsItem = Wh_GetIntSetting(L"showMoreOptionsItem") != 0;
+    g_settings.submenuDelayMs = Wh_GetIntSetting(L"submenuDelayMs");
     g_settings.warmupDelaySeconds = Wh_GetIntSetting(L"warmupDelaySeconds");
     g_settings.clearCache = Wh_GetIntSetting(L"clearCache") != 0;
     g_settings.debugLogging = Wh_GetIntSetting(L"debugLogging") != 0;
@@ -479,15 +484,22 @@ void ReorganizeAdvancedItems(std::vector<MenuItem>& items) {
             kept.push_back(std::move(item));
         }
     }
-    if (advanced.empty()) {
-        return;
-    }
-
     if (g_settings.debugLogging) {
         for (const MenuItem& item : advanced) {
             Wh_Log(L"More options: moved '%s' (verb '%s')", item.label.c_str(),
                    item.canonicalVerb.c_str());
         }
+        for (const MenuItem& item : kept) {
+            if (item.kind != ItemKind::Separator &&
+                item.action != ActionKind::Fallback &&
+                (item.flags & kModelExtension)) {
+                Wh_Log(L"More options: kept '%s' (verb '%s')", item.label.c_str(),
+                       item.canonicalVerb.c_str());
+            }
+        }
+    }
+    if (advanced.empty()) {
+        return;
     }
 
     MenuItem submenu{};
@@ -595,7 +607,7 @@ MenuModel BuildCoreModel(Scope scope, const std::vector<std::wstring>& paths, Sh
         item.id = nextId++;
         item.kind = ItemKind::Command;
         item.action = ActionKind::Fallback;
-        item.label = L"Show more options";
+        item.label = L"Show classic menu";
         model.items.push_back(std::move(item));
     };
 
@@ -3359,6 +3371,58 @@ void RestoreMenuAnimation() {
     }
 }
 
+// Temporarily lowers the system submenu show delay (MenuShowDelay, default
+// 400 ms) while the replacement menu is open; the previous value is restored
+// on scope exit. The delay is never lengthened, and a configured value of -1
+// leaves the system setting alone.
+std::atomic<bool> g_menuDelaySuppressed{false};
+std::atomic<DWORD> g_menuDelayOriginal{400};
+
+class MenuDelaySuppressor {
+public:
+    MenuDelaySuppressor() {
+        if (g_settings.submenuDelayMs < 0) {
+            return;
+        }
+        DWORD current = 0;
+        if (!SystemParametersInfoW(SPI_GETMENUSHOWDELAY, 0, &current, 0)) {
+            return;
+        }
+        if (current <= static_cast<DWORD>(g_settings.submenuDelayMs)) {
+            return;
+        }
+        g_menuDelayOriginal.store(current);
+        if (SystemParametersInfoW(SPI_SETMENUSHOWDELAY,
+                                  static_cast<UINT>(g_settings.submenuDelayMs),
+                                  nullptr, 0)) {
+            active_ = true;
+            g_menuDelaySuppressed.store(true);
+        }
+    }
+
+    ~MenuDelaySuppressor() {
+        if (!active_) {
+            return;
+        }
+        SystemParametersInfoW(SPI_SETMENUSHOWDELAY,
+                              static_cast<UINT>(g_menuDelayOriginal.load()), nullptr,
+                              0);
+        g_menuDelaySuppressed.store(false);
+    }
+
+private:
+    bool active_ = false;
+};
+
+// Defensive restore in case a suppressor was active when the mod unloaded.
+void RestoreMenuDelay() {
+    if (g_menuDelaySuppressed.exchange(false)) {
+        SystemParametersInfoW(SPI_SETMENUSHOWDELAY,
+                              static_cast<UINT>(g_menuDelayOriginal.load()), nullptr,
+                              0);
+    }
+}
+
 // Parses a shell icon reference: "file,index", "file", or a quoted path with
 // an optional trailing ",index". Environment expansion happens at load time.
 bool ParseIconRef(std::wstring_view ref, std::wstring& path, int& index) {
@@ -3853,6 +3917,7 @@ public:
 
         const UINT flags = TPM_RETURNCMD | TPM_NONOTIFY | TPM_LEFTALIGN | TPM_TOPALIGN;
         MenuAnimationSuppressor animationSuppressor;
+        MenuDelaySuppressor delaySuppressor;
         int command = TrackPopupMenuEx_Original(menu, flags, pt.x, pt.y, owner, nullptr);
         DestroyMenu(menu);
 
@@ -4937,6 +5002,7 @@ void Wh_ModAfterInit() {
 void Wh_ModUninit() {
     Wh_Log(L"Context Menu Overhaul uninit");
     cmo::RestoreMenuAnimation();
+    cmo::RestoreMenuDelay();
     cmo::g_warmup.Stop();
     cmo::g_invalidation.Stop();
     cmo::g_iconCache.Clear();

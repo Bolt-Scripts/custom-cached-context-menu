@@ -2754,6 +2754,30 @@ int main() {
         CHECK(!cmo::DecodeConfigBytes(invalid, decoded));
     }
 
+    // v2.1 ConfigStore: on-open reload, no thread, last good kept.
+    {
+        const std::wstring path = cmo::ConfigFilePath();
+        DeleteFileW(path.c_str());
+        cmo::ConfigStore store;
+        store.EnsureLoaded();
+        CHECK(store.Revision() == 1);  // default file loaded
+        CHECK(store.Snapshot() != nullptr);
+
+        CHECK(cmo::WriteConfigFile(path, L"[appearance]\ncornerRadius = 7\n"));
+        store.RefreshIfChanged();
+        CHECK(store.Revision() == 2);
+        CHECK(store.Snapshot()->appearance.cornerRadius == 7);
+
+        store.RefreshIfChanged();  // unchanged: no bump
+        CHECK(store.Revision() == 2);
+
+        CHECK(cmo::WriteConfigFile(path, L"[appearance]\ncornerRadius = nope\n"));
+        store.RefreshIfChanged();
+        CHECK(store.Revision() == 2);
+        CHECK(store.Snapshot()->appearance.cornerRadius == 7);
+        DeleteFileW(path.c_str());
+    }
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

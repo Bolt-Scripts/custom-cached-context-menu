@@ -2481,10 +2481,11 @@ std::wstring ConfigFilePath() {
 
 class ConfigStore {
 public:
-    void Start() {
-        if (thread_) {
+    void EnsureLoaded() {
+        if (loaded_) {
             return;
         }
+        loaded_ = true;
         const std::wstring path = ConfigFilePath();
         if (path.empty()) {
             return;
@@ -2494,46 +2495,42 @@ public:
             CreateDirectoryW(path.substr(0, slash).c_str(), nullptr);
         }
         if (GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) {
-            WriteDefaultFile(path);
+            WriteConfigFile(path, DefaultRulesConfigText());
         }
         std::wstring text;
-        if (ReadTextFile(path, text)) {
+        if (ReadConfigFile(path, text)) {
             ApplyText(text);
         }
-
-        stopEvent_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-        if (!stopEvent_) {
-            return;
-        }
-        thread_ = CreateThread(nullptr, 0, &ConfigStore::ThreadProc, this, 0, nullptr);
-        if (!thread_) {
-            CloseHandle(stopEvent_);
-            stopEvent_ = nullptr;
-        }
+        UpdateStamp(path);
     }
 
-    void Stop() {
-        if (stopEvent_) {
-            SetEvent(stopEvent_);
+    // Called at menu open: reloads only when the file changed.
+    void RefreshIfChanged() {
+        EnsureLoaded();
+        const std::wstring path = ConfigFilePath();
+        if (path.empty()) {
+            return;
         }
-        if (thread_) {
-            const DWORD wait = WaitForSingleObject(thread_, 2000);
-            if (wait == WAIT_OBJECT_0) {
-                CloseHandle(thread_);
-                if (stopEvent_) {
-                    CloseHandle(stopEvent_);
-                    stopEvent_ = nullptr;
-                }
-            } else {
-                // The watcher did not exit in time; leave its handles alone so it
-                // can never touch freed state after unload. The OS reclaims them
-                // when the process exits.
-                Wh_Log(L"menu.ini watcher did not stop in time; leaving it parked");
-            }
-            thread_ = nullptr;
-        } else if (stopEvent_) {
-            CloseHandle(stopEvent_);
-            stopEvent_ = nullptr;
+        WIN32_FILE_ATTRIBUTE_DATA attributes = {};
+        if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &attributes)) {
+            return;  // Deleted: keep the last good snapshot.
+        }
+        const uint64_t size =
+            (static_cast<uint64_t>(attributes.nFileSizeHigh) << 32) |
+            attributes.nFileSizeLow;
+        if (stampValid_ && size == stampSize_ &&
+            attributes.ftLastWriteTime.dwLowDateTime == stampTimeLow_ &&
+            attributes.ftLastWriteTime.dwHighDateTime == stampTimeHigh_) {
+            return;
+        }
+        stampValid_ = true;
+        stampSize_ = size;
+        stampTimeLow_ = attributes.ftLastWriteTime.dwLowDateTime;
+        stampTimeHigh_ = attributes.ftLastWriteTime.dwHighDateTime;
+
+        std::wstring text;
+        if (ReadConfigFile(path, text)) {
+            ApplyText(text);
         }
     }
 
@@ -2552,6 +2549,19 @@ public:
     }
 
 private:
+    void UpdateStamp(const std::wstring& path) {
+        WIN32_FILE_ATTRIBUTE_DATA attributes = {};
+        if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &attributes)) {
+            stampValid_ = false;
+            return;
+        }
+        stampValid_ = true;
+        stampSize_ = (static_cast<uint64_t>(attributes.nFileSizeHigh) << 32) |
+                     attributes.nFileSizeLow;
+        stampTimeLow_ = attributes.ftLastWriteTime.dwLowDateTime;
+        stampTimeHigh_ = attributes.ftLastWriteTime.dwHighDateTime;
+    }
+
     bool ApplyText(const std::wstring& text) {
         RulesConfig parsed;
         std::vector<ConfigParseError> errors;
@@ -2573,138 +2583,13 @@ private:
         return true;
     }
 
-    static void WriteDefaultFile(const std::wstring& path) {
-        const std::wstring text = DefaultRulesConfigText();
-        HANDLE file =
-            CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
-                        FILE_ATTRIBUTE_NORMAL, nullptr);
-        if (file == INVALID_HANDLE_VALUE) {
-            return;
-        }
-        DWORD written = 0;
-        WriteFile(file, text.c_str(),
-                  static_cast<DWORD>(text.size() * sizeof(wchar_t)), &written,
-                  nullptr);
-        CloseHandle(file);
-    }
-
-    static bool ReadTextFile(const std::wstring& path, std::wstring& text) {
-        HANDLE file =
-            CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
-                        nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-        if (file == INVALID_HANDLE_VALUE) {
-            return false;
-        }
-        LARGE_INTEGER size = {};
-        if (!GetFileSizeEx(file, &size) || size.QuadPart > 1024 * 1024) {
-            CloseHandle(file);
-            return false;
-        }
-        const size_t bytes = static_cast<size_t>(size.QuadPart);
-        // Round up so an odd byte count can never overrun the buffer.
-        text.assign((bytes + sizeof(wchar_t) - 1) / sizeof(wchar_t), L'\0');
-        DWORD read = 0;
-        const BOOL ok = ReadFile(file, text.data(), static_cast<DWORD>(bytes),
-                                 &read, nullptr);
-        CloseHandle(file);
-        if (!ok) {
-            return false;
-        }
-        text.resize(read / sizeof(wchar_t));
-        return true;
-    }
-
-    static DWORD WINAPI ThreadProc(LPVOID param) {
-        static_cast<ConfigStore*>(param)->Run();
-        return 0;
-    }
-
-    void Run() {
-        const std::wstring path = ConfigFilePath();
-        const size_t slash = path.find_last_of(L'\\');
-        if (slash == std::wstring::npos) {
-            return;
-        }
-        const std::wstring dir = path.substr(0, slash);
-        const std::wstring fileName = path.substr(slash + 1);
-
-        HANDLE dirHandle = CreateFileW(
-            dir.c_str(), FILE_LIST_DIRECTORY,
-            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
-            OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED,
-            nullptr);
-        if (dirHandle == INVALID_HANDLE_VALUE) {
-            return;
-        }
-
-        OVERLAPPED overlapped = {};
-        overlapped.hEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-        if (!overlapped.hEvent) {
-            CloseHandle(dirHandle);
-            return;
-        }
-
-        std::vector<BYTE> buffer(4096);
-        HANDLE events[2] = {stopEvent_, overlapped.hEvent};
-        for (;;) {
-            DWORD bytes = 0;
-            ResetEvent(overlapped.hEvent);
-            if (!ReadDirectoryChangesW(
-                    dirHandle, buffer.data(), static_cast<DWORD>(buffer.size()), FALSE,
-                    FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_SIZE |
-                        FILE_NOTIFY_CHANGE_FILE_NAME,
-                    nullptr, &overlapped, nullptr)) {
-                break;
-            }
-            const DWORD wait = WaitForMultipleObjects(2, events, FALSE, INFINITE);
-            if (wait == WAIT_OBJECT_0) {
-                CancelIo(dirHandle);
-                GetOverlappedResult(dirHandle, &overlapped, &bytes, TRUE);
-                break;
-            }
-            if (wait != WAIT_OBJECT_0 + 1 ||
-                !GetOverlappedResult(dirHandle, &overlapped, &bytes, FALSE)) {
-                CancelIo(dirHandle);
-                GetOverlappedResult(dirHandle, &overlapped, &bytes, TRUE);
-                break;
-            }
-
-            bool menuChanged = false;
-            DWORD offset = 0;
-            while (offset < bytes) {
-                auto* info =
-                    reinterpret_cast<FILE_NOTIFY_INFORMATION*>(buffer.data() + offset);
-                const std::wstring name(info->FileName,
-                                        info->FileNameLength / sizeof(wchar_t));
-                if (_wcsicmp(name.c_str(), fileName.c_str()) == 0) {
-                    menuChanged = true;
-                }
-                if (info->NextEntryOffset == 0) {
-                    break;
-                }
-                offset += info->NextEntryOffset;
-            }
-            if (!menuChanged) {
-                continue;
-            }
-
-            // Debounce editor write bursts.
-            if (WaitForSingleObject(stopEvent_, 300) == WAIT_OBJECT_0) {
-                break;
-            }
-            std::wstring text;
-            if (ReadTextFile(path, text)) {
-                ApplyText(text);
-            }
-        }
-        CloseHandle(overlapped.hEvent);
-        CloseHandle(dirHandle);
-    }
-
     mutable std::mutex mutex_;
     std::shared_ptr<const RulesConfig> config_;
-    HANDLE thread_ = nullptr;
-    HANDLE stopEvent_ = nullptr;
+    bool loaded_ = false;
+    bool stampValid_ = false;
+    uint64_t stampSize_ = 0;
+    DWORD stampTimeLow_ = 0;
+    DWORD stampTimeHigh_ = 0;
 };
 
 inline ConfigStore g_configStore;
@@ -9953,6 +9838,8 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
             });
         }
 
+        g_configStore.EnsureLoaded();
+        g_configStore.RefreshIfChanged();
         std::shared_ptr<const RulesConfig> rules = g_configStore.Snapshot();
         bool hasMoveRules = false;
         if (rules) {
@@ -10306,7 +10193,6 @@ BOOL Wh_ModInit() {
         }
     }
     cmo::g_invalidation.Start();
-    cmo::g_configStore.Start();
     cmo::g_warmup.Start();
     cmo::RebuildSendToChildren();
 
@@ -10333,7 +10219,6 @@ void Wh_ModAfterInit() {
 
 void Wh_ModUninit() {
     Wh_Log(L"Context Menu Overhaul uninit");
-    cmo::g_configStore.Stop();
     cmo::g_menuWindowPool.DestroyAll();
     cmo::g_contentCaches.Clear();
     cmo::g_layoutCache.InvalidateAll();

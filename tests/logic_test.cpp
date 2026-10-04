@@ -731,6 +731,41 @@ int main() {
         }
     }
 
+    // Unlabeled items are hidden: they cannot be rendered faithfully and
+    // their cached offsets can dispatch the wrong command.
+    {
+        cmo::MenuModel unlabeled{};
+        cmo::MenuItem labeledItem{};
+        labeledItem.id = 1;
+        labeledItem.kind = cmo::ItemKind::Command;
+        labeledItem.label = L"Open";
+        cmo::MenuItem blankItem{};
+        blankItem.id = 2;
+        blankItem.kind = cmo::ItemKind::Command;
+        cmo::MenuItem separatorItem{};
+        separatorItem.id = 3;
+        separatorItem.kind = cmo::ItemKind::Separator;
+        cmo::MenuItem parentItem{};
+        parentItem.id = 4;
+        parentItem.kind = cmo::ItemKind::Submenu;
+        parentItem.label = L"WinRAR";
+        cmo::MenuItem blankChild{};
+        blankChild.id = 5;
+        blankChild.kind = cmo::ItemKind::Command;
+        parentItem.children.push_back(blankChild);
+        cmo::MenuItem blankParent{};
+        blankParent.id = 6;
+        blankParent.kind = cmo::ItemKind::Submenu;
+        unlabeled.items = {labeledItem, blankItem, separatorItem, parentItem,
+                           blankParent};
+        cmo::RemoveUnlabeledItems(unlabeled.items);
+        CHECK(unlabeled.items.size() == 3);
+        CHECK(unlabeled.items[0].label == L"Open");
+        CHECK(unlabeled.items[1].kind == cmo::ItemKind::Separator);
+        CHECK(unlabeled.items[2].label == L"WinRAR");
+        CHECK(unlabeled.items[2].children.empty());
+    }
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

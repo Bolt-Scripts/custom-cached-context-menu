@@ -53,6 +53,9 @@ untouched native menu, including extended verbs.
   are localized.
 - "Sort by" / "New" / "Paste shortcut" fall back to the native menu on builds
   where the shell object rejects those verbs.
+- Rare entries whose labels cannot be read from the shell (dynamic or
+  owner-drawn items) are hidden rather than shown blank; each one is logged as
+  `[suspicious dN] ...` so it can be reported.
 - Rename, Refresh, and the View modes use the documented `IFolderView2` /
   `IShellView` APIs; the old `FCIDM_*` view command IDs are not used.
 

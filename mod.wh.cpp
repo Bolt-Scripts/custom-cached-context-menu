@@ -2,7 +2,7 @@
 // @id              context-menu-overhaul
 // @name            Context Menu Overhaul
 // @description     Replaces the Explorer context menu with an instantly-opening cached menu, then discovers and caches shell extension items asynchronously.
-// @version         0.2.3
+// @version         0.2.4
 // @include         explorer.exe
 // @architecture    x86-64
 // @compilerOptions -lole32 -lshlwapi -luuid -lcomctl32 -ladvapi32 -lgdi32
@@ -270,6 +270,32 @@ std::wstring FormatMultiLabel(std::wstring_view verb, size_t count) {
         return std::wstring(verb);
     }
     return std::wstring(verb) + L" " + std::to_wstring(count) + L" items";
+}
+
+// Removes non-separator items without a label. Such items cannot be rendered
+// faithfully, and their cached offsets can dispatch the wrong command.
+void RemoveUnlabeledItems(std::vector<MenuItem>& items) {
+    std::erase_if(items, [](const MenuItem& item) {
+        return item.kind != ItemKind::Separator && item.label.empty();
+    });
+    for (MenuItem& item : items) {
+        RemoveUnlabeledItems(item.children);
+    }
+}
+
+// Logs any unlabeled item with its full descriptor so the extension behavior
+// can be identified from a single run.
+void DumpSuspiciousItems(const std::vector<MenuItem>& items, int depth) {
+    for (const MenuItem& item : items) {
+        if (item.kind != ItemKind::Separator && item.label.empty()) {
+            Wh_Log(L"[suspicious d%d] kind=%d action=%d flags=%04X offset=%u "
+                   L"verb='%s' children=%zu",
+                   depth, static_cast<int>(item.kind), static_cast<int>(item.action),
+                   item.flags, item.verbOffset, item.canonicalVerb.c_str(),
+                   item.children.size());
+        }
+        DumpSuspiciousItems(item.children, depth + 1);
+    }
 }
 
 // Core model for a context. The common commands come first, cached extension
@@ -3096,6 +3122,8 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
             return item.action == ActionKind::Fallback;
         });
     }
+    DumpSuspiciousItems(model.items, 0);
+    RemoveUnlabeledItems(model.items);
 
     if (ShouldShowNativeReplay(model.flags)) {
         Wh_Log(L"Owner-draw context: using the native menu");

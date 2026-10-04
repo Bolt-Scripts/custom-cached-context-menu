@@ -61,6 +61,28 @@ int main() {
     CHECK(cmo::IsReplaceableKind(cmo::ShellViewKind::Desktop));
     CHECK(!cmo::IsReplaceableKind(cmo::ShellViewKind::NavPane));
 
+    cmo::PendingQueue queue;
+    cmo::PendingCapture capture{};
+    capture.tick = 1000;
+    capture.idCmdFirst = 11;
+    queue.Push(capture);
+    cmo::PendingCapture* taken = queue.Take();
+    CHECK(taken != nullptr);
+    CHECK(taken && taken->idCmdFirst == 11);
+    CHECK(queue.Take() == nullptr);
+
+    queue.Push(capture);
+    queue.ExpireOlderThan(1200, 500);
+    CHECK(queue.Take() != nullptr);
+
+    queue.Push(capture);
+    queue.ExpireOlderThan(2000, 500);
+    CHECK(queue.Take() == nullptr);
+
+    queue.Push(capture);
+    queue.Clear();
+    CHECK(queue.Take() == nullptr);
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

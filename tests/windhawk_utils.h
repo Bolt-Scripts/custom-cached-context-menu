@@ -4,14 +4,14 @@
 #include <string>
 #include <vector>
 
+namespace WindhawkUtils {
+
 struct SYMBOL_HOOK {
     std::vector<std::wstring> symbols;
     void** pOriginalFunction;
     void* hookFunction;
     bool optional;
 };
-
-namespace WindhawkUtils {
 
 inline bool HookSymbols(HMODULE module, SYMBOL_HOOK* hooks, size_t hookCount) {
     (void)module;

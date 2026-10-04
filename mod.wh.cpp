@@ -2,7 +2,7 @@
 // @id              context-menu-overhaul
 // @name            Context Menu Overhaul
 // @description     Replaces the Explorer context menu with an instantly-opening cached menu, then discovers and caches shell extension items asynchronously.
-// @version         0.3.3
+// @version         0.3.4
 // @include         explorer.exe
 // @architecture    x86-64
 // @compilerOptions -lole32 -lshlwapi -luuid -lcomctl32 -ladvapi32 -lgdi32 -luxtheme
@@ -549,7 +549,7 @@ MenuModel MergeCoreWithCached(const MenuModel& core, const MenuModel& cached) {
 namespace cmo {
 
 constexpr uint32_t kCacheMagic = 0x434F4D4F;  // "COMO"
-constexpr uint32_t kCacheVersion = 9;
+constexpr uint32_t kCacheVersion = 10;
 constexpr uint32_t kMaxCacheEntries = 1024;
 constexpr uint32_t kMaxModelItems = 4096;
 constexpr uint32_t kMaxMenuDepth = 16;
@@ -1157,6 +1157,52 @@ inline bool ShouldShowNativeReplay(uint32_t modelFlags) {
     return (modelFlags & kModelOwnerDraw) != 0;
 }
 
+// True when the user's apps use the dark theme.
+inline bool IsDarkThemeActive() {
+    DWORD lightTheme = 1;
+    DWORD size = sizeof(lightTheme);
+    HKEY key = nullptr;
+    if (RegOpenKeyExW(
+            HKEY_CURRENT_USER,
+            L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize", 0,
+            KEY_READ, &key) == ERROR_SUCCESS) {
+        RegQueryValueExW(key, L"AppsUseLightTheme", nullptr, nullptr,
+                         reinterpret_cast<LPBYTE>(&lightTheme), &size);
+        RegCloseKey(key);
+    }
+    return lightTheme == 0;
+}
+
+// The actual menu background color for the owner window's theme. The theme
+// lookup can return light colors even in dark mode, so the result is sanity
+// checked against the registry theme setting.
+inline COLORREF MenuBackgroundColor(HWND owner) {
+    COLORREF color = 0;
+    bool haveColor = false;
+    HTHEME theme = OpenThemeData(owner, L"Menu");
+    if (theme) {
+        if (SUCCEEDED(GetThemeColor(theme, MENU_POPUPBACKGROUND, 0, TMT_FILLCOLOR,
+                                    &color))) {
+            haveColor = true;
+        }
+        CloseThemeData(theme);
+    }
+    if (!haveColor) {
+        color = GetSysColor(COLOR_MENU);
+    }
+
+    const bool darkTheme = IsDarkThemeActive();
+    const int luminance =
+        (GetRValue(color) * 30 + GetGValue(color) * 59 + GetBValue(color) * 11) / 100;
+    if (darkTheme && luminance > 128) {
+        return RGB(44, 44, 44);
+    }
+    if (!darkTheme && luminance < 128) {
+        return GetSysColor(COLOR_MENU);
+    }
+    return color;
+}
+
 inline bool IsDesktopRootWindow(HWND hwnd) {
     HWND root = GetAncestor(hwnd, GA_ROOT);
     if (!root) {
@@ -1558,7 +1604,7 @@ void ApplyRegistryIcons(std::vector<MenuItem>& items,
             item.iconRef = icon;
             Wh_Log(L"Registry icon for '%s' (verb '%s'): %s", item.label.c_str(),
                    item.canonicalVerb.c_str(), icon.c_str());
-        } else {
+        } else if (g_settings.debugLogging) {
             Wh_Log(L"No registry icon for '%s' (verb '%s')", item.label.c_str(),
                    item.canonicalVerb.c_str());
         }
@@ -1591,6 +1637,12 @@ void BuildItemsFromHMenu(HMENU menu, UINT idCmdFirst, IContextMenu* context,
                                                ARRAYSIZE(labelBuffer), MF_BYPOSITION);
         if (labelLength > 0) {
             item.label.assign(labelBuffer, static_cast<size_t>(labelLength));
+        }
+
+        if (info.hbmpItem && reinterpret_cast<INT_PTR>(info.hbmpItem) <= 16) {
+            Wh_Log(L"Sentinel menu bitmap %lld for '%s'",
+                   static_cast<long long>(reinterpret_cast<INT_PTR>(info.hbmpItem)),
+                   item.label.c_str());
         }
 
         if (info.fType & MFT_OWNERDRAW) {
@@ -1690,6 +1742,174 @@ void DumpModelItems(const std::vector<MenuItem>& items, int depth) {
     }
 }
 
+// Copies icons captured before host initialization onto the post-init model,
+// matching by canonical verb first and label second.
+void MergePreInitIcons(std::vector<MenuItem>& post, const std::vector<MenuItem>& pre) {
+    for (MenuItem& item : post) {
+        const MenuItem* match = nullptr;
+        for (const MenuItem& candidate : pre) {
+            if (!item.canonicalVerb.empty() && !candidate.canonicalVerb.empty() &&
+                candidate.canonicalVerb == item.canonicalVerb) {
+                match = &candidate;
+                break;
+            }
+        }
+        if (!match) {
+            for (const MenuItem& candidate : pre) {
+                if (!item.label.empty() && !candidate.label.empty() &&
+                    candidate.label == item.label) {
+                    match = &candidate;
+                    break;
+                }
+            }
+        }
+
+        if (item.iconPixels.empty() && item.action == ActionKind::ShellVerb && match &&
+            !match->iconPixels.empty()) {
+            item.iconPixels = match->iconPixels;
+        }
+        if (match) {
+            MergePreInitIcons(item.children, match->children);
+        }
+    }
+}
+
+// Asks the extension to draw an item into an offscreen bitmap (the owner-draw
+// path) and crops the icon gutter. Covers items that expose no MIM_BITMAP,
+// including HBMMENU_CALLBACK items.
+bool CaptureOwnerDrawIcon(PendingCapture& capture, const MenuItem& item,
+                          std::vector<uint8_t>& out) {
+    if (!capture.contextMenu2 && !capture.contextMenu3) {
+        return false;
+    }
+
+    const int height =
+        std::max(24, static_cast<int>(GetSystemMetrics(SM_CYMENU)));
+    const int width = height * 4;
+    const UINT commandId = capture.idCmdFirst + item.verbOffset;
+
+    HDC screen = GetDC(nullptr);
+    HDC memory = CreateCompatibleDC(screen);
+
+    BITMAPINFO dibInfo = {};
+    dibInfo.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    dibInfo.bmiHeader.biWidth = width;
+    dibInfo.bmiHeader.biHeight = -height;  // top-down
+    dibInfo.bmiHeader.biPlanes = 1;
+    dibInfo.bmiHeader.biBitCount = 32;
+    dibInfo.bmiHeader.biCompression = BI_RGB;
+
+    void* bits = nullptr;
+    HBITMAP bitmap =
+        CreateDIBSection(screen, &dibInfo, DIB_RGB_COLORS, &bits, nullptr, 0);
+    if (!bitmap || !bits) {
+        if (bitmap) {
+            DeleteObject(bitmap);
+        }
+        DeleteDC(memory);
+        ReleaseDC(nullptr, screen);
+        return false;
+    }
+
+    HGDIOBJ oldBitmap = SelectObject(memory, bitmap);
+    const COLORREF background = MenuBackgroundColor(capture.owner);
+    RECT rect = {0, 0, width, height};
+    HBRUSH backgroundBrush = CreateSolidBrush(background);
+    FillRect(memory, &rect, backgroundBrush);
+    DeleteObject(backgroundBrush);
+
+    DRAWITEMSTRUCT drawInfo = {};
+    drawInfo.CtlType = ODT_MENU;
+    drawInfo.CtlID = commandId;
+    drawInfo.itemID = commandId;
+    drawInfo.itemAction = ODA_DRAWENTIRE;
+    if (item.flags & kModelDisabled) {
+        drawInfo.itemState |= ODS_DISABLED;
+    }
+    if (item.flags & kModelChecked) {
+        drawInfo.itemState |= ODS_CHECKED;
+    }
+    if (item.flags & kModelDefault) {
+        drawInfo.itemState |= ODS_DEFAULT;
+    }
+    drawInfo.hwndItem = capture.owner;
+    drawInfo.hDC = memory;
+    drawInfo.rcItem = rect;
+
+    bool handled = false;
+    if (capture.contextMenu3) {
+        LRESULT result = 0;
+        handled = SUCCEEDED(capture.contextMenu3->HandleMenuMsg2(
+            WM_DRAWITEM, 0, reinterpret_cast<LPARAM>(&drawInfo), &result));
+    } else if (capture.contextMenu2) {
+        handled = SUCCEEDED(capture.contextMenu2->HandleMenuMsg(
+            WM_DRAWITEM, 0, reinterpret_cast<LPARAM>(&drawInfo)));
+    }
+
+    if (handled) {
+        // Crop the icon gutter: the bounding box of pixels that differ from
+        // the menu background in the left half of the item.
+        const uint8_t backgroundBlue = GetBValue(background);
+        const uint8_t backgroundGreen = GetGValue(background);
+        const uint8_t backgroundRed = GetRValue(background);
+        const uint8_t* pixels = static_cast<const uint8_t*>(bits);
+
+        int minX = width;
+        int minY = height;
+        int maxX = -1;
+        int maxY = -1;
+        const int scanWidth = width / 2;
+        for (int y = 0; y < height; ++y) {
+            for (int x = 0; x < scanWidth; ++x) {
+                const uint8_t* pixel = pixels + (static_cast<size_t>(y) * width + x) * 4;
+                if (pixel[0] != backgroundBlue || pixel[1] != backgroundGreen ||
+                    pixel[2] != backgroundRed) {
+                    if (x < minX) minX = x;
+                    if (x > maxX) maxX = x;
+                    if (y < minY) minY = y;
+                    if (y > maxY) maxY = y;
+                }
+            }
+        }
+        if (maxX >= minX && maxY >= minY) {
+            const int cropWidth = maxX - minX + 1;
+            const int cropHeight = maxY - minY + 1;
+            out.resize(static_cast<size_t>(cropWidth) * cropHeight * 4);
+            for (int y = 0; y < cropHeight; ++y) {
+                memcpy(out.data() + static_cast<size_t>(y) * cropWidth * 4,
+                       pixels + (static_cast<size_t>(minY + y) * width + minX) * 4,
+                       static_cast<size_t>(cropWidth) * 4);
+            }
+        }
+    }
+
+    SelectObject(memory, oldBitmap);
+    DeleteObject(bitmap);
+    DeleteDC(memory);
+    ReleaseDC(nullptr, screen);
+    return handled && !out.empty();
+}
+
+void CaptureOwnerDrawIcons(PendingCapture& capture, std::vector<MenuItem>& items) {
+    for (MenuItem& item : items) {
+        CaptureOwnerDrawIcons(capture, item.children);
+        if (!item.iconPixels.empty() || !item.iconRef.empty() ||
+            item.kind != ItemKind::Command || item.action != ActionKind::ShellVerb ||
+            !(item.flags & kModelHasOffset)) {
+            continue;
+        }
+
+        std::vector<uint8_t> pixels;
+        if (CaptureOwnerDrawIcon(capture, item, pixels)) {
+            item.iconPixels = std::move(pixels);
+            Wh_Log(L"Owner-draw icon captured for '%s'", item.label.c_str());
+        } else {
+            Wh_Log(L"Owner-draw draw not handled for '%s' (verb '%s')",
+                   item.label.c_str(), item.canonicalVerb.c_str());
+        }
+    }
+}
+
 void DiscoverIntoCache(PendingCapture& capture, const ContextSignature& signature) {
     if (capture.discoveryDone || !capture.obj) {
         return;
@@ -1699,10 +1919,21 @@ void DiscoverIntoCache(PendingCapture& capture, const ContextSignature& signatur
     }
 
     const ULONGLONG start = GetTickCount64();
+
+    // Capture the menu as populated, before host initialization: extensions
+    // often switch their bitmaps to callback-drawn icons on
+    // WM_INITMENUPOPUP, which would lose the real images.
+    MenuModel preInit = BuildModelFromHMenu(capture.populatedMenu, capture.idCmdFirst,
+                                            signature, capture.obj);
+
+    // Initialize like a real host, then rebuild for dynamic labels/children.
     InitializeMenuRecursive(capture, capture.populatedMenu, 0);
     MenuModel model = BuildModelFromHMenu(capture.populatedMenu, capture.idCmdFirst,
                                           signature, capture.obj);
+    MergePreInitIcons(model.items, preInit.items);
+
     ApplyRegistryIcons(model.items, signature);
+    CaptureOwnerDrawIcons(capture, model.items);
     model.handlerModules = capture.handlerModules;
     model.sourceStamp = capture.sourceStamp;
     capture.discoveryDone = true;
@@ -2811,7 +3042,7 @@ private:
             // Fill with the menu background first: menus draw bitmaps without
             // alpha, so the icon must be composited here.
             RECT rect = {0, 0, sizePx, sizePx};
-            HBRUSH backgroundBrush = CreateSolidBrush(MenuBackgroundColor());
+            HBRUSH backgroundBrush = CreateSolidBrush(MenuBackgroundColor(themeOwner_));
             FillRect(memory, &rect, backgroundBrush);
             DeleteObject(backgroundBrush);
             DrawIconEx(memory, 0, 0, icon, sizePx, sizePx, 0, nullptr, DI_NORMAL);
@@ -2820,36 +3051,6 @@ private:
         DeleteDC(memory);
         ReleaseDC(nullptr, screen);
         return bitmap;
-    }
-
-    COLORREF MenuBackgroundColor() const {
-        COLORREF color = 0;
-        bool haveColor = false;
-        HTHEME theme = OpenThemeData(themeOwner_, L"Menu");
-        if (theme) {
-            if (SUCCEEDED(GetThemeColor(theme, MENU_POPUPBACKGROUND, 0, TMT_FILLCOLOR,
-                                        &color))) {
-                haveColor = true;
-            }
-            CloseThemeData(theme);
-        }
-        if (!haveColor) {
-            color = GetSysColor(COLOR_MENU);
-        }
-
-        // The theme lookup can return light colors even in dark mode; keep
-        // the baked-in background consistent with the actual menu.
-        const bool darkTheme = IsDarkThemeActive();
-        const int luminance = (GetRValue(color) * 30 + GetGValue(color) * 59 +
-                               GetBValue(color) * 11) /
-                              100;
-        if (darkTheme && luminance > 128) {
-            return RGB(44, 44, 44);
-        }
-        if (!darkTheme && luminance < 128) {
-            return GetSysColor(COLOR_MENU);
-        }
-        return color;
     }
 
     // Composites captured BGRA pixels over the actual themed menu background
@@ -2883,7 +3084,7 @@ private:
             HGDIOBJ oldTarget = SelectObject(targetDc, target);
 
             RECT rect = {0, 0, sizePx, sizePx};
-            HBRUSH backgroundBrush = CreateSolidBrush(MenuBackgroundColor());
+            HBRUSH backgroundBrush = CreateSolidBrush(MenuBackgroundColor(themeOwner_));
             FillRect(targetDc, &rect, backgroundBrush);
             DeleteObject(backgroundBrush);
 
@@ -2983,21 +3184,6 @@ private:
         DeleteDC(targetDc);
         ReleaseDC(nullptr, screen);
         return target;
-    }
-
-    static bool IsDarkThemeActive() {
-        DWORD lightTheme = 1;
-        DWORD size = sizeof(lightTheme);
-        HKEY key = nullptr;
-        if (RegOpenKeyExW(
-                HKEY_CURRENT_USER,
-                L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
-                0, KEY_READ, &key) == ERROR_SUCCESS) {
-            RegQueryValueExW(key, L"AppsUseLightTheme", nullptr, nullptr,
-                             reinterpret_cast<LPBYTE>(&lightTheme), &size);
-            RegCloseKey(key);
-        }
-        return lightTheme == 0;
     }
 
     static bool FontExists(const wchar_t* faceName) {
@@ -3957,6 +4143,7 @@ BOOL WINAPI TrackPopupMenuEx_Hook(HMENU hMenu, UINT uFlags, int x, int y, HWND h
 
     if (path == MenuPath::Ours && hasPending) {
         Wh_Log(L"Replacing context menu: kind=%d", static_cast<int>(kind));
+        pending.owner = hWnd;
         ShowReplacementMenu(pending, kind, hWnd, POINT{x, y});
         ReleaseCapture(pending);
         return 0;
@@ -3990,6 +4177,7 @@ BOOL WINAPI TrackPopupMenu_Hook(HMENU hMenu, UINT uFlags, int x, int y, int nRes
 
     if (path == MenuPath::Ours && hasPending) {
         Wh_Log(L"Replacing context menu: kind=%d", static_cast<int>(kind));
+        pending.owner = hWnd;
         ShowReplacementMenu(pending, kind, hWnd, POINT{x, y});
         ReleaseCapture(pending);
         return 0;

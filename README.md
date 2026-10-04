@@ -50,11 +50,11 @@ untouched native menu, including extended verbs.
   replacement) is always used.
 - Icons: core actions (Cut/Copy/Rename/Delete/Properties/Open with/Paste/
   Refresh) use built-in icon-font glyphs; extension entries use the bitmap the
-  shell provides, or the verb's registry `Icon` value (matched by verb or by
-  display label) when the classic menu exposes no bitmap. Everything is
-  composited over the themed menu background, including alpha-less bitmaps
-  where black is the transparent color key; checked items keep the checkmark
-  gutter.
+  shell provides, an icon captured by asking the extension to draw the item
+  (owner-draw), or the verb's registry `Icon` value (matched by verb or display
+  label). Everything is composited over the themed menu background, including
+  alpha-less bitmaps where black is the transparent color key; checked items
+  keep the checkmark gutter.
 - Core menu labels are English; cached extension labels come from the shell and
   are localized.
 - "Sort by" / "New" / "Paste shortcut" fall back to the native menu on builds

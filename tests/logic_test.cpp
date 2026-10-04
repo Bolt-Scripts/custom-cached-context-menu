@@ -70,6 +70,43 @@ public:
     }
 };
 
+// Fake extension that paints a red square when asked to draw a menu item.
+class DrawingContextMenu2 : public IContextMenu2 {
+public:
+    int drawCalls = 0;
+
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID, void** ppvObject) override {
+        if (ppvObject) {
+            *ppvObject = nullptr;
+        }
+        return E_NOINTERFACE;
+    }
+    ULONG STDMETHODCALLTYPE AddRef() override { return 1; }
+    ULONG STDMETHODCALLTYPE Release() override { return 1; }
+    HRESULT STDMETHODCALLTYPE QueryContextMenu(HMENU, UINT, UINT, UINT, UINT) override {
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE InvokeCommand(CMINVOKECOMMANDINFO*) override {
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE GetCommandString(UINT_PTR, UINT, UINT*, LPSTR,
+                                               UINT) override {
+        return E_NOTIMPL;
+    }
+    HRESULT STDMETHODCALLTYPE HandleMenuMsg(UINT uMsg, WPARAM, LPARAM lParam) override {
+        if (uMsg != WM_DRAWITEM) {
+            return S_OK;
+        }
+        ++drawCalls;
+        auto* drawInfo = reinterpret_cast<DRAWITEMSTRUCT*>(lParam);
+        RECT rect = {4, 4, 20, 20};
+        HBRUSH brush = CreateSolidBrush(RGB(255, 0, 0));
+        FillRect(drawInfo->hDC, &rect, brush);
+        DeleteObject(brush);
+        return S_OK;
+    }
+};
+
 int main() {
     CHECK_EQ(cmo::MakeExtensionKey(L"file.txt"), std::wstring(L".txt"));
     CHECK_EQ(cmo::MakeExtensionKey(L"FILE.TXT"), std::wstring(L".txt"));
@@ -1014,6 +1051,57 @@ int main() {
 
             RegDeleteTreeW(HKEY_CURRENT_USER, L"Software\\Classes\\*\\shell\\cmolabel");
         }
+    }
+
+    // Owner-draw icons are captured from WM_DRAWITEM.
+    {
+        DrawingContextMenu2 drawingMenu;
+        cmo::PendingCapture drawCapture{};
+        drawCapture.contextMenu2 = &drawingMenu;
+        drawCapture.idCmdFirst = 1;
+        cmo::MenuItem drawItem{};
+        drawItem.label = L"Drawn";
+        drawItem.verbOffset = 0;
+        std::vector<uint8_t> drawnPixels;
+        CHECK(cmo::CaptureOwnerDrawIcon(drawCapture, drawItem, drawnPixels));
+        CHECK(drawingMenu.drawCalls == 1);
+        CHECK(!drawnPixels.empty());
+        bool foundRed = false;
+        for (size_t i = 0; i + 2 < drawnPixels.size(); i += 4) {
+            if (drawnPixels[i] < 64 && drawnPixels[i + 1] < 64 &&
+                drawnPixels[i + 2] > 200) {
+                foundRed = true;
+                break;
+            }
+        }
+        CHECK(foundRed);
+        drawCapture.contextMenu2 = nullptr;
+    }
+
+    // Icons captured before host initialization are merged onto the
+    // post-init model.
+    {
+        std::vector<cmo::MenuItem> post;
+        cmo::MenuItem postItem{};
+        postItem.id = 1;
+        postItem.kind = cmo::ItemKind::Command;
+        postItem.action = cmo::ActionKind::ShellVerb;
+        postItem.canonicalVerb = L"tsvn_checkout";
+        postItem.label = L"SVN Checkout...";
+        post.push_back(postItem);
+
+        std::vector<cmo::MenuItem> pre;
+        cmo::MenuItem preItem{};
+        preItem.id = 1;
+        preItem.kind = cmo::ItemKind::Command;
+        preItem.action = cmo::ActionKind::ShellVerb;
+        preItem.canonicalVerb = L"tsvn_checkout";
+        preItem.label = L"SVN Checkout...";
+        preItem.iconPixels.assign(24 * 24 * 4, 0x11);
+        pre.push_back(preItem);
+
+        cmo::MergePreInitIcons(post, pre);
+        CHECK(post.front().iconPixels.size() == 24 * 24 * 4);
     }
 
     // Instant menu open: while the suppressor is active the master menu

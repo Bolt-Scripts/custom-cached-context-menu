@@ -3045,6 +3045,34 @@ int main() {
         CHECK(panel.y == 38);
     }
 
+    // v2.1 shadow: per-corner mask and blurred bitmap.
+    {
+        std::vector<uint8_t> mask;
+        cmo::BuildRoundedRectMaskRadii(20, 20, 0, 8, 0, 8, mask);
+        CHECK(mask.size() == 400);
+        CHECK(mask[0] == 255);             // top-left radius 0: square corner
+        CHECK(mask[19] == 0);              // top-right radius 8: cut
+        CHECK(mask[19 * 20] == 0);         // bottom-left radius 8: cut
+        CHECK(mask[19 * 20 + 19] == 255);  // bottom-right radius 0: square
+
+        std::vector<uint32_t> pixels;
+        int outW = 0;
+        int outH = 0;
+        cmo::CornerRadii radii{};
+        radii.topLeft = radii.topRight = radii.bottomRight = radii.bottomLeft = 6;
+        CHECK(cmo::BuildShadowBitmap(60, 40, radii, 8, 128, 4, pixels, outW, outH));
+        CHECK(outW > 0 && outH > 0);
+        CHECK(pixels.size() == static_cast<size_t>(outW) * outH);
+        bool anyAlpha = false;
+        for (uint32_t pixel : pixels) {
+            if ((pixel >> 24) != 0) {
+                anyAlpha = true;
+                CHECK((pixel & 0x00FFFFFF) == 0);  // black, premultiplied
+            }
+        }
+        CHECK(anyAlpha);
+    }
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

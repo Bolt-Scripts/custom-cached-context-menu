@@ -4020,6 +4020,101 @@ void BuildRoundedRectMask(int width, int height, int radius,
     }
 }
 
+void BuildRoundedRectMaskRadii(int width, int height, int topLeft, int topRight,
+                               int bottomRight, int bottomLeft,
+                               std::vector<uint8_t>& alpha) {
+    if (width <= 0 || height <= 0) {
+        alpha.clear();
+        return;
+    }
+    alpha.assign(static_cast<size_t>(width) * static_cast<size_t>(height), 255);
+
+    const int maxRadius = std::min(width, height);
+    auto clampRadius = [maxRadius](int radius) {
+        return std::clamp(radius, 0, maxRadius);
+    };
+    const int tl = clampRadius(topLeft);
+    const int tr = clampRadius(topRight);
+    const int br = clampRadius(bottomRight);
+    const int bl = clampRadius(bottomLeft);
+    if (tl == 0 && tr == 0 && br == 0 && bl == 0) {
+        return;
+    }
+
+    const float w = static_cast<float>(width);
+    const float h = static_cast<float>(height);
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            const float px = static_cast<float>(x) + 0.5f;
+            const float py = static_cast<float>(y) + 0.5f;
+            float radius = 0.0f;
+            float cx = px;
+            float cy = py;
+            if (px < static_cast<float>(tl) && py < static_cast<float>(tl)) {
+                radius = static_cast<float>(tl);
+                cx = static_cast<float>(tl);
+                cy = static_cast<float>(tl);
+            } else if (px > w - static_cast<float>(tr) &&
+                       py < static_cast<float>(tr)) {
+                radius = static_cast<float>(tr);
+                cx = w - static_cast<float>(tr);
+                cy = static_cast<float>(tr);
+            } else if (px > w - static_cast<float>(br) &&
+                       py > h - static_cast<float>(br)) {
+                radius = static_cast<float>(br);
+                cx = w - static_cast<float>(br);
+                cy = h - static_cast<float>(br);
+            } else if (px < static_cast<float>(bl) &&
+                       py > h - static_cast<float>(bl)) {
+                radius = static_cast<float>(bl);
+                cx = static_cast<float>(bl);
+                cy = h - static_cast<float>(bl);
+            }
+            if (radius <= 0.0f) {
+                continue;
+            }
+            const float dx = px - cx;
+            const float dy = py - cy;
+            const float distance = std::sqrt(dx * dx + dy * dy);
+            const float coverage = std::clamp(radius - distance + 0.5f, 0.0f, 1.0f);
+            alpha[static_cast<size_t>(y) * width + x] =
+                static_cast<uint8_t>(coverage * 255.0f + 0.5f);
+        }
+    }
+}
+
+bool BuildShadowBitmap(int width, int height, const CornerRadii& radii, int blur,
+                       int opacity, int downscale, std::vector<uint32_t>& pixels,
+                       int& outW, int& outH) {
+    pixels.clear();
+    outW = 0;
+    outH = 0;
+    if (width <= 0 || height <= 0 || blur < 0 || downscale <= 0) {
+        return false;
+    }
+
+    const int maskW = width + 2 * blur;
+    const int maskH = height + 2 * blur;
+    std::vector<uint8_t> mask;
+    BuildRoundedRectMaskRadii(maskW, maskH, radii.topLeft + blur,
+                              radii.topRight + blur, radii.bottomRight + blur,
+                              radii.bottomLeft + blur, mask);
+    std::vector<uint32_t> argb(static_cast<size_t>(maskW) * maskH);
+    for (size_t i = 0; i < argb.size(); ++i) {
+        const uint32_t alpha =
+            (static_cast<uint32_t>(mask[i]) * static_cast<uint32_t>(opacity)) / 255;
+        argb[i] = alpha << 24;  // black, premultiplied
+    }
+
+    std::vector<uint32_t> blurred;
+    DownscaleAndBlur(argb.data(), maskW, maskH, downscale, 3, blurred, outW, outH);
+    if (outW <= 0 || outH <= 0) {
+        return false;
+    }
+    pixels = std::move(blurred);
+    return true;
+}
+
 constexpr int kBackdropDownscaleFactor = 4;
 constexpr int kBackdropBlurPasses = 2;
 
@@ -4382,26 +4477,45 @@ void DrawPanel(ID2D1DeviceContext* dc, const LayoutPanel& panel,
     const float radius = static_cast<float>(metrics.cornerRadius);
     const D2D1_ROUNDED_RECT rounded = {rect, radius, radius};
 
-    // Drop shadow: stroke rings drawn in the margin outside the panel.
-    if (appearance.shadow && metrics.shadowSize > 0 && margin > 0) {
-        const float size = static_cast<float>(metrics.shadowSize);
-        const int layers = std::max(1, metrics.shadowSize / 4);
-        for (int layer = layers; layer >= 1; --layer) {
-            const float grow =
-                size * static_cast<float>(layer) / static_cast<float>(layers);
-            const float alpha = 0.10f * static_cast<float>(layer) /
-                                static_cast<float>(layers);
-            const D2D1_ROUNDED_RECT ring = {
-                {-grow, -grow + grow * 0.25f,
-                 static_cast<float>(panel.size.cx) + grow,
-                 static_cast<float>(panel.size.cy) + grow + grow * 0.25f},
-                radius + grow, radius + grow};
-            ID2D1SolidColorBrush* shadowBrush = nullptr;
-            const D2D1_COLOR_F color = {0.0f, 0.0f, 0.0f, alpha};
-            if (SUCCEEDED(dc->CreateSolidColorBrush(color, &shadowBrush)) &&
-                shadowBrush) {
-                dc->DrawRoundedRectangle(&ring, shadowBrush, grow);
-                shadowBrush->Release();
+    // Blurred drop shadow drawn in the margin outside the panel.
+    if (appearance.shadow && margin > 0 &&
+        (metrics.shadowSize > 0 || metrics.shadowBlur > 0)) {
+        const int blur = metrics.shadowBlur > 0 ? metrics.shadowBlur
+                                                : metrics.shadowSize;
+        CornerRadii radii;
+        if (metrics.hasCornerRadii) {
+            radii = metrics.cornerRadii;
+        } else {
+            radii.topLeft = radii.topRight = radii.bottomRight =
+                radii.bottomLeft = metrics.cornerRadius;
+        }
+        std::vector<uint32_t> shadowPixels;
+        int shadowW = 0;
+        int shadowH = 0;
+        if (BuildShadowBitmap(panel.size.cx, panel.size.cy, radii, blur,
+                              metrics.shadowOpacity, 4, shadowPixels, shadowW,
+                              shadowH)) {
+            ID2D1Bitmap* bitmap = nullptr;
+            const D2D1_SIZE_U size = {static_cast<UINT32>(shadowW),
+                                      static_cast<UINT32>(shadowH)};
+            const D2D1_BITMAP_PROPERTIES props = {
+                {DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED}, 96.0f,
+                96.0f};
+            if (SUCCEEDED(dc->CreateBitmap(
+                    size, shadowPixels.data(),
+                    static_cast<UINT32>(shadowW * sizeof(uint32_t)), props,
+                    &bitmap)) &&
+                bitmap) {
+                const float maskW =
+                    static_cast<float>(panel.size.cx + 2 * blur);
+                const float maskH =
+                    static_cast<float>(panel.size.cy + 2 * blur);
+                const D2D1_RECT_F dest = {
+                    static_cast<float>(-blur), static_cast<float>(-blur + 2),
+                    static_cast<float>(-blur) + maskW,
+                    static_cast<float>(-blur + 2) + maskH};
+                dc->DrawBitmap(bitmap, dest, 1.0f, D2D1_INTERPOLATION_MODE_LINEAR);
+                bitmap->Release();
             }
         }
     }
@@ -5484,9 +5598,10 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
     }
 
     MenuWindow* root = g_menuWindowPool.Acquire();
-    const int margin = appearance.shadow && metrics.shadowSize > 0
-                           ? std::min(metrics.shadowSize, 24)
-                           : 0;
+    const int margin =
+        appearance.shadow && (metrics.shadowSize > 0 || metrics.shadowBlur > 0)
+            ? std::min(std::max(metrics.shadowSize, metrics.shadowBlur), 24)
+            : 0;
     if (!root || !root->Create(owner, panel.get(), true, margin)) {
         if (root) {
             g_menuWindowPool.Release(root);

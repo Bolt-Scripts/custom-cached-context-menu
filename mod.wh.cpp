@@ -5,7 +5,7 @@
 // @version         0.3.25
 // @include         explorer.exe
 // @architecture    x86-64
-// @compilerOptions -lole32 -lshlwapi -luuid -lcomctl32 -ladvapi32 -lgdi32 -luxtheme -lversion
+// @compilerOptions -lole32 -lshlwapi -luuid -lcomctl32 -ladvapi32 -lgdi32 -luxtheme -lversion -ld3d11 -ld2d1 -ldwrite -ldcomp -ldxgi
 // @license         MIT
 // ==/WindhawkMod==
 
@@ -72,6 +72,13 @@ Design document: `docs/superpowers/specs/2026-10-04-context-menu-overhaul-design
 #include <uxtheme.h>
 #include <vsstyle.h>
 #include <vssym32.h>
+
+#include <d2d1.h>
+#include <d2d1_1.h>
+#include <d3d11.h>
+#include <dcomp.h>
+#include <dwrite.h>
+#include <dxgi.h>
 
 #include <commctrl.h>
 #include <tlhelp32.h>
@@ -2774,6 +2781,202 @@ private:
 };
 
 inline LayoutCache g_layoutCache;
+
+// ===========================================================================
+// [CMO:Mode] Custom vs HMENU mode selection and failure fallback.
+// ===========================================================================
+
+enum class MenuMode : uint8_t { Custom, HMenu };
+
+MenuMode ResolveMenuMode(int settingValue, int consecutiveCustomFailures) {
+    if (settingValue != 0) {
+        return MenuMode::HMenu;
+    }
+    if (consecutiveCustomFailures >= 3) {
+        return MenuMode::HMenu;
+    }
+    return MenuMode::Custom;
+}
+
+class ModeController {
+public:
+    MenuMode Current() const { return mode_; }
+
+    void SetMode(MenuMode mode) { mode_ = mode; }
+
+    void RecordSuccess() { consecutiveFailures_ = 0; }
+
+    void RecordFailure() {
+        if (consecutiveFailures_ < 3) {
+            ++consecutiveFailures_;
+        }
+        if (consecutiveFailures_ >= 3) {
+            mode_ = MenuMode::HMenu;
+        }
+    }
+
+    int ConsecutiveFailures() const { return consecutiveFailures_; }
+
+private:
+    MenuMode mode_ = MenuMode::Custom;
+    int consecutiveFailures_ = 0;
+};
+
+inline ModeController g_modeController;
+
+// ===========================================================================
+// [CMO:RenderDevice] Shared D3D11/D2D/DWrite/DComp device.
+// ===========================================================================
+
+// MinGW declares the interfaces but does not export the IID symbols from the
+// import libraries, so carry local copies.
+const GUID kIidD2D1Factory = {
+    0x06152247, 0x6f50, 0x465a, {0x92, 0x45, 0x11, 0x8b, 0xfd, 0x3b, 0x60, 0x07}};
+const GUID kIidD2D1Factory1 = {
+    0xbb12d362, 0xdaee, 0x4b9a, {0xaa, 0x1d, 0x14, 0xba, 0x40, 0x1c, 0xfa, 0x1f}};
+const GUID kIidDWriteFactory = {
+    0xb859ee5a, 0xd838, 0x4b5b, {0xa2, 0xe8, 0x1a, 0xdc, 0x7d, 0x93, 0xdb, 0x48}};
+const GUID kIidDCompositionDevice = {
+    0xc37ea93a, 0xe7aa, 0x450d, {0xb1, 0x6f, 0x97, 0x46, 0xcb, 0x04, 0x07, 0xf3}};
+const GUID kIidIDXGIDevice = {
+    0x54ec77fa, 0x1377, 0x44e6, {0x8c, 0x32, 0x88, 0xfd, 0x5f, 0x44, 0xc8, 0x4c}};
+
+class RenderDevice {
+public:
+    bool Initialize() {
+        if (ready_) {
+            return true;
+        }
+        if (failed_) {
+            return false;
+        }
+
+        static const D3D_FEATURE_LEVEL kLevels[] = {
+            D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_1, D3D_FEATURE_LEVEL_10_0};
+        D3D_FEATURE_LEVEL level = D3D_FEATURE_LEVEL_10_0;
+        HRESULT hr = D3D11CreateDevice(
+            nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+            kLevels, ARRAYSIZE(kLevels), D3D11_SDK_VERSION, &d3d_, &level, nullptr);
+        if (FAILED(hr) || !d3d_) {
+            hr = D3D11CreateDevice(
+                nullptr, D3D_DRIVER_TYPE_WARP, nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+                kLevels, ARRAYSIZE(kLevels), D3D11_SDK_VERSION, &d3d_, &level, nullptr);
+        }
+        if (FAILED(hr) || !d3d_) {
+            failed_ = true;
+            return false;
+        }
+
+        if (FAILED(d3d_->QueryInterface(kIidIDXGIDevice,
+                                        reinterpret_cast<void**>(&dxgi_))) ||
+            !dxgi_) {
+            Shutdown();
+            failed_ = true;
+            return false;
+        }
+
+        D2D1_FACTORY_OPTIONS options = {};
+        if (FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, kIidD2D1Factory,
+                                     &options,
+                                     reinterpret_cast<void**>(&d2dFactory_))) ||
+            !d2dFactory_) {
+            Shutdown();
+            failed_ = true;
+            return false;
+        }
+        if (FAILED(d2dFactory_->QueryInterface(kIidD2D1Factory1,
+                                               reinterpret_cast<void**>(&d2dFactory1_))) ||
+            !d2dFactory1_) {
+            Shutdown();
+            failed_ = true;
+            return false;
+        }
+        if (FAILED(d2dFactory1_->CreateDevice(dxgi_, &d2dDevice_)) || !d2dDevice_) {
+            Shutdown();
+            failed_ = true;
+            return false;
+        }
+
+        if (FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, kIidDWriteFactory,
+                                       reinterpret_cast<IUnknown**>(&dwrite_))) ||
+            !dwrite_) {
+            Shutdown();
+            failed_ = true;
+            return false;
+        }
+
+        if (FAILED(DCompositionCreateDevice(dxgi_, kIidDCompositionDevice,
+                                            reinterpret_cast<void**>(&comp_))) ||
+            !comp_) {
+            Shutdown();
+            failed_ = true;
+            return false;
+        }
+
+        ready_ = true;
+        return true;
+    }
+
+    bool IsReady() const { return ready_; }
+
+    void HandleDeviceLost() {
+        Shutdown();
+        failed_ = false;
+    }
+
+    void Shutdown() {
+        ready_ = false;
+        if (comp_) {
+            comp_->Release();
+            comp_ = nullptr;
+        }
+        if (dwrite_) {
+            dwrite_->Release();
+            dwrite_ = nullptr;
+        }
+        if (d2dDevice_) {
+            d2dDevice_->Release();
+            d2dDevice_ = nullptr;
+        }
+        if (d2dFactory1_) {
+            d2dFactory1_->Release();
+            d2dFactory1_ = nullptr;
+        }
+        if (d2dFactory_) {
+            d2dFactory_->Release();
+            d2dFactory_ = nullptr;
+        }
+        if (dxgi_) {
+            dxgi_->Release();
+            dxgi_ = nullptr;
+        }
+        if (d3d_) {
+            d3d_->Release();
+            d3d_ = nullptr;
+        }
+    }
+
+    ID3D11Device* D3DDevice() const { return d3d_; }
+    IDXGIDevice* DxgiDevice() const { return dxgi_; }
+    ID2D1Factory* D2DFactory() const { return d2dFactory_; }
+    ID2D1Factory1* D2DFactory1() const { return d2dFactory1_; }
+    ID2D1Device* D2DDevice() const { return d2dDevice_; }
+    IDWriteFactory* DWriteFactory() const { return dwrite_; }
+    IDCompositionDevice* CompDevice() const { return comp_; }
+
+private:
+    bool ready_ = false;
+    bool failed_ = false;
+    ID3D11Device* d3d_ = nullptr;
+    IDXGIDevice* dxgi_ = nullptr;
+    ID2D1Factory* d2dFactory_ = nullptr;
+    ID2D1Factory1* d2dFactory1_ = nullptr;
+    ID2D1Device* d2dDevice_ = nullptr;
+    IDWriteFactory* dwrite_ = nullptr;
+    IDCompositionDevice* comp_ = nullptr;
+};
+
+inline RenderDevice g_renderDevice;
 
 // Shell property keys used by the Sort by and Group by submenus (all in the
 // shell's System property set, defined here so no SDK propkey.h is needed).

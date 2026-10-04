@@ -2490,6 +2490,23 @@ int main() {
         CHECK(cache.Size() == 0);
     }
 
+    // v2 mode selection and failure fallback.
+    {
+        CHECK(cmo::ResolveMenuMode(0, 0) == cmo::MenuMode::Custom);
+        CHECK(cmo::ResolveMenuMode(1, 0) == cmo::MenuMode::HMenu);
+        CHECK(cmo::ResolveMenuMode(0, 3) == cmo::MenuMode::HMenu);
+        cmo::ModeController controller;
+        controller.SetMode(cmo::MenuMode::Custom);
+        CHECK(controller.Current() == cmo::MenuMode::Custom);
+        controller.RecordFailure();
+        controller.RecordFailure();
+        CHECK(controller.Current() == cmo::MenuMode::Custom);
+        controller.RecordFailure();
+        CHECK(controller.Current() == cmo::MenuMode::HMenu);
+        controller.RecordSuccess();
+        CHECK(controller.ConsecutiveFailures() == 0);
+    }
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

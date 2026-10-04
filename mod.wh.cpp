@@ -2,7 +2,7 @@
 // @id              context-menu-overhaul
 // @name            Context Menu Overhaul
 // @description     Replaces the Explorer context menu with an instantly-opening cached menu, then discovers and caches shell extension items asynchronously.
-// @version         0.2.2
+// @version         0.2.3
 // @include         explorer.exe
 // @architecture    x86-64
 // @compilerOptions -lole32 -lshlwapi -luuid -lcomctl32 -ladvapi32 -lgdi32
@@ -497,7 +497,7 @@ MenuModel MergeCoreWithCached(const MenuModel& core, const MenuModel& cached) {
 namespace cmo {
 
 constexpr uint32_t kCacheMagic = 0x434F4D4F;  // "COMO"
-constexpr uint32_t kCacheVersion = 4;
+constexpr uint32_t kCacheVersion = 5;
 constexpr uint32_t kMaxCacheEntries = 1024;
 constexpr uint32_t kMaxModelItems = 4096;
 constexpr uint32_t kMaxMenuDepth = 16;
@@ -1379,6 +1379,45 @@ std::vector<std::wstring> DiffModules(const std::vector<std::wstring>& before,
                                       const std::vector<std::wstring>& after);
 bool EnsureContextPopulated(PendingCapture& capture);
 
+// Mimics a menu host: asks the context object to initialize each menu and
+// submenu before its items are read. Extensions populate dynamic labels and
+// submenu children on WM_INITMENUPOPUP; without this, discovery captures
+// empty labels and empty submenus.
+void InitializeMenuRecursive(PendingCapture& capture, HMENU menu, UINT position) {
+    if (capture.contextMenu3) {
+        LRESULT result = 0;
+        capture.contextMenu3->HandleMenuMsg2(
+            WM_INITMENUPOPUP, reinterpret_cast<WPARAM>(menu),
+            MAKELPARAM(position, 0), &result);
+    } else if (capture.contextMenu2) {
+        capture.contextMenu2->HandleMenuMsg(
+            WM_INITMENUPOPUP, reinterpret_cast<WPARAM>(menu), MAKELPARAM(position, 0));
+    }
+
+    const int count = GetMenuItemCount(menu);
+    for (int i = 0; i < count; ++i) {
+        MENUITEMINFOW info = {};
+        info.cbSize = sizeof(info);
+        info.fMask = MIIM_SUBMENU;
+        if (GetMenuItemInfoW(menu, static_cast<UINT>(i), TRUE, &info) &&
+            info.hSubMenu) {
+            InitializeMenuRecursive(capture, info.hSubMenu, static_cast<UINT>(i));
+        }
+    }
+}
+
+// Debug dump of a discovered model; helps identify unlabeled or unusual items.
+void DumpModelItems(const std::vector<MenuItem>& items, int depth) {
+    for (const MenuItem& item : items) {
+        Wh_Log(L"[d%d] kind=%d action=%d flags=%04X offset=%u verb='%s' label='%s' "
+               L"children=%zu",
+               depth, static_cast<int>(item.kind), static_cast<int>(item.action),
+               item.flags, item.verbOffset, item.canonicalVerb.c_str(),
+               item.label.c_str(), item.children.size());
+        DumpModelItems(item.children, depth + 1);
+    }
+}
+
 void DiscoverIntoCache(PendingCapture& capture, const ContextSignature& signature) {
     if (capture.discoveryDone || !capture.obj) {
         return;
@@ -1388,6 +1427,7 @@ void DiscoverIntoCache(PendingCapture& capture, const ContextSignature& signatur
     }
 
     const ULONGLONG start = GetTickCount64();
+    InitializeMenuRecursive(capture, capture.populatedMenu, 0);
     MenuModel model = BuildModelFromHMenu(capture.populatedMenu, capture.idCmdFirst,
                                           signature, capture.obj);
     model.handlerModules = capture.handlerModules;
@@ -1396,6 +1436,9 @@ void DiscoverIntoCache(PendingCapture& capture, const ContextSignature& signatur
 
     Wh_Log(L"Discovered %zu menu items in %llu ms", model.items.size(),
            static_cast<unsigned long long>(GetTickCount64() - start));
+    if (g_settings.debugLogging) {
+        DumpModelItems(model.items, 0);
+    }
     g_cache.Put(std::move(model));
 }
 

@@ -39,6 +39,37 @@ static cmo::MenuItem MakeDeepItem(int depth) {
     return item;
 }
 
+// Minimal IContextMenu2 used to verify host-style initialization.
+class FakeContextMenu2 : public IContextMenu2 {
+public:
+    int handleMenuMsgCalls = 0;
+
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID, void** ppvObject) override {
+        if (ppvObject) {
+            *ppvObject = nullptr;
+        }
+        return E_NOINTERFACE;
+    }
+    ULONG STDMETHODCALLTYPE AddRef() override { return 1; }
+    ULONG STDMETHODCALLTYPE Release() override { return 1; }
+    HRESULT STDMETHODCALLTYPE QueryContextMenu(HMENU, UINT, UINT, UINT, UINT) override {
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE InvokeCommand(CMINVOKECOMMANDINFO*) override {
+        return S_OK;
+    }
+    HRESULT STDMETHODCALLTYPE GetCommandString(UINT_PTR, UINT, UINT*, LPSTR,
+                                               UINT) override {
+        return E_NOTIMPL;
+    }
+    HRESULT STDMETHODCALLTYPE HandleMenuMsg(UINT uMsg, WPARAM, LPARAM) override {
+        if (uMsg == WM_INITMENUPOPUP) {
+            ++handleMenuMsgCalls;
+        }
+        return S_OK;
+    }
+};
+
 int main() {
     CHECK_EQ(cmo::MakeExtensionKey(L"file.txt"), std::wstring(L".txt"));
     CHECK_EQ(cmo::MakeExtensionKey(L"FILE.TXT"), std::wstring(L".txt"));
@@ -275,7 +306,11 @@ int main() {
     CHECK(restoredChild && restoredChild->verbOffset == 42);
 
     std::vector<uint8_t> badVersion = serialized;
-    badVersion[4] = 5;
+    const uint32_t differentVersion = cmo::kCacheVersion + 1;
+    badVersion[4] = static_cast<uint8_t>(differentVersion & 0xFF);
+    badVersion[5] = static_cast<uint8_t>((differentVersion >> 8) & 0xFF);
+    badVersion[6] = static_cast<uint8_t>((differentVersion >> 16) & 0xFF);
+    badVersion[7] = static_cast<uint8_t>((differentVersion >> 24) & 0xFF);
     cmo::Cache rejectedCache;
     CHECK(!cmo::Cache::Deserialize(badVersion, rejectedCache));
 
@@ -574,6 +609,21 @@ int main() {
         CHECK(!cmo::FindNativeOffsetInMenu(nativeMenu, 10, nullptr, missingTarget)
                    .has_value());
         DestroyMenu(nativeMenu);
+
+        // Host-style initialization sends WM_INITMENUPOPUP for the menu and
+        // every submenu before discovery reads their items.
+        HMENU initTop = CreatePopupMenu();
+        HMENU initChild = CreatePopupMenu();
+        AppendMenuW(initChild, MF_STRING, 41, L"Child");
+        AppendMenuW(initTop, MF_POPUP, reinterpret_cast<UINT_PTR>(initChild),
+                    L"Parent");
+        FakeContextMenu2 fakeMenu;
+        cmo::PendingCapture fakeCapture{};
+        fakeCapture.contextMenu2 = &fakeMenu;
+        cmo::InitializeMenuRecursive(fakeCapture, initTop, 0);
+        CHECK(fakeMenu.handleMenuMsgCalls == 2);
+        fakeCapture.contextMenu2 = nullptr;
+        DestroyMenu(initTop);
 
         HMENU flagMenu = CreatePopupMenu();
         AppendMenuW(flagMenu, MF_STRING, 21, L"Item");

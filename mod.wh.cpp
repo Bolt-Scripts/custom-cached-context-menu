@@ -2,7 +2,7 @@
 // @id              context-menu-overhaul
 // @name            Context Menu Overhaul
 // @description     Replaces the Explorer context menu with an instantly-opening cached menu, then discovers and caches shell extension items asynchronously.
-// @version         0.2.7
+// @version         0.3.0
 // @include         explorer.exe
 // @architecture    x86-64
 // @compilerOptions -lole32 -lshlwapi -luuid -lcomctl32 -ladvapi32 -lgdi32
@@ -64,6 +64,7 @@ Design document: `docs/superpowers/specs/2026-10-04-context-menu-overhaul-design
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <mutex>
@@ -222,6 +223,8 @@ struct MenuItem {
     uint32_t flags = kModelNone;
     std::wstring iconRef;
     std::wstring targetPath;
+    // 16x16 BGRA icon captured from the shell's own menu bitmap.
+    std::vector<uint8_t> iconPixels;
     std::vector<MenuItem> children;
 };
 
@@ -320,7 +323,8 @@ MenuModel BuildCoreModel(Scope scope, const std::vector<std::wstring>& paths, Sh
     model.sig = ContextSignature{scope, typeKey, shape, Variant::Normal};
 
     uint32_t nextId = 1;
-    auto makeCommand = [&](std::wstring label, std::wstring verb, uint32_t flags) {
+    auto makeCommand = [&](std::wstring label, std::wstring verb, uint32_t flags,
+                           std::wstring iconRef = L"") {
         MenuItem item{};
         item.id = nextId++;
         item.kind = ItemKind::Command;
@@ -328,10 +332,12 @@ MenuModel BuildCoreModel(Scope scope, const std::vector<std::wstring>& paths, Sh
         item.canonicalVerb = std::move(verb);
         item.action = ActionKind::ShellVerb;
         item.flags = flags;
+        item.iconRef = std::move(iconRef);
         return item;
     };
     auto makeViewAction = [&](std::wstring label, std::wstring dedupVerb,
-                              ViewAction action, uint32_t flags) {
+                              ViewAction action, uint32_t flags,
+                              std::wstring iconRef = L"") {
         MenuItem item{};
         item.id = nextId++;
         item.kind = ItemKind::Command;
@@ -340,16 +346,19 @@ MenuModel BuildCoreModel(Scope scope, const std::vector<std::wstring>& paths, Sh
         item.action = ActionKind::ViewAction;
         item.viewAction = static_cast<uint32_t>(action);
         item.flags = flags;
+        item.iconRef = std::move(iconRef);
         return item;
     };
     auto addCommand = [&](std::wstring label, std::wstring verb,
-                          uint32_t flags = kModelNone) {
-        model.items.push_back(makeCommand(std::move(label), std::move(verb), flags));
+                          uint32_t flags = kModelNone, std::wstring iconRef = L"") {
+        model.items.push_back(
+            makeCommand(std::move(label), std::move(verb), flags, std::move(iconRef)));
     };
     auto addViewAction = [&](std::wstring label, std::wstring dedupVerb,
-                             ViewAction action, uint32_t flags = kModelNone) {
-        model.items.push_back(
-            makeViewAction(std::move(label), std::move(dedupVerb), action, flags));
+                             ViewAction action, uint32_t flags = kModelNone,
+                             std::wstring iconRef = L"") {
+        model.items.push_back(makeViewAction(std::move(label), std::move(dedupVerb),
+                                             action, flags, std::move(iconRef)));
     };
     auto addSeparator = [&]() {
         MenuItem item{};
@@ -391,9 +400,10 @@ MenuModel BuildCoreModel(Scope scope, const std::vector<std::wstring>& paths, Sh
                                                    ViewAction::ViewDetails, kModelNone));
 
         addCommand(L"Sort by", L"sortby");
-        addViewAction(L"Refresh", L"refresh", ViewAction::Refresh);
+        addViewAction(L"Refresh", L"refresh", ViewAction::Refresh, kModelNone,
+                      L"@glyph:E72C");
         addSeparator();
-        addCommand(L"Paste", L"paste");
+        addCommand(L"Paste", L"paste", kModelNone, L"@glyph:E77F");
         addCommand(L"Paste shortcut", L"pastelink");
         addSeparator();
         addCommand(L"New", L"new");
@@ -408,37 +418,38 @@ MenuModel BuildCoreModel(Scope scope, const std::vector<std::wstring>& paths, Sh
     }
 
     if (scope == Scope::Drive) {
-        addCommand(openLabel, L"open", kModelDefault);
+        addCommand(openLabel, L"open", kModelDefault, L"@folder");
         addCommand(L"Open in new window", L"opennew");
         addCommand(L"Pin to Quick access", L"pintohome");
         addSeparator();
-        addCommand(L"Properties", L"properties");
+        addCommand(L"Properties", L"properties", kModelNone, L"@glyph:E713");
         addSeparator();
         addFallback();
         return model;
     }
 
     if (scope == Scope::Folders) {
-        addCommand(openLabel, L"open", kModelDefault);
+        addCommand(openLabel, L"open", kModelDefault, L"@folder");
         addCommand(L"Open in new window", L"opennew");
         addCommand(L"Pin to Quick access", L"pintohome");
         addSeparator();
     } else {
-        addCommand(openLabel, L"open", kModelDefault);
-        addCommand(L"Open with", L"openwith");
+        addCommand(openLabel, L"open", kModelDefault, L"@file");
+        addCommand(L"Open with", L"openwith", kModelNone, L"@glyph:E8E5");
         addSeparator();
     }
 
-    addCommand(L"Cut", L"cut");
-    addCommand(L"Copy", L"copy");
-    addViewAction(L"Rename", L"rename", ViewAction::Rename, multiDisabled);
-    addCommand(L"Delete", L"delete");
+    addCommand(L"Cut", L"cut", kModelNone, L"@glyph:E8C6");
+    addCommand(L"Copy", L"copy", kModelNone, L"@glyph:E8C8");
+    addViewAction(L"Rename", L"rename", ViewAction::Rename, multiDisabled,
+                  L"@glyph:E8AC");
+    addCommand(L"Delete", L"delete", kModelNone, L"@glyph:E74D");
     addSeparator();
     addCommand(L"Create shortcut", L"createshortcut", multiDisabled);
     addSubmenu(L"Send to");
     addCommand(L"Copy as path", L"copyaspath");
     addSeparator();
-    addCommand(L"Properties", L"properties");
+    addCommand(L"Properties", L"properties", kModelNone, L"@glyph:E713");
     addSeparator();
     addFallback();
 
@@ -536,7 +547,7 @@ MenuModel MergeCoreWithCached(const MenuModel& core, const MenuModel& cached) {
 namespace cmo {
 
 constexpr uint32_t kCacheMagic = 0x434F4D4F;  // "COMO"
-constexpr uint32_t kCacheVersion = 5;
+constexpr uint32_t kCacheVersion = 6;
 constexpr uint32_t kMaxCacheEntries = 1024;
 constexpr uint32_t kMaxModelItems = 4096;
 constexpr uint32_t kMaxMenuDepth = 16;
@@ -574,6 +585,11 @@ void WriteString(std::vector<uint8_t>& out, const std::wstring& text) {
     out.insert(out.end(), bytes, bytes + text.size() * sizeof(wchar_t));
 }
 
+void WriteBytes(std::vector<uint8_t>& out, const std::vector<uint8_t>& bytes) {
+    WriteU32(out, static_cast<uint32_t>(bytes.size()));
+    out.insert(out.end(), bytes.begin(), bytes.end());
+}
+
 void WriteItem(std::vector<uint8_t>& out, const MenuItem& item) {
     WriteU32(out, item.id);
     WriteU8(out, static_cast<uint8_t>(item.kind));
@@ -585,6 +601,7 @@ void WriteItem(std::vector<uint8_t>& out, const MenuItem& item) {
     WriteString(out, item.canonicalVerb);
     WriteString(out, item.iconRef);
     WriteString(out, item.targetPath);
+    WriteBytes(out, item.iconPixels);
     WriteU32(out, static_cast<uint32_t>(item.children.size()));
     for (const MenuItem& child : item.children) {
         WriteItem(out, child);
@@ -698,6 +715,19 @@ public:
         return true;
     }
 
+    bool ReadBytes(std::vector<uint8_t>& bytes, uint32_t maxBytes) {
+        uint32_t length = 0;
+        if (!ReadU32(length) || length > maxBytes) {
+            return false;
+        }
+        if (pos_ + length > data_.size()) {
+            return false;
+        }
+        bytes.assign(data_.begin() + pos_, data_.begin() + pos_ + length);
+        pos_ += length;
+        return true;
+    }
+
     bool ReadSignature(ContextSignature& sig) {
         uint8_t scope = 0;
         uint8_t shape = 0;
@@ -724,7 +754,8 @@ public:
             !ReadU32(item.flags) || !ReadU32(viewAction) ||
             !ReadU32(item.verbOffset) || !ReadString(item.label) ||
             !ReadString(item.canonicalVerb) || !ReadString(item.iconRef) ||
-            !ReadString(item.targetPath) || !ReadU32(childCount)) {
+            !ReadString(item.targetPath) || !ReadBytes(item.iconPixels, 4096) ||
+            !ReadU32(childCount)) {
             return false;
         }
         item.kind = static_cast<ItemKind>(kind);
@@ -1339,13 +1370,45 @@ uint32_t MapMenuState(UINT state) {
     return flags;
 }
 
+// Copies a shell menu bitmap (32bpp, small-icon sized) into BGRA pixels.
+void CaptureBitmapPixels(HBITMAP bitmap, std::vector<uint8_t>& out) {
+    out.clear();
+    BITMAP bitmapInfo = {};
+    if (!GetObjectW(bitmap, sizeof(bitmapInfo), &bitmapInfo)) {
+        return;
+    }
+
+    const int expected = GetSystemMetrics(SM_CXSMICON);
+    if (bitmapInfo.bmWidth != expected || bitmapInfo.bmHeight != expected ||
+        bitmapInfo.bmBitsPixel != 32) {
+        return;
+    }
+
+    BITMAPINFO dibInfo = {};
+    dibInfo.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    dibInfo.bmiHeader.biWidth = expected;
+    dibInfo.bmiHeader.biHeight = -expected;
+    dibInfo.bmiHeader.biPlanes = 1;
+    dibInfo.bmiHeader.biBitCount = 32;
+    dibInfo.bmiHeader.biCompression = BI_RGB;
+
+    std::vector<uint8_t> pixels(static_cast<size_t>(expected) * expected * 4);
+    HDC screen = GetDC(nullptr);
+    const int lines = GetDIBits(screen, bitmap, 0, expected, pixels.data(), &dibInfo,
+                                DIB_RGB_COLORS);
+    ReleaseDC(nullptr, screen);
+    if (lines == expected) {
+        out = std::move(pixels);
+    }
+}
+
 void BuildItemsFromHMenu(HMENU menu, UINT idCmdFirst, IContextMenu* context,
                          uint32_t& nextId, std::vector<MenuItem>& out, bool& ownerDraw) {
     const int count = GetMenuItemCount(menu);
     for (int index = 0; index < count; ++index) {
         MENUITEMINFOW info = {};
         info.cbSize = sizeof(info);
-        info.fMask = MIIM_ID | MIIM_STATE | MIIM_FTYPE | MIIM_SUBMENU;
+        info.fMask = MIIM_ID | MIIM_STATE | MIIM_FTYPE | MIIM_SUBMENU | MIIM_BITMAP;
         if (!GetMenuItemInfoW(menu, static_cast<UINT>(index), TRUE, &info)) {
             continue;
         }
@@ -1383,6 +1446,12 @@ void BuildItemsFromHMenu(HMENU menu, UINT idCmdFirst, IContextMenu* context,
             if (info.wID >= idCmdFirst) {
                 item.verbOffset = info.wID - idCmdFirst;
                 item.flags |= kModelHasOffset;
+            }
+            // Capture icons the shell itself provides. HBMMENU_* sentinels
+            // are small integers; real bitmaps are pointers.
+            if (info.hbmpItem &&
+                reinterpret_cast<INT_PTR>(info.hbmpItem) > 16) {
+                CaptureBitmapPixels(info.hbmpItem, item.iconPixels);
             }
             if (context) {
                 wchar_t verbBuffer[256] = {};
@@ -2362,9 +2431,419 @@ void RestoreMenuAnimation() {
     }
 }
 
+// Parses a shell icon reference: "file,index", "file", or a quoted path with
+// an optional trailing ",index". Environment expansion happens at load time.
+bool ParseIconRef(std::wstring_view ref, std::wstring& path, int& index) {
+    path.clear();
+    index = 0;
+
+    std::wstring_view text = ref;
+    while (!text.empty() && (text.front() == L' ' || text.front() == L'\t')) {
+        text.remove_prefix(1);
+    }
+    while (!text.empty() && (text.back() == L' ' || text.back() == L'\t')) {
+        text.remove_suffix(1);
+    }
+    if (text.empty()) {
+        return false;
+    }
+
+    if (text.front() == L'"') {
+        text.remove_prefix(1);
+        const size_t quote = text.find(L'"');
+        if (quote == std::wstring_view::npos) {
+            return false;
+        }
+        path.assign(text.substr(0, quote));
+        text.remove_prefix(quote + 1);
+        if (!text.empty() && text.front() == L',') {
+            text.remove_prefix(1);
+            index = _wtoi(std::wstring(text).c_str());
+        }
+        return !path.empty();
+    }
+
+    const size_t comma = text.find_last_of(L',');
+    if (comma != std::wstring_view::npos) {
+        const std::wstring_view suffix = text.substr(comma + 1);
+        bool numeric = !suffix.empty();
+        for (wchar_t c : suffix) {
+            if (c < L'0' || c > L'9') {
+                numeric = false;
+                break;
+            }
+        }
+        if (numeric) {
+            path.assign(text.substr(0, comma));
+            index = _wtoi(std::wstring(suffix).c_str());
+            return !path.empty();
+        }
+    }
+
+    path.assign(text);
+    return true;
+}
+
+// Cached menu bitmaps and icons. Bitmaps are owned by this cache and must not
+// be destroyed by callers; they are released in Clear() at mod unload.
+// Icon references understood here:
+//   "@file"       - the selected item's type icon
+//   "@folder"     - the stock folder icon
+//   "@glyph:XXXX" - an icon-font glyph rendered to a bitmap
+//   anything else - a shell icon reference for ParseIconRef
+class IconCache {
+public:
+    ~IconCache() { Clear(); }
+
+    // Returns a menu bitmap for the item's icon, or nullptr. `paths` is the
+    // captured selection, used to resolve "@file".
+    HBITMAP GetBitmap(const MenuItem& item, const std::vector<std::wstring>& paths,
+                      int sizePx) {
+        if (!item.iconPixels.empty()) {
+            return BitmapFromPixels(item.iconPixels, sizePx);
+        }
+        if (item.iconRef.empty()) {
+            return nullptr;
+        }
+        return BitmapFromRef(item.iconRef, paths, sizePx);
+    }
+
+    // Pre-renders the core glyphs and the stock folder icon, so the open path
+    // only ever attaches already-cached bitmaps.
+    void PreloadCoreIcons(int sizePx) {
+        static const wchar_t* kGlyphRefs[] = {
+            L"@glyph:E8C6", L"@glyph:E8C8", L"@glyph:E8AC", L"@glyph:E74D",
+            L"@glyph:E713", L"@glyph:E8E5", L"@glyph:E72C", L"@glyph:E77F",
+        };
+        for (const wchar_t* ref : kGlyphRefs) {
+            BitmapFromRef(ref, {}, sizePx);
+        }
+        BitmapFromRef(L"@folder", {}, sizePx);
+    }
+
+    void Clear() {
+        for (auto& pair : bitmaps_) {
+            if (pair.second) {
+                DeleteObject(pair.second);
+            }
+        }
+        bitmaps_.clear();
+        for (auto& pair : icons_) {
+            if (pair.second) {
+                DestroyIcon(pair.second);
+            }
+        }
+        icons_.clear();
+    }
+
+private:
+    HBITMAP BitmapFromRef(const std::wstring& ref,
+                          const std::vector<std::wstring>& paths, int sizePx) {
+        // "@file" resolves to a type icon, so key it by extension rather than
+        // sharing one bitmap across every file type.
+        const std::wstring cacheRef =
+            ref == L"@file"
+                ? (L"@file:" +
+                   (paths.empty() ? std::wstring(L"")
+                                  : MakeExtensionKey(paths.front())))
+                : ref;
+        const std::wstring key = cacheRef + L"#" + std::to_wstring(sizePx);
+        auto it = bitmaps_.find(key);
+        if (it != bitmaps_.end()) {
+            return it->second;
+        }
+
+        HBITMAP bitmap = nullptr;
+        if (ref == L"@file") {
+            if (!paths.empty()) {
+                SHFILEINFOW fileInfo = {};
+                if (SHGetFileInfoW(paths.front().c_str(), FILE_ATTRIBUTE_NORMAL,
+                                   &fileInfo, sizeof(fileInfo),
+                                   SHGFI_ICON | SHGFI_SMALLICON |
+                                       SHGFI_USEFILEATTRIBUTES) &&
+                    fileInfo.hIcon) {
+                    bitmap = BitmapFromIcon(fileInfo.hIcon, sizePx);
+                    DestroyIcon(fileInfo.hIcon);
+                }
+            }
+        } else if (ref == L"@folder") {
+            SHSTOCKICONINFO stockInfo = {};
+            stockInfo.cbSize = sizeof(stockInfo);
+            if (SUCCEEDED(SHGetStockIconInfo(SIID_FOLDER,
+                                             SHGSI_ICON | SHGSI_SMALLICON,
+                                             &stockInfo)) &&
+                stockInfo.hIcon) {
+                bitmap = BitmapFromIcon(stockInfo.hIcon, sizePx);
+                DestroyIcon(stockInfo.hIcon);
+            }
+        } else if (ref.rfind(L"@glyph:", 0) == 0) {
+            const wchar_t codepoint =
+                static_cast<wchar_t>(wcstoul(ref.c_str() + 7, nullptr, 16));
+            bitmap = GlyphBitmap(codepoint, sizePx);
+        } else {
+            HICON icon = GetIcon(ref, sizePx);
+            if (icon) {
+                bitmap = BitmapFromIcon(icon, sizePx);
+            }
+        }
+
+        bitmaps_[key] = bitmap;
+        return bitmap;
+    }
+
+    HBITMAP BitmapFromPixels(const std::vector<uint8_t>& pixels, int sizePx) {
+        if (pixels.size() < 4) {
+            return nullptr;
+        }
+        const int side =
+            static_cast<int>(std::sqrt(static_cast<double>(pixels.size()) / 4.0));
+        if (side <= 0 ||
+            static_cast<size_t>(side) * side * 4 != pixels.size()) {
+            return nullptr;
+        }
+
+        const std::wstring key = L"px#" + std::to_wstring(HashBytes(pixels)) + L"#" +
+                                 std::to_wstring(sizePx);
+        auto it = bitmaps_.find(key);
+        if (it != bitmaps_.end()) {
+            return it->second;
+        }
+        HBITMAP bitmap = ScaledBitmapFromBgra(pixels, side, side, sizePx);
+        bitmaps_[key] = bitmap;
+        return bitmap;
+    }
+
+    HICON GetIcon(std::wstring_view ref, int sizePx) {
+        const std::wstring key = std::wstring(ref) + L"#" + std::to_wstring(sizePx);
+        auto it = icons_.find(key);
+        if (it != icons_.end()) {
+            return it->second;
+        }
+
+        HICON icon = nullptr;
+        std::wstring path;
+        int index = 0;
+        if (ParseIconRef(ref, path, index)) {
+            wchar_t expanded[MAX_PATH] = {};
+            if (ExpandEnvironmentStringsW(path.c_str(), expanded,
+                                          ARRAYSIZE(expanded))) {
+                HICON large = nullptr;
+                if (SUCCEEDED(SHDefExtractIconW(expanded, index, 0, &large, nullptr,
+                                                MAKELONG(sizePx, sizePx)))) {
+                    icon = large;
+                }
+            }
+        }
+        icons_[key] = icon;
+        return icon;
+    }
+
+    static uint64_t HashBytes(const std::vector<uint8_t>& bytes) {
+        uint64_t hash = 1469598103934665603ULL;
+        for (uint8_t byte : bytes) {
+            hash ^= byte;
+            hash *= 1099511628211ULL;
+        }
+        return hash;
+    }
+
+    static void FillBitmapHeader(BITMAPV5HEADER& header, int width, int height) {
+        header = {};
+        header.bV5Size = sizeof(header);
+        header.bV5Width = width;
+        header.bV5Height = -height;  // top-down
+        header.bV5Planes = 1;
+        header.bV5BitCount = 32;
+        header.bV5Compression = BI_BITFIELDS;
+        header.bV5RedMask = 0x00FF0000;
+        header.bV5GreenMask = 0x0000FF00;
+        header.bV5BlueMask = 0x000000FF;
+        header.bV5AlphaMask = 0xFF000000;
+    }
+
+    static HBITMAP BitmapFromIcon(HICON icon, int sizePx) {
+        HDC screen = GetDC(nullptr);
+        HDC memory = CreateCompatibleDC(screen);
+        BITMAPV5HEADER header = {};
+        FillBitmapHeader(header, sizePx, sizePx);
+        void* bits = nullptr;
+        HBITMAP bitmap = CreateDIBSection(
+            screen, reinterpret_cast<BITMAPINFO*>(&header), DIB_RGB_COLORS, &bits,
+            nullptr, 0);
+        if (bitmap && bits) {
+            HGDIOBJ old = SelectObject(memory, bitmap);
+            DrawIconEx(memory, 0, 0, icon, sizePx, sizePx, 0, nullptr, DI_NORMAL);
+            SelectObject(memory, old);
+        }
+        DeleteDC(memory);
+        ReleaseDC(nullptr, screen);
+        return bitmap;
+    }
+
+    static HBITMAP ScaledBitmapFromBgra(const std::vector<uint8_t>& pixels, int width,
+                                        int height, int sizePx) {
+        HDC screen = GetDC(nullptr);
+        HDC sourceDc = CreateCompatibleDC(screen);
+        HDC targetDc = CreateCompatibleDC(screen);
+
+        BITMAPV5HEADER sourceHeader = {};
+        FillBitmapHeader(sourceHeader, width, height);
+        void* sourceBits = nullptr;
+        HBITMAP source = CreateDIBSection(
+            screen, reinterpret_cast<BITMAPINFO*>(&sourceHeader), DIB_RGB_COLORS,
+            &sourceBits, nullptr, 0);
+        if (source && sourceBits) {
+            memcpy(sourceBits, pixels.data(), pixels.size());
+        }
+
+        BITMAPV5HEADER targetHeader = {};
+        FillBitmapHeader(targetHeader, sizePx, sizePx);
+        void* targetBits = nullptr;
+        HBITMAP target = CreateDIBSection(
+            screen, reinterpret_cast<BITMAPINFO*>(&targetHeader), DIB_RGB_COLORS,
+            &targetBits, nullptr, 0);
+
+        if (source && target && targetBits) {
+            HGDIOBJ oldSource = SelectObject(sourceDc, source);
+            HGDIOBJ oldTarget = SelectObject(targetDc, target);
+            SetStretchBltMode(targetDc, HALFTONE);
+            StretchBlt(targetDc, 0, 0, sizePx, sizePx, sourceDc, 0, 0, width, height,
+                       SRCCOPY);
+            SelectObject(targetDc, oldTarget);
+            SelectObject(sourceDc, oldSource);
+        } else if (target) {
+            DeleteObject(target);
+            target = nullptr;
+        }
+
+        if (source) {
+            DeleteObject(source);
+        }
+        DeleteDC(sourceDc);
+        DeleteDC(targetDc);
+        ReleaseDC(nullptr, screen);
+        return target;
+    }
+
+    static bool FontExists(const wchar_t* faceName) {
+        HDC dc = GetDC(nullptr);
+        LOGFONTW logFont = {};
+        logFont.lfCharSet = DEFAULT_CHARSET;
+        wcsncpy(logFont.lfFaceName, faceName, LF_FACESIZE - 1);
+        bool found = false;
+        EnumFontFamiliesExW(
+            dc, &logFont,
+            [](const LOGFONTW*, const TEXTMETRICW*, DWORD, LPARAM lParam) -> int {
+                *reinterpret_cast<bool*>(lParam) = true;
+                return 0;
+            },
+            reinterpret_cast<LPARAM>(&found), 0);
+        ReleaseDC(nullptr, dc);
+        return found;
+    }
+
+    static bool IsDarkThemeActive() {
+        DWORD lightTheme = 1;
+        DWORD size = sizeof(lightTheme);
+        HKEY key = nullptr;
+        if (RegOpenKeyExW(
+                HKEY_CURRENT_USER,
+                L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+                0, KEY_READ, &key) == ERROR_SUCCESS) {
+            RegQueryValueExW(key, L"AppsUseLightTheme", nullptr, nullptr,
+                             reinterpret_cast<LPBYTE>(&lightTheme), &size);
+            RegCloseKey(key);
+        }
+        return lightTheme == 0;
+    }
+
+    static HBITMAP GlyphBitmap(wchar_t codepoint, int sizePx) {
+        static const wchar_t* kFonts[] = {L"Segoe Fluent Icons",
+                                          L"Segoe MDL2 Assets"};
+        for (const wchar_t* font : kFonts) {
+            if (!FontExists(font)) {
+                continue;
+            }
+
+            HDC screen = GetDC(nullptr);
+            HDC memory = CreateCompatibleDC(screen);
+            BITMAPV5HEADER header = {};
+            FillBitmapHeader(header, sizePx, sizePx);
+            void* bits = nullptr;
+            HBITMAP bitmap = CreateDIBSection(
+                screen, reinterpret_cast<BITMAPINFO*>(&header), DIB_RGB_COLORS,
+                &bits, nullptr, 0);
+            if (!bitmap || !bits) {
+                if (bitmap) {
+                    DeleteObject(bitmap);
+                }
+                DeleteDC(memory);
+                ReleaseDC(nullptr, screen);
+                continue;
+            }
+
+            memset(bits, 0, static_cast<size_t>(sizePx) * sizePx * 4);
+            HGDIOBJ oldBitmap = SelectObject(memory, bitmap);
+            HFONT fontHandle = CreateFontW(
+                -sizePx, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+                OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                DEFAULT_PITCH | FF_DONTCARE, font);
+            HGDIOBJ oldFont = SelectObject(memory, fontHandle);
+            SetBkMode(memory, TRANSPARENT);
+            SetTextColor(memory, RGB(255, 255, 255));
+            RECT rect = {0, 0, sizePx, sizePx};
+            DrawTextW(memory, &codepoint, 1, &rect,
+                      DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+            SelectObject(memory, oldFont);
+            DeleteObject(fontHandle);
+            SelectObject(memory, oldBitmap);
+            DeleteDC(memory);
+            ReleaseDC(nullptr, screen);
+
+            // Derive coverage from the white rendering and store a
+            // premultiplied monochrome glyph in the menu text color.
+            const bool darkTheme = IsDarkThemeActive();
+            const COLORREF textColor = GetSysColor(COLOR_MENUTEXT);
+            const uint8_t red = darkTheme ? 255 : GetRValue(textColor);
+            const uint8_t green = darkTheme ? 255 : GetGValue(textColor);
+            const uint8_t blue = darkTheme ? 255 : GetBValue(textColor);
+
+            uint8_t* pixels = static_cast<uint8_t*>(bits);
+            bool anyCoverage = false;
+            for (int i = 0; i < sizePx * sizePx; ++i) {
+                uint8_t coverage = pixels[i * 4];
+                if (pixels[i * 4 + 1] > coverage) {
+                    coverage = pixels[i * 4 + 1];
+                }
+                if (pixels[i * 4 + 2] > coverage) {
+                    coverage = pixels[i * 4 + 2];
+                }
+                if (coverage > 0) {
+                    anyCoverage = true;
+                }
+                pixels[i * 4] = static_cast<uint8_t>(blue * coverage / 255);
+                pixels[i * 4 + 1] = static_cast<uint8_t>(green * coverage / 255);
+                pixels[i * 4 + 2] = static_cast<uint8_t>(red * coverage / 255);
+                pixels[i * 4 + 3] = coverage;
+            }
+            if (anyCoverage) {
+                return bitmap;
+            }
+            DeleteObject(bitmap);
+        }
+        return nullptr;
+    }
+
+    std::unordered_map<std::wstring, HBITMAP> bitmaps_;
+    std::unordered_map<std::wstring, HICON> icons_;
+};
+
+inline IconCache g_iconCache;
+
 class NativeMenuView {
 public:
     static std::optional<uint32_t> Show(const MenuModel& model, HWND owner, POINT pt,
+                                        const std::vector<std::wstring>& paths,
                                         bool* creationFailed = nullptr) {
         if (creationFailed) {
             *creationFailed = false;
@@ -2377,7 +2856,8 @@ public:
             }
             return std::nullopt;
         }
-        AppendItems(menu, model.items);
+        const int iconSize = GetSystemMetrics(SM_CXSMICON);
+        AppendItems(menu, model.items, paths, iconSize);
 
         if (!TrackPopupMenuEx_Original) {
             if (creationFailed) {
@@ -2399,10 +2879,13 @@ public:
     }
 
 private:
-    static void AppendItems(HMENU menu, const std::vector<MenuItem>& items) {
+    static void AppendItems(HMENU menu, const std::vector<MenuItem>& items,
+                            const std::vector<std::wstring>& paths, int iconSize) {
+        int index = 0;
         for (const MenuItem& item : items) {
             if (item.kind == ItemKind::Separator) {
                 AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+                ++index;
                 continue;
             }
 
@@ -2420,14 +2903,29 @@ private:
             if (item.kind == ItemKind::Submenu) {
                 HMENU submenu = CreatePopupMenu();
                 if (!submenu) {
+                    ++index;
                     continue;
                 }
-                AppendItems(submenu, item.children);
+                AppendItems(submenu, item.children, paths, iconSize);
                 AppendMenuW(menu, flags | MF_POPUP,
                             reinterpret_cast<UINT_PTR>(submenu), item.label.c_str());
             } else {
                 AppendMenuW(menu, flags, item.id, item.label.c_str());
             }
+
+            // Checked items keep the checkmark gutter; everything else may
+            // carry a cached icon bitmap.
+            if (!(item.flags & kModelChecked)) {
+                HBITMAP bitmap = g_iconCache.GetBitmap(item, paths, iconSize);
+                if (bitmap) {
+                    MENUITEMINFOW bitmapInfo = {};
+                    bitmapInfo.cbSize = sizeof(bitmapInfo);
+                    bitmapInfo.fMask = MIIM_BITMAP;
+                    bitmapInfo.hbmpItem = bitmap;
+                    SetMenuItemInfoW(menu, static_cast<UINT>(index), TRUE, &bitmapInfo);
+                }
+            }
+            ++index;
         }
     }
 };
@@ -2557,108 +3055,6 @@ std::optional<uint32_t> ShowNativeReplay(PendingCapture& capture, HWND owner, PO
 
     return static_cast<uint32_t>(command);
 }
-
-// Parses a shell icon reference: "file,index", "file", or a quoted path with
-// an optional trailing ",index". Environment expansion happens at load time.
-bool ParseIconRef(std::wstring_view ref, std::wstring& path, int& index) {
-    path.clear();
-    index = 0;
-
-    std::wstring_view text = ref;
-    while (!text.empty() && (text.front() == L' ' || text.front() == L'\t')) {
-        text.remove_prefix(1);
-    }
-    while (!text.empty() && (text.back() == L' ' || text.back() == L'\t')) {
-        text.remove_suffix(1);
-    }
-    if (text.empty()) {
-        return false;
-    }
-
-    if (text.front() == L'"') {
-        text.remove_prefix(1);
-        const size_t quote = text.find(L'"');
-        if (quote == std::wstring_view::npos) {
-            return false;
-        }
-        path.assign(text.substr(0, quote));
-        text.remove_prefix(quote + 1);
-        if (!text.empty() && text.front() == L',') {
-            text.remove_prefix(1);
-            index = _wtoi(std::wstring(text).c_str());
-        }
-        return !path.empty();
-    }
-
-    const size_t comma = text.find_last_of(L',');
-    if (comma != std::wstring_view::npos) {
-        const std::wstring_view suffix = text.substr(comma + 1);
-        bool numeric = !suffix.empty();
-        for (wchar_t c : suffix) {
-            if (c < L'0' || c > L'9') {
-                numeric = false;
-                break;
-            }
-        }
-        if (numeric) {
-            path.assign(text.substr(0, comma));
-            index = _wtoi(std::wstring(suffix).c_str());
-            return !path.empty();
-        }
-    }
-
-    path.assign(text);
-    return true;
-}
-
-// Memoized HICONs, keyed by reference and pixel size. Owned and released by
-// this cache; callers must not destroy the returned icons.
-class IconCache {
-public:
-    ~IconCache() { Clear(); }
-
-    HICON Get(std::wstring_view ref, int sizePx) {
-        if (ref.empty()) {
-            return nullptr;
-        }
-        const std::wstring key = std::wstring(ref) + L"#" + std::to_wstring(sizePx);
-        auto it = icons_.find(key);
-        if (it != icons_.end()) {
-            return it->second;
-        }
-
-        HICON icon = nullptr;
-        std::wstring path;
-        int index = 0;
-        if (ParseIconRef(ref, path, index)) {
-            wchar_t expanded[MAX_PATH] = {};
-            if (ExpandEnvironmentStringsW(path.c_str(), expanded,
-                                          ARRAYSIZE(expanded))) {
-                HICON large = nullptr;
-                if (SUCCEEDED(SHDefExtractIconW(expanded, index, 0, &large, nullptr,
-                                                MAKELONG(sizePx, sizePx)))) {
-                    icon = large;
-                }
-            }
-        }
-        icons_[key] = icon;
-        return icon;
-    }
-
-    void Clear() {
-        for (auto& pair : icons_) {
-            if (pair.second) {
-                DestroyIcon(pair.second);
-            }
-        }
-        icons_.clear();
-    }
-
-private:
-    std::unordered_map<std::wstring, HICON> icons_;
-};
-
-inline IconCache g_iconCache;
 
 // Open-path timing, active only with debugLogging.
 class Perf {
@@ -3219,11 +3615,11 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
         // Cache hits skip population entirely; extension items populate
         // lazily if they are clicked.
         if (cached) {
-            chosen = NativeMenuView::Show(model, owner, pt, &creationFailed);
+            chosen = NativeMenuView::Show(model, owner, pt, paths, &creationFailed);
         } else {
             OwnerSubclass subclass(owner, &capture, /*forwardMenuMessages=*/false);
             subclass.StartDiscoveryTimer(signature);
-            chosen = NativeMenuView::Show(model, owner, pt, &creationFailed);
+            chosen = NativeMenuView::Show(model, owner, pt, paths, &creationFailed);
         }
     }
 
@@ -3482,6 +3878,7 @@ BOOL Wh_ModInit() {
     }
 
     cmo::LoadSettings();
+    cmo::g_iconCache.PreloadCoreIcons(GetSystemMetrics(SM_CXSMICON));
 
     const std::wstring cachePath = cmo::CacheFilePath();
     if (!cachePath.empty()) {

@@ -514,7 +514,8 @@ int main() {
 
     // A failed menu construction is distinguishable from a dismissal.
     bool showFailed = false;
-    auto showResult = cmo::NativeMenuView::Show(single, nullptr, POINT{0, 0}, &showFailed);
+    auto showResult = cmo::NativeMenuView::Show(single, nullptr, POINT{0, 0}, {},
+                                                &showFailed);
     CHECK(!showResult.has_value());
     CHECK(showFailed);
 
@@ -778,6 +779,118 @@ int main() {
         CHECK(unlabeled.items[1].kind == cmo::ItemKind::Separator);
         CHECK(unlabeled.items[2].label == L"Extras");
         CHECK(unlabeled.items[2].children.size() == 1);
+    }
+
+    // Icons: core items carry icon references.
+    bool openFileIcon = false;
+    bool cutGlyph = false;
+    bool renameGlyph = false;
+    for (const cmo::MenuItem& item : single.items) {
+        if (item.label == L"Open") {
+            openFileIcon = item.iconRef == L"@file";
+        }
+        if (item.label == L"Cut") {
+            cutGlyph = item.iconRef == L"@glyph:E8C6";
+        }
+        if (item.label == L"Rename") {
+            renameGlyph = item.iconRef == L"@glyph:E8AC";
+        }
+    }
+    CHECK(openFileIcon);
+    CHECK(cutGlyph);
+    CHECK(renameGlyph);
+
+    // Icons: pixel blobs round-trip through the cache format.
+    {
+        cmo::Cache pixelCache;
+        cmo::MenuModel pixelModel = cmo::BuildCoreFileModel(onePath, cmo::Shape::Single);
+        pixelModel.items.front().iconPixels.assign(16 * 16 * 4, 0x5A);
+        pixelCache.Put(pixelModel);
+        std::vector<uint8_t> pixelBytes = pixelCache.Serialize();
+        cmo::Cache pixelRestored;
+        CHECK(cmo::Cache::Deserialize(pixelBytes, pixelRestored));
+        std::optional<cmo::MenuModel> pixelModelRestored =
+            pixelRestored.Find(pixelModel.sig);
+        CHECK(pixelModelRestored.has_value());
+        CHECK(pixelModelRestored &&
+              pixelModelRestored->items.front().iconPixels.size() == 16 * 16 * 4);
+    }
+
+    // Icons: pixel blobs produce cached 16x16 bitmaps.
+    {
+        std::vector<uint8_t> pixels(16 * 16 * 4);
+        for (size_t i = 0; i < pixels.size(); i += 4) {
+            pixels[i] = 0x20;
+            pixels[i + 1] = 0x40;
+            pixels[i + 2] = 0x60;
+            pixels[i + 3] = 0xFF;
+        }
+        cmo::MenuItem iconItem{};
+        iconItem.iconPixels = pixels;
+        HBITMAP bitmap = cmo::g_iconCache.GetBitmap(iconItem, {}, 16);
+        CHECK(bitmap != nullptr);
+        if (bitmap) {
+            BITMAP bitmapInfo = {};
+            CHECK(GetObjectW(bitmap, sizeof(bitmapInfo), &bitmapInfo) != 0);
+            CHECK(bitmapInfo.bmWidth == 16 && bitmapInfo.bmHeight == 16);
+            CHECK(cmo::g_iconCache.GetBitmap(iconItem, {}, 16) == bitmap);
+        }
+    }
+
+    // Icons: shell menu bitmaps are captured into the model during discovery.
+    {
+        BITMAPINFO dibInfo = {};
+        dibInfo.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        dibInfo.bmiHeader.biWidth = 16;
+        dibInfo.bmiHeader.biHeight = -16;
+        dibInfo.bmiHeader.biPlanes = 1;
+        dibInfo.bmiHeader.biBitCount = 32;
+        dibInfo.bmiHeader.biCompression = BI_RGB;
+
+        HDC screen = GetDC(nullptr);
+        void* bits = nullptr;
+        HBITMAP dib =
+            CreateDIBSection(screen, &dibInfo, DIB_RGB_COLORS, &bits, nullptr, 0);
+        if (dib && bits) {
+            uint8_t* pixelBytes = static_cast<uint8_t*>(bits);
+            for (int i = 0; i < 16 * 16; ++i) {
+                pixelBytes[i * 4] = 0x11;
+                pixelBytes[i * 4 + 1] = 0x22;
+                pixelBytes[i * 4 + 2] = 0x33;
+                pixelBytes[i * 4 + 3] = 0xFF;
+            }
+
+            HMENU captureMenu = CreatePopupMenu();
+            AppendMenuW(captureMenu, MF_STRING, 7, L"Captured");
+            MENUITEMINFOW menuItemInfo = {};
+            menuItemInfo.cbSize = sizeof(menuItemInfo);
+            menuItemInfo.fMask = MIIM_BITMAP;
+            menuItemInfo.hbmpItem = dib;
+            CHECK(SetMenuItemInfoW(captureMenu, 0, TRUE, &menuItemInfo));
+
+            cmo::MenuModel captured = cmo::BuildModelFromHMenu(
+                captureMenu, 1,
+                cmo::ContextSignature{cmo::Scope::Files, L".x", cmo::Shape::Single,
+                                      cmo::Variant::Normal},
+                nullptr);
+            CHECK(!captured.items.empty());
+            CHECK(captured.items.front().iconPixels.size() == 16 * 16 * 4);
+            if (captured.items.front().iconPixels.size() == 16 * 16 * 4) {
+                CHECK(captured.items.front().iconPixels[0] == 0x11);
+                CHECK(captured.items.front().iconPixels[3] == 0xFF);
+            }
+            DestroyMenu(captureMenu);
+            DeleteObject(dib);
+        }
+        ReleaseDC(nullptr, screen);
+    }
+
+    // Icons: glyph rendering must not crash when the icon font is absent.
+    {
+        cmo::MenuItem glyphItem{};
+        glyphItem.iconRef = L"@glyph:E8C6";
+        HBITMAP glyph = cmo::g_iconCache.GetBitmap(glyphItem, {}, 16);
+        (void)glyph;
     }
 
     // Instant menu open: while the suppressor is active the master menu

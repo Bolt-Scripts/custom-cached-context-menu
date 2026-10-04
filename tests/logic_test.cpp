@@ -731,8 +731,9 @@ int main() {
         }
     }
 
-    // Unlabeled items are hidden: they cannot be rendered faithfully and
-    // their cached offsets can dispatch the wrong command.
+    // Unlabeled items and submenus left empty are pruned: they cannot be
+    // rendered faithfully and their cached offsets can dispatch the wrong
+    // command.
     {
         cmo::MenuModel unlabeled{};
         cmo::MenuItem labeledItem{};
@@ -756,14 +757,27 @@ int main() {
         cmo::MenuItem blankParent{};
         blankParent.id = 6;
         blankParent.kind = cmo::ItemKind::Submenu;
+        cmo::MenuItem goodParent{};
+        goodParent.id = 7;
+        goodParent.kind = cmo::ItemKind::Submenu;
+        goodParent.label = L"Extras";
+        cmo::MenuItem goodChild{};
+        goodChild.id = 8;
+        goodChild.kind = cmo::ItemKind::Command;
+        goodChild.label = L"Extract";
+        goodParent.children.push_back(goodChild);
+        cmo::MenuItem emptyParent{};
+        emptyParent.id = 9;
+        emptyParent.kind = cmo::ItemKind::Submenu;
+        emptyParent.label = L"Empty";
         unlabeled.items = {labeledItem, blankItem, separatorItem, parentItem,
-                           blankParent};
-        cmo::RemoveUnlabeledItems(unlabeled.items);
+                           blankParent, goodParent, emptyParent};
+        cmo::PruneMenuItems(unlabeled.items);
         CHECK(unlabeled.items.size() == 3);
         CHECK(unlabeled.items[0].label == L"Open");
         CHECK(unlabeled.items[1].kind == cmo::ItemKind::Separator);
-        CHECK(unlabeled.items[2].label == L"WinRAR");
-        CHECK(unlabeled.items[2].children.empty());
+        CHECK(unlabeled.items[2].label == L"Extras");
+        CHECK(unlabeled.items[2].children.size() == 1);
     }
 
     if (g_failures == 0) {

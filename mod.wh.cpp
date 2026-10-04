@@ -2,7 +2,7 @@
 // @id              context-menu-overhaul
 // @name            Context Menu Overhaul
 // @description     Replaces the Explorer context menu with an instantly-opening cached menu, then discovers and caches shell extension items asynchronously.
-// @version         0.2.4
+// @version         0.2.5
 // @include         explorer.exe
 // @architecture    x86-64
 // @compilerOptions -lole32 -lshlwapi -luuid -lcomctl32 -ladvapi32 -lgdi32
@@ -272,15 +272,23 @@ std::wstring FormatMultiLabel(std::wstring_view verb, size_t count) {
     return std::wstring(verb) + L" " + std::to_wstring(count) + L" items";
 }
 
-// Removes non-separator items without a label. Such items cannot be rendered
-// faithfully, and their cached offsets can dispatch the wrong command.
-void RemoveUnlabeledItems(std::vector<MenuItem>& items) {
-    std::erase_if(items, [](const MenuItem& item) {
-        return item.kind != ItemKind::Separator && item.label.empty();
-    });
+// Prunes items that cannot be shown faithfully: non-separator items without
+// a label, and submenus left with no children after their contents were
+// pruned. Runs bottom-up so a submenu whose children are all pruned is
+// removed together with them.
+void PruneMenuItems(std::vector<MenuItem>& items) {
     for (MenuItem& item : items) {
-        RemoveUnlabeledItems(item.children);
+        PruneMenuItems(item.children);
     }
+    std::erase_if(items, [](const MenuItem& item) {
+        if (item.kind == ItemKind::Separator) {
+            return false;
+        }
+        if (item.label.empty()) {
+            return true;
+        }
+        return item.kind == ItemKind::Submenu && item.children.empty();
+    });
 }
 
 // Logs any unlabeled item with its full descriptor so the extension behavior
@@ -3123,7 +3131,7 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
         });
     }
     DumpSuspiciousItems(model.items, 0);
-    RemoveUnlabeledItems(model.items);
+    PruneMenuItems(model.items);
 
     if (ShouldShowNativeReplay(model.flags)) {
         Wh_Log(L"Owner-draw context: using the native menu");

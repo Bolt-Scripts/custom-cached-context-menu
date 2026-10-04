@@ -4169,6 +4169,81 @@ struct MenuSession {
 
 inline MenuSession* g_menuSession = nullptr;
 
+struct AnimationSpec {
+    bool animate = false;
+    bool slide = false;
+    int durationMs = 0;
+};
+
+// MinGW's dcomp.h omits IDCompositionVisual::SetOpacity (the vtable tail);
+// mirror it so the correct slots are called.
+struct IDCompositionVisualOpacity : public IDCompositionVisual {
+    virtual HRESULT STDMETHODCALLTYPE SetOpacity(float opacity) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetOpacity(IDCompositionAnimation* animation) = 0;
+};
+
+AnimationSpec ResolveAnimationSpec(const Appearance& appearance) {
+    AnimationSpec spec;
+    switch (appearance.animation) {
+        case AnimationKind::None:
+            break;
+        case AnimationKind::Fade:
+            spec.animate = true;
+            spec.durationMs = appearance.animationDuration;
+            break;
+        case AnimationKind::Slide:
+            spec.animate = true;
+            spec.slide = true;
+            spec.durationMs = appearance.animationDuration;
+            break;
+    }
+    if (spec.durationMs < 0) {
+        spec.durationMs = 0;
+    }
+    return spec;
+}
+
+void ApplyWindowAnimation(IDCompositionVisual* visual, const AnimationSpec& spec,
+                          bool opening) {
+    if (!visual) {
+        return;
+    }
+    IDCompositionDevice* comp = g_renderDevice.CompDevice();
+    if (!comp) {
+        return;
+    }
+
+    if (!spec.animate || spec.durationMs <= 0) {
+        static_cast<IDCompositionVisualOpacity*>(visual)->SetOpacity(
+            opening ? 1.0f : 0.0f);
+        comp->Commit();
+        return;
+    }
+
+    const double duration = static_cast<double>(spec.durationMs) / 1000.0;
+    IDCompositionAnimation* opacity = nullptr;
+    if (FAILED(comp->CreateAnimation(&opacity)) || !opacity) {
+        return;
+    }
+    opacity->AddCubic(0.0, opening ? 0.0 : 1.0,
+                      (opening ? 1.0 : -1.0) / duration, 0.0, 0.0);
+    opacity->End(duration, opening ? 1.0 : 0.0);
+    static_cast<IDCompositionVisualOpacity*>(visual)->SetOpacity(opacity);
+    opacity->Release();
+
+    if (spec.slide) {
+        IDCompositionAnimation* slide = nullptr;
+        if (SUCCEEDED(comp->CreateAnimation(&slide)) && slide) {
+            slide->AddCubic(0.0, opening ? 12.0 : 0.0,
+                            (opening ? -12.0 : 12.0) / duration, 0.0, 0.0);
+            slide->End(duration, opening ? 0.0 : 12.0);
+            visual->SetOffsetX(slide);
+            slide->Release();
+        }
+    }
+    comp->Commit();
+}
+
 void RenderMenuWindow(MenuWindow* window, const LayoutPanel& panel,
                       const MenuInputState& state, const LayoutMetrics& metrics,
                       const Appearance& appearance,
@@ -4234,6 +4309,8 @@ void CloseSubmenusBelow(MenuSession* session, int index) {
         if (session->backdrops.size() >= session->windows.size() + 1) {
             session->backdrops.pop_back();
         }
+        ApplyWindowAnimation(window->CompVisual(),
+                             ResolveAnimationSpec(session->appearance), false);
         g_menuWindowPool.Release(window);
     }
     session->active = index;
@@ -4307,6 +4384,8 @@ void OpenSubmenu(MenuSession* session, int index, int itemIndex) {
                      session->appearance,
                      hasBackdrop ? &session->backdrops.back() : nullptr,
                      session->margin);
+    ApplyWindowAnimation(child->CompVisual(),
+                         ResolveAnimationSpec(session->appearance), true);
     child->Show();
     SetFocus(child->Handle());
 }
@@ -4563,6 +4642,13 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
     session.metrics = metrics;
     session.appearance = appearance;
     session.submenuDelayMs = g_settings.submenuDelayMs;
+    if (session.submenuDelayMs < 0) {
+        DWORD systemDelay = 400;
+        session.submenuDelayMs =
+            SystemParametersInfoW(SPI_GETMENUSHOWDELAY, 0, &systemDelay, 0)
+                ? static_cast<int>(systemDelay)
+                : 400;
+    }
     session.maxHeight = workArea.bottom - workArea.top;
     session.margin = margin;
     session.windows.push_back(root);
@@ -4584,6 +4670,7 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
     root->Move(POINT{panelPos.x - margin, panelPos.y - margin});
     RenderMenuWindow(root, *panel, session.states[0], metrics, appearance,
                      hasBackdrop ? &session.backdrops[0] : nullptr, margin);
+    ApplyWindowAnimation(root->CompVisual(), ResolveAnimationSpec(appearance), true);
     root->Show();
     SetForegroundWindow(root->Handle());
     SetFocus(root->Handle());
@@ -4604,6 +4691,13 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
     if (session.submenuTimerActive) {
         KillTimer(root->Handle(), kMenuSubmenuTimerId);
         session.submenuTimerActive = false;
+    }
+    const AnimationSpec closing = ResolveAnimationSpec(appearance);
+    if (closing.animate && closing.durationMs > 0) {
+        for (MenuWindow* window : session.windows) {
+            ApplyWindowAnimation(window->CompVisual(), closing, false);
+        }
+        Sleep(static_cast<DWORD>(closing.durationMs));
     }
     for (size_t i = session.windows.size(); i > 1; --i) {
         g_menuWindowPool.Release(session.windows[i - 1]);

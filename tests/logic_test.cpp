@@ -2628,6 +2628,21 @@ int main() {
         CHECK(mask[19] == 0);
     }
 
+    // v2 animation spec resolution.
+    {
+        cmo::Appearance appearance{};
+        appearance.animation = cmo::AnimationKind::None;
+        cmo::AnimationSpec spec = cmo::ResolveAnimationSpec(appearance);
+        CHECK(!spec.animate && !spec.slide && spec.durationMs == 0);
+        appearance.animation = cmo::AnimationKind::Fade;
+        appearance.animationDuration = 120;
+        spec = cmo::ResolveAnimationSpec(appearance);
+        CHECK(spec.animate && !spec.slide && spec.durationMs == 120);
+        appearance.animation = cmo::AnimationKind::Slide;
+        spec = cmo::ResolveAnimationSpec(appearance);
+        CHECK(spec.animate && spec.slide && spec.durationMs == 120);
+    }
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

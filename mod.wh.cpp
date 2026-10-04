@@ -195,8 +195,13 @@ constexpr UINT kViewCmdProperties = 0x7013;
 constexpr UINT kViewCmdCut = 0x7018;
 constexpr UINT kViewCmdCopy = 0x7019;
 constexpr UINT kViewCmdPaste = 0x701A;
+constexpr UINT kViewCmdBigIcon = 0x7029;
+constexpr UINT kViewCmdSmallIcon = 0x702A;
+constexpr UINT kViewCmdList = 0x702B;
+constexpr UINT kViewCmdDetails = 0x702C;
 constexpr UINT kViewCmdRename = 0x7050;
 constexpr UINT kViewCmdCreateLink = 0x7051;
+constexpr UINT kViewCmdRefresh = 0x7100;
 
 struct MenuItem {
     uint32_t id = 0;
@@ -208,6 +213,7 @@ struct MenuItem {
     uint32_t verbOffset = 0;
     uint32_t flags = kModelNone;
     std::wstring iconRef;
+    std::wstring targetPath;
     std::vector<MenuItem> children;
 };
 
@@ -254,15 +260,21 @@ std::pair<std::wstring, uint32_t> ChooseInvokeDescriptor(const MenuItem& item) {
     return {L"", item.verbOffset};
 }
 
-// Core model for a file selection. The common commands come first, cached
-// extension items are merged in later, and the native fallback stays last.
-MenuModel BuildCoreFileModel(const std::vector<std::wstring>& paths, Shape shape) {
+std::wstring FormatMultiLabel(std::wstring_view verb, size_t count) {
+    if (count <= 1) {
+        return std::wstring(verb);
+    }
+    return std::wstring(verb) + L" " + std::to_wstring(count) + L" items";
+}
+
+// Core model for a context. The common commands come first, cached extension
+// items are merged in later, and the native fallback stays last.
+MenuModel BuildCoreModel(Scope scope, const std::vector<std::wstring>& paths, Shape shape) {
     MenuModel model{};
-    model.sig = ContextSignature{Scope::Files, MakeTypeKey(paths), shape, Variant::Normal};
+    model.sig = ContextSignature{scope, MakeTypeKey(paths), shape, Variant::Normal};
 
     uint32_t nextId = 1;
-    auto addCommand = [&](std::wstring label, std::wstring verb,
-                          uint32_t flags = kModelNone) {
+    auto makeCommand = [&](std::wstring label, std::wstring verb, uint32_t flags) {
         MenuItem item{};
         item.id = nextId++;
         item.kind = ItemKind::Command;
@@ -270,10 +282,10 @@ MenuModel BuildCoreFileModel(const std::vector<std::wstring>& paths, Shape shape
         item.canonicalVerb = std::move(verb);
         item.action = ActionKind::ShellVerb;
         item.flags = flags;
-        model.items.push_back(std::move(item));
+        return item;
     };
-    auto addViewCommand = [&](std::wstring label, std::wstring dedupVerb, UINT commandId,
-                              uint32_t flags = kModelNone) {
+    auto makeViewCommand = [&](std::wstring label, std::wstring dedupVerb, UINT commandId,
+                               uint32_t flags) {
         MenuItem item{};
         item.id = nextId++;
         item.kind = ItemKind::Command;
@@ -282,7 +294,16 @@ MenuModel BuildCoreFileModel(const std::vector<std::wstring>& paths, Shape shape
         item.action = ActionKind::ViewCommand;
         item.viewCommandId = commandId;
         item.flags = flags;
-        model.items.push_back(std::move(item));
+        return item;
+    };
+    auto addCommand = [&](std::wstring label, std::wstring verb,
+                          uint32_t flags = kModelNone) {
+        model.items.push_back(makeCommand(std::move(label), std::move(verb), flags));
+    };
+    auto addViewCommand = [&](std::wstring label, std::wstring dedupVerb, UINT commandId,
+                              uint32_t flags = kModelNone) {
+        model.items.push_back(
+            makeViewCommand(std::move(label), std::move(dedupVerb), commandId, flags));
     };
     auto addSeparator = [&]() {
         MenuItem item{};
@@ -290,13 +311,14 @@ MenuModel BuildCoreFileModel(const std::vector<std::wstring>& paths, Shape shape
         item.kind = ItemKind::Separator;
         model.items.push_back(std::move(item));
     };
-    auto addSubmenu = [&](std::wstring label) {
+    auto addSubmenu = [&](std::wstring label) -> MenuItem& {
         MenuItem item{};
         item.id = nextId++;
         item.kind = ItemKind::Submenu;
         item.action = ActionKind::Submenu;
         item.label = std::move(label);
         model.items.push_back(std::move(item));
+        return model.items.back();
     };
     auto addFallback = [&]() {
         MenuItem item{};
@@ -309,12 +331,58 @@ MenuModel BuildCoreFileModel(const std::vector<std::wstring>& paths, Shape shape
 
     const bool multi = shape == Shape::Multi;
     const uint32_t multiDisabled = multi ? kModelDisabled : kModelNone;
-    const std::wstring openLabel =
-        multi ? (L"Open " + std::to_wstring(paths.size()) + L" items") : L"Open";
+    const std::wstring openLabel = FormatMultiLabel(L"Open", paths.size());
 
-    addCommand(openLabel, L"open", kModelDefault);
-    addCommand(L"Open with", L"openwith");
-    addSeparator();
+    if (scope == Scope::Background || scope == Scope::Desktop) {
+        MenuItem& viewMenu = addSubmenu(L"View");
+        viewMenu.children.push_back(
+            makeViewCommand(L"Large icons", L"viewlarge", kViewCmdBigIcon, kModelNone));
+        viewMenu.children.push_back(
+            makeViewCommand(L"Small icons", L"viewsmall", kViewCmdSmallIcon, kModelNone));
+        viewMenu.children.push_back(
+            makeViewCommand(L"List", L"viewlist", kViewCmdList, kModelNone));
+        viewMenu.children.push_back(
+            makeViewCommand(L"Details", L"viewdetails", kViewCmdDetails, kModelNone));
+
+        addCommand(L"Sort by", L"sortby");
+        addViewCommand(L"Refresh", L"refresh", kViewCmdRefresh);
+        addSeparator();
+        addCommand(L"Paste", L"paste");
+        addCommand(L"Paste shortcut", L"pastelink");
+        addSeparator();
+        addCommand(L"New", L"new");
+        if (scope == Scope::Desktop) {
+            addSeparator();
+            addCommand(L"Display settings", L"display");
+            addCommand(L"Personalize", L"personalize");
+        }
+        addSeparator();
+        addFallback();
+        return model;
+    }
+
+    if (scope == Scope::Drive) {
+        addCommand(openLabel, L"open", kModelDefault);
+        addCommand(L"Open in new window", L"opennew");
+        addCommand(L"Pin to Quick access", L"pintohome");
+        addSeparator();
+        addCommand(L"Properties", L"properties");
+        addSeparator();
+        addFallback();
+        return model;
+    }
+
+    if (scope == Scope::Folders) {
+        addCommand(openLabel, L"open", kModelDefault);
+        addCommand(L"Open in new window", L"opennew");
+        addCommand(L"Pin to Quick access", L"pintohome");
+        addSeparator();
+    } else {
+        addCommand(openLabel, L"open", kModelDefault);
+        addCommand(L"Open with", L"openwith");
+        addSeparator();
+    }
+
     addViewCommand(L"Cut", L"cut", kViewCmdCut, multiDisabled);
     addViewCommand(L"Copy", L"copy", kViewCmdCopy, multiDisabled);
     addViewCommand(L"Rename", L"rename", kViewCmdRename, multiDisabled);
@@ -329,6 +397,10 @@ MenuModel BuildCoreFileModel(const std::vector<std::wstring>& paths, Shape shape
     addFallback();
 
     return model;
+}
+
+MenuModel BuildCoreFileModel(const std::vector<std::wstring>& paths, Shape shape) {
+    return BuildCoreModel(Scope::Files, paths, shape);
 }
 
 // Merges cached extension items into a freshly built core model: core items
@@ -391,7 +463,7 @@ MenuModel MergeCoreWithCached(const MenuModel& core, const MenuModel& cached) {
 namespace cmo {
 
 constexpr uint32_t kCacheMagic = 0x434F4D4F;  // "COMO"
-constexpr uint32_t kCacheVersion = 1;
+constexpr uint32_t kCacheVersion = 2;
 
 std::wstring CacheFilePath() {
     wchar_t storagePath[MAX_PATH] = {};
@@ -430,6 +502,7 @@ void WriteItem(std::vector<uint8_t>& out, const MenuItem& item) {
     WriteString(out, item.label);
     WriteString(out, item.canonicalVerb);
     WriteString(out, item.iconRef);
+    WriteString(out, item.targetPath);
     WriteU32(out, static_cast<uint32_t>(item.children.size()));
     for (const MenuItem& child : item.children) {
         WriteItem(out, child);
@@ -519,7 +592,7 @@ public:
             !ReadU32(item.flags) || !ReadU32(viewCommandId) ||
             !ReadU32(item.verbOffset) || !ReadString(item.label) ||
             !ReadString(item.canonicalVerb) || !ReadString(item.iconRef) ||
-            !ReadU32(childCount)) {
+            !ReadString(item.targetPath) || !ReadU32(childCount)) {
             return false;
         }
         item.kind = static_cast<ItemKind>(kind);
@@ -769,6 +842,49 @@ inline ShellViewKind ClassifyClassChain(const std::vector<std::wstring>& ancesto
 
 inline bool IsReplaceableKind(ShellViewKind kind) {
     return kind == ShellViewKind::Desktop || kind == ShellViewKind::ShellDefView;
+}
+
+// Maps the popup owner to a scope. A replaceable owner with an empty
+// selection is a background menu; Desktop background and desktop icons share
+// the same owner kind.
+inline Scope ScopeFromKind(ShellViewKind kind, bool background) {
+    switch (kind) {
+        case ShellViewKind::Desktop:
+            return background ? Scope::Desktop : Scope::Files;
+        case ShellViewKind::ShellDefView:
+            return background ? Scope::Background : Scope::Files;
+        case ShellViewKind::NavPane:
+            return Scope::NavPane;
+        default:
+            return Scope::Other;
+    }
+}
+
+inline bool AllPathsAreDirectories(const std::vector<std::wstring>& paths) {
+    if (paths.empty()) {
+        return false;
+    }
+    for (const std::wstring& path : paths) {
+        const DWORD attributes = GetFileAttributesW(path.c_str());
+        if (attributes == INVALID_FILE_ATTRIBUTES ||
+            !(attributes & FILE_ATTRIBUTE_DIRECTORY)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+inline bool AllPathsAreDrives(const std::vector<std::wstring>& paths) {
+    if (paths.empty()) {
+        return false;
+    }
+    for (const std::wstring& path : paths) {
+        if (path.size() != 3 || path[1] != L':' ||
+            (path[2] != L'\\' && path[2] != L'/')) {
+            return false;
+        }
+    }
+    return true;
 }
 
 inline bool IsDesktopRootWindow(HWND hwnd) {
@@ -1026,6 +1142,46 @@ void DiscoverIntoCache(IContextMenu* context, const PendingCapture& capture,
     Wh_Log(L"Discovered %zu menu items", model.items.size());
     g_cache.Put(std::move(model));
     g_cache.MaybeSave(CacheFilePath());
+}
+
+// Enumerates the SendTo folder into the "Send to" submenu. Items execute the
+// shortcut with the selected paths as arguments.
+void BuildSendToSubmenu(MenuItem& parent) {
+    PWSTR sendToPath = nullptr;
+    if (FAILED(SHGetKnownFolderPath(FOLDERID_SendTo, 0, nullptr, &sendToPath)) ||
+        !sendToPath) {
+        return;
+    }
+
+    const std::wstring directory(sendToPath);
+    const std::wstring pattern = directory + L"\\*.lnk";
+    WIN32_FIND_DATAW findData = {};
+    HANDLE find = FindFirstFileW(pattern.c_str(), &findData);
+    if (find != INVALID_HANDLE_VALUE) {
+        uint32_t nextChildId = 20000;
+        do {
+            if (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+                continue;
+            }
+            std::wstring label = findData.cFileName;
+            const size_t dot = label.find_last_of(L'.');
+            if (dot != std::wstring::npos) {
+                label.resize(dot);
+            }
+
+            MenuItem child{};
+            child.id = nextChildId++;
+            child.kind = ItemKind::Command;
+            child.action = ActionKind::ShellVerb;
+            child.canonicalVerb = L"sendto";
+            child.label = std::move(label);
+            child.targetPath = directory + L"\\" + findData.cFileName;
+            parent.children.push_back(std::move(child));
+        } while (FindNextFileW(find, &findData));
+        FindClose(find);
+    }
+
+    CoTaskMemFree(sendToPath);
 }
 
 // Creates a throwaway default context menu to read the shared vtable of
@@ -1290,6 +1446,8 @@ struct InvocationContext {
     std::vector<std::wstring> paths;
     IContextMenu* liveContext = nullptr;
     UINT idCmdFirst = 0;
+    DWORD clipboardSequence = 0;
+    bool clipboardHadData = false;
 };
 
 HWND FindShellDefView(HWND owner) {
@@ -1354,6 +1512,42 @@ bool CopyAsPath(const std::vector<std::wstring>& paths) {
     }
     CloseClipboard();
     return ok;
+}
+
+bool ClipboardHasFileData() {
+    return IsClipboardFormatAvailable(CF_HDROP) != FALSE;
+}
+
+// Paste availability: cached state while the clipboard sequence is unchanged,
+// otherwise the freshly checked state.
+bool ComputePasteEnabled(DWORD sequenceAtOpen, DWORD currentSequence,
+                         bool cachedHadData, bool currentHasData) {
+    return sequenceAtOpen == currentSequence ? cachedHadData : currentHasData;
+}
+
+// Executes a SendTo shortcut with the selected paths as arguments.
+bool InvokeSendTo(const std::wstring& target, const std::vector<std::wstring>& paths) {
+    if (target.empty() || paths.empty()) {
+        return false;
+    }
+
+    std::wstring parameters;
+    for (const std::wstring& path : paths) {
+        if (!parameters.empty()) {
+            parameters += L' ';
+        }
+        parameters += L'"';
+        parameters += path;
+        parameters += L'"';
+    }
+
+    SHELLEXECUTEINFOW info = {};
+    info.cbSize = sizeof(info);
+    info.fMask = SEE_MASK_INVOKEIDLIST | SEE_MASK_FLAG_NO_UI;
+    info.lpFile = target.c_str();
+    info.lpParameters = parameters.c_str();
+    info.nShow = SW_SHOWNORMAL;
+    return ShellExecuteExW(&info) != FALSE;
 }
 
 // Fills an invocation descriptor: canonical verb when available, otherwise
@@ -1446,9 +1640,24 @@ InvokeResult InvokeItem(const MenuItem& item, const InvocationContext& ctx) {
                 return CopyAsPath(ctx.paths) ? InvokeResult::Handled
                                              : InvokeResult::Failed;
             }
+            if (item.canonicalVerb == L"sendto") {
+                return InvokeSendTo(item.targetPath, ctx.paths)
+                           ? InvokeResult::Handled
+                           : InvokeResult::FallbackNative;
+            }
+            if (item.canonicalVerb == L"paste") {
+                const DWORD currentSequence = GetClipboardSequenceNumber();
+                const bool currentHasData =
+                    currentSequence == ctx.clipboardSequence ? ctx.clipboardHadData
+                                                             : ClipboardHasFileData();
+                if (!ComputePasteEnabled(ctx.clipboardSequence, currentSequence,
+                                         ctx.clipboardHadData, currentHasData)) {
+                    return InvokeResult::Handled;
+                }
+            }
             return InvokeContextVerb(ctx.liveContext, item.canonicalVerb, ctx.owner)
                        ? InvokeResult::Handled
-                       : InvokeResult::Failed;
+                       : InvokeResult::FallbackNative;
     }
     return InvokeResult::Failed;
 }
@@ -1973,15 +2182,37 @@ MenuPath DecidePath(bool shiftHeld, ShellViewKind kind, bool hasPendingCapture,
 bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner, POINT pt) {
     std::vector<std::wstring> paths = GetSelectedPaths(owner, kind);
     Shape shape = paths.size() > 1 ? Shape::Multi : Shape::Single;
-    ContextSignature signature{Scope::Files, MakeTypeKey(paths), shape, Variant::Normal};
+
+    Scope scope = ScopeFromKind(kind, paths.empty());
+    if (!paths.empty() && scope == Scope::Files) {
+        if (AllPathsAreDrives(paths)) {
+            scope = Scope::Drive;
+        } else if (AllPathsAreDirectories(paths)) {
+            scope = Scope::Folders;
+        }
+    }
+    ContextSignature signature{scope, MakeTypeKey(paths), shape, Variant::Normal};
 
     const MenuModel* cached = g_cache.Find(signature);
-    MenuModel model = cached ? MergeCoreWithCached(BuildCoreFileModel(paths, shape), *cached)
-                             : BuildCoreFileModel(paths, shape);
+    MenuModel model =
+        cached ? MergeCoreWithCached(BuildCoreModel(scope, paths, shape), *cached)
+               : BuildCoreModel(scope, paths, shape);
     if (!g_settings.showMoreOptionsItem) {
         std::erase_if(model.items, [](const MenuItem& item) {
             return item.action == ActionKind::Fallback;
         });
+    }
+
+    const DWORD clipboardSequence = GetClipboardSequenceNumber();
+    const bool clipboardHadData = ClipboardHasFileData();
+    for (MenuItem& item : model.items) {
+        if (item.canonicalVerb == L"paste" && !clipboardHadData) {
+            item.flags |= kModelDisabled;
+        }
+        if (item.kind == ItemKind::Submenu && item.label == L"Send to" &&
+            item.children.empty()) {
+            BuildSendToSubmenu(item);
+        }
     }
 
     g_warmup.SetMenuOpen(true);
@@ -1995,6 +2226,8 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
             ctx.paths = paths;
             ctx.liveContext = capture.obj;
             ctx.idCmdFirst = capture.idCmdFirst;
+            ctx.clipboardSequence = clipboardSequence;
+            ctx.clipboardHadData = clipboardHadData;
 
             InvokeResult result = InvokeResult::Failed;
             if (item->flags & kModelExtension) {

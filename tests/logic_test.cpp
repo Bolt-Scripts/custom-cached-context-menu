@@ -243,7 +243,7 @@ int main() {
     CHECK(restoredChild && restoredChild->verbOffset == 42);
 
     std::vector<uint8_t> badVersion = serialized;
-    badVersion[4] = 2;
+    badVersion[4] = 3;
     cmo::Cache rejectedCache;
     CHECK(!cmo::Cache::Deserialize(badVersion, rejectedCache));
 
@@ -317,6 +317,63 @@ int main() {
           cmo::MenuPath::Ours);
     CHECK(cmo::DecidePath(true, cmo::ShellViewKind::ShellDefView, true, false) ==
           cmo::MenuPath::Ours);
+
+    CHECK(cmo::ScopeFromKind(cmo::ShellViewKind::Desktop, false) == cmo::Scope::Files);
+    CHECK(cmo::ScopeFromKind(cmo::ShellViewKind::Desktop, true) == cmo::Scope::Desktop);
+    CHECK(cmo::ScopeFromKind(cmo::ShellViewKind::ShellDefView, false) == cmo::Scope::Files);
+    CHECK(cmo::ScopeFromKind(cmo::ShellViewKind::ShellDefView, true) ==
+          cmo::Scope::Background);
+    CHECK(cmo::ScopeFromKind(cmo::ShellViewKind::NavPane, false) == cmo::Scope::NavPane);
+
+    CHECK_EQ(cmo::FormatMultiLabel(L"Open", 3), std::wstring(L"Open 3 items"));
+    CHECK_EQ(cmo::FormatMultiLabel(L"Copy", 1), std::wstring(L"Copy"));
+
+    CHECK(cmo::ComputePasteEnabled(5, 5, true, false));
+    CHECK(!cmo::ComputePasteEnabled(5, 5, false, true));
+    CHECK(cmo::ComputePasteEnabled(5, 6, false, true));
+    CHECK(!cmo::ComputePasteEnabled(5, 6, true, false));
+
+    cmo::MenuModel folderModel =
+        cmo::BuildCoreModel(cmo::Scope::Folders, onePath, cmo::Shape::Single);
+    bool hasOpenInNewWindow = false;
+    bool hasPin = false;
+    for (const cmo::MenuItem& item : folderModel.items) {
+        if (item.label == L"Open in new window") hasOpenInNewWindow = true;
+        if (item.label == L"Pin to Quick access") hasPin = true;
+    }
+    CHECK(hasOpenInNewWindow);
+    CHECK(hasPin);
+
+    cmo::MenuModel backgroundModel =
+        cmo::BuildCoreModel(cmo::Scope::Background, {}, cmo::Shape::Single);
+    bool hasView = false;
+    bool hasSort = false;
+    bool hasRefresh = false;
+    bool hasPasteItem = false;
+    bool hasNew = false;
+    for (const cmo::MenuItem& item : backgroundModel.items) {
+        if (item.label == L"View") hasView = true;
+        if (item.label == L"Sort by") hasSort = true;
+        if (item.label == L"Refresh") hasRefresh = true;
+        if (item.canonicalVerb == L"paste") hasPasteItem = true;
+        if (item.label == L"New") hasNew = true;
+    }
+    CHECK(hasView);
+    CHECK(hasSort);
+    CHECK(hasRefresh);
+    CHECK(hasPasteItem);
+    CHECK(hasNew);
+
+    cmo::MenuModel desktopModel =
+        cmo::BuildCoreModel(cmo::Scope::Desktop, {}, cmo::Shape::Single);
+    bool hasPersonalize = false;
+    bool hasDisplaySettings = false;
+    for (const cmo::MenuItem& item : desktopModel.items) {
+        if (item.label == L"Personalize") hasPersonalize = true;
+        if (item.label == L"Display settings") hasDisplaySettings = true;
+    }
+    CHECK(hasPersonalize);
+    CHECK(hasDisplaySettings);
 
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");

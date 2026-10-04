@@ -2474,6 +2474,14 @@ private:
 
 inline ConfigStore g_configStore;
 
+RulesApplication ApplyRulesConfigToModel(MenuModel& model,
+                                         const RulesConfig& config,
+                                         const ItemContext& ctx) {
+    RulesApplication application = ApplyRulesToModel(model, config, ctx);
+    InsertCustomItems(model, config, ctx);
+    return application;
+}
+
 // Shell property keys used by the Sort by and Group by submenus (all in the
 // shell's System property set, defined here so no SDK propkey.h is needed).
 const PROPERTYKEY kShellPropertyKeys[] = {
@@ -4958,6 +4966,7 @@ struct InvocationContext {
     ShellViewKind kind = ShellViewKind::None;
     DWORD clipboardSequence = 0;
     bool clipboardHadData = false;
+    std::shared_ptr<const RulesConfig> config;
 };
 
 int ShowWindowToShowCmd(ShowWindow showWindow) {
@@ -5774,6 +5783,14 @@ InvokeResult InvokeItem(const MenuItem& item, const InvocationContext& ctx,
         case ActionKind::GroupDirection:
             return InvokeGroupDirection(item, ctx) ? InvokeResult::Handled
                                                    : InvokeResult::Failed;
+        case ActionKind::CustomCommand:
+            if (ctx.config &&
+                item.customCommandIndex < ctx.config->commands.size() &&
+                InvokeCustomCommand(ctx.config->commands[item.customCommandIndex],
+                                    ctx)) {
+                return InvokeResult::Handled;
+            }
+            return InvokeResult::Failed;
         case ActionKind::ViewAction:
             return InvokeViewAction(item, ctx);
         case ActionKind::ShellVerb:
@@ -7249,6 +7266,18 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
                 return item.action == ActionKind::Fallback;
             });
         }
+
+        std::shared_ptr<const RulesConfig> rules = g_configStore.Snapshot();
+        bool hasMoveRules = false;
+        if (rules) {
+            ItemContext itemCtx{};
+            itemCtx.scope = scope;
+            itemCtx.shape = shape;
+            itemCtx.paths = paths;
+            hasMoveRules =
+                ApplyRulesConfigToModel(model, *rules, itemCtx).hasMoveRules;
+        }
+
         DumpSuspiciousItems(model.items, 0);
         PruneMenuItems(model.items);
 
@@ -7268,12 +7297,13 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
             }
         }
 
-        ReorganizeAdvancedItems(model.items);
+        if (!hasMoveRules) {
+            ReorganizeAdvancedItems(model.items);
+        }
 
         if (scope == Scope::Background || scope == Scope::Desktop) {
             ApplyViewStateChecks(model.items, owner, kind);
         }
-
         Wh_Log(L"Menu prep: %llu ms",
                static_cast<unsigned long long>(g_perf.OpenPathElapsedMs()));
 
@@ -7302,6 +7332,7 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
                 ctx.kind = kind;
                 ctx.clipboardSequence = clipboardSequence;
                 ctx.clipboardHadData = clipboardHadData;
+                ctx.config = rules;
 
                 InvokeResult result = InvokeResult::Failed;
                 if (item->flags & kModelExtension) {

@@ -2328,6 +2328,39 @@ int main() {
         CHECK(cmo::ConfigFilePath().find(L"menu.ini") != std::wstring::npos);
     }
 
+    // v2 rules integration: hide applies and custom commands are inserted.
+    {
+        cmo::RulesConfig config;
+        std::vector<cmo::ConfigParseError> errors;
+        CHECK(cmo::ParseRulesConfig(
+            L"[command \"Echo\"]\ncommand = cmd.exe /c echo %1\nmatch.scope = files\n"
+            L"[rules]\nhide = label:\"Hide me\"\n",
+            config, errors));
+        cmo::ItemContext ctx{};
+        ctx.scope = cmo::Scope::Files;
+        ctx.paths = {L"C:\\a.txt"};
+        cmo::MenuModel model = cmo::BuildCoreFileModel(ctx.paths, cmo::Shape::Single);
+        cmo::MenuItem hidden{};
+        hidden.id = 900;
+        hidden.kind = cmo::ItemKind::Command;
+        hidden.action = cmo::ActionKind::ShellVerb;
+        hidden.label = L"Hide me";
+        model.items.insert(model.items.end() - 1, hidden);
+        cmo::ApplyRulesConfigToModel(model, config, ctx);
+        for (const cmo::MenuItem& item : model.items) {
+            CHECK(item.label != L"Hide me");
+        }
+        bool foundEcho = false;
+        for (const cmo::MenuItem& item : model.items) {
+            if (item.label == L"Echo" &&
+                item.action == cmo::ActionKind::CustomCommand) {
+                foundEcho = true;
+                CHECK(item.customCommandIndex == 0);
+            }
+        }
+        CHECK(foundEcho);
+    }
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

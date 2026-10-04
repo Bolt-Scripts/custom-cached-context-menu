@@ -2,7 +2,7 @@
 // @id              context-menu-overhaul
 // @name            Context Menu Overhaul
 // @description     Replaces the Explorer context menu with an instantly-opening cached menu, then discovers and caches shell extension items asynchronously.
-// @version         0.2.5
+// @version         0.2.6
 // @include         explorer.exe
 // @architecture    x86-64
 // @compilerOptions -lole32 -lshlwapi -luuid -lcomctl32 -ladvapi32 -lgdi32
@@ -44,6 +44,9 @@ Design document: `docs/superpowers/specs/2026-10-04-context-menu-overhaul-design
 - debugLogging: false
   $name: Debug logging
   $description: Log timing and diagnostics for troubleshooting.
+- instantMenuFade: true
+  $name: Instant menu fade
+  $description: Temporarily disable the system menu fade while this mod's menu opens, so it appears instantly. Session-only; the previous setting is restored immediately.
 */
 // ==/WindhawkModSettings==
 
@@ -84,6 +87,7 @@ struct Settings {
     int warmupDelaySeconds = 5;
     bool clearCache = false;
     bool debugLogging = false;
+    bool instantMenuFade = true;
 };
 
 inline Settings g_settings;
@@ -94,6 +98,7 @@ void LoadSettings() {
     g_settings.warmupDelaySeconds = Wh_GetIntSetting(L"warmupDelaySeconds");
     g_settings.clearCache = Wh_GetIntSetting(L"clearCache") != 0;
     g_settings.debugLogging = Wh_GetIntSetting(L"debugLogging") != 0;
+    g_settings.instantMenuFade = Wh_GetIntSetting(L"instantMenuFade") != 0;
 }
 
 }  // namespace cmo
@@ -2309,6 +2314,50 @@ inline TrackPopupMenuEx_t TrackPopupMenuEx_Original = nullptr;
 using TrackPopupMenu_t = decltype(&TrackPopupMenu);
 inline TrackPopupMenu_t TrackPopupMenu_Original = nullptr;
 
+// Temporarily disables the per-user menu fade while a menu we display is
+// opening, so it appears instantly. The previous value is restored on scope
+// exit; the change is session-only (never written to disk, no broadcast).
+std::atomic<bool> g_fadeSuppressed{false};
+
+class MenuFadeSuppressor {
+public:
+    MenuFadeSuppressor() {
+        if (!g_settings.instantMenuFade) {
+            return;
+        }
+        BOOL enabled = FALSE;
+        if (!SystemParametersInfoW(SPI_GETMENUFADE, 0, &enabled, 0) || !enabled) {
+            return;
+        }
+        if (SystemParametersInfoW(SPI_SETMENUFADE, 0,
+                                  reinterpret_cast<PVOID>(static_cast<ULONG_PTR>(FALSE)),
+                                  0)) {
+            active_ = true;
+            g_fadeSuppressed.store(true);
+        }
+    }
+
+    ~MenuFadeSuppressor() {
+        if (!active_) {
+            return;
+        }
+        SystemParametersInfoW(SPI_SETMENUFADE, 0,
+                              reinterpret_cast<PVOID>(static_cast<ULONG_PTR>(TRUE)), 0);
+        g_fadeSuppressed.store(false);
+    }
+
+private:
+    bool active_ = false;
+};
+
+// Defensive restore in case a suppressor was active when the mod unloaded.
+void RestoreMenuFade() {
+    if (g_fadeSuppressed.exchange(false)) {
+        SystemParametersInfoW(SPI_SETMENUFADE, 0,
+                              reinterpret_cast<PVOID>(static_cast<ULONG_PTR>(TRUE)), 0);
+    }
+}
+
 class NativeMenuView {
 public:
     static std::optional<uint32_t> Show(const MenuModel& model, HWND owner, POINT pt,
@@ -2335,6 +2384,7 @@ public:
         }
 
         const UINT flags = TPM_RETURNCMD | TPM_NONOTIFY | TPM_LEFTALIGN | TPM_TOPALIGN;
+        MenuFadeSuppressor fadeSuppressor;
         int command = TrackPopupMenuEx_Original(menu, flags, pt.x, pt.y, owner, nullptr);
         DestroyMenu(menu);
 
@@ -2481,6 +2531,7 @@ std::optional<uint32_t> ShowNativeReplay(PendingCapture& capture, HWND owner, PO
     OwnerSubclass subclass(owner, &capture, /*forwardMenuMessages=*/true);
 
     const UINT flags = TPM_RETURNCMD | TPM_NONOTIFY | TPM_LEFTALIGN | TPM_TOPALIGN;
+    MenuFadeSuppressor fadeSuppressor;
     int command = TrackPopupMenuEx_Original(capture.populatedMenu, flags, pt.x, pt.y, owner,
                                             nullptr);
     if (command == 0 || !capture.obj) {
@@ -3466,6 +3517,7 @@ void Wh_ModAfterInit() {
 
 void Wh_ModUninit() {
     Wh_Log(L"Context Menu Overhaul uninit");
+    cmo::RestoreMenuFade();
     cmo::g_warmup.Stop();
     cmo::g_invalidation.Stop();
     cmo::g_iconCache.Clear();

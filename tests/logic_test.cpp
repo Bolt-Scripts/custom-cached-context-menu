@@ -780,6 +780,24 @@ int main() {
         CHECK(unlabeled.items[2].children.size() == 1);
     }
 
+    // Instant fade: while the suppressor is active the per-user menu fade is
+    // off, and it is restored afterwards. Skipped when the environment does
+    // not implement the SPI.
+    {
+        BOOL originalFade = TRUE;
+        if (SystemParametersInfoW(SPI_GETMENUFADE, 0, &originalFade, 0)) {
+            {
+                cmo::MenuFadeSuppressor suppressor;
+                BOOL duringFade = TRUE;
+                CHECK(SystemParametersInfoW(SPI_GETMENUFADE, 0, &duringFade, 0));
+                CHECK(duringFade == FALSE);
+            }
+            BOOL restoredFade = !originalFade;
+            CHECK(SystemParametersInfoW(SPI_GETMENUFADE, 0, &restoredFade, 0));
+            CHECK(restoredFade == originalFade);
+        }
+    }
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

@@ -2,7 +2,7 @@
 // @id              context-menu-overhaul
 // @name            Context Menu Overhaul
 // @description     Replaces the Explorer context menu with an instantly-opening cached menu, then discovers and caches shell extension items asynchronously.
-// @version         0.3.9
+// @version         0.3.10
 // @include         explorer.exe
 // @architecture    x86-64
 // @compilerOptions -lole32 -lshlwapi -luuid -lcomctl32 -ladvapi32 -lgdi32 -luxtheme -lversion
@@ -47,14 +47,14 @@ Design document: `docs/superpowers/specs/2026-10-04-context-menu-overhaul-design
 - instantMenuFade: true
   $name: Instant menu open
   $description: Temporarily disables system menu animation (fade and slide) while this mod's menu opens, so it appears instantly. Session-only; the previous setting is restored immediately.
-- advancedSubmenu: false
-  $name: Advanced submenu
+- advancedSubmenu: true
+  $name: More options submenu
   $description: Move Windows extras and third-party shell extension entries into a submenu.
-- advancedSubmenuLabel: Advanced
-  $name: Advanced submenu label
-  $description: Label of the submenu that collects advanced items.
-- advancedSubmenuItems: "Pin to Start, Open in Terminal"
-  $name: Advanced built-in items
+- advancedSubmenuLabel: More options
+  $name: More options submenu label
+  $description: Label of the submenu that collects extra items.
+- advancedSubmenuItems: "Share, Add to Favorites, Cast to Device, Give access to, Restore previous versions, Pin to Start, Pin to Quick access, Open in Terminal"
+  $name: Windows items to move
   $description: Comma-separated labels or verbs of Windows items to move into the submenu.
 */
 // ==/WindhawkModSettings==
@@ -103,8 +103,8 @@ struct Settings {
     bool clearCache = false;
     bool debugLogging = false;
     bool instantMenuFade = true;
-    bool advancedSubmenu = false;
-    std::wstring advancedSubmenuLabel = L"Advanced";
+    bool advancedSubmenu = true;
+    std::wstring advancedSubmenuLabel = L"More options";
     std::vector<std::wstring> advancedSubmenuItems;
 };
 
@@ -117,6 +117,29 @@ std::wstring TrimWhitespace(const std::wstring& text) {
     }
     const size_t last = text.find_last_not_of(L" \t\r\n");
     return text.substr(first, last - first + 1);
+}
+
+// The shell's raw menu labels carry accelerator markers ("Add to &Favorites")
+// and trailing ellipses that are never visible; normalize them before
+// comparing against anything the user sees or types.
+std::wstring NormalizeMenuLabel(std::wstring text) {
+    std::wstring out;
+    out.reserve(text.size());
+    for (size_t i = 0; i < text.size(); ++i) {
+        if (text[i] == L'&') {
+            if (i + 1 < text.size() && text[i + 1] == L'&') {
+                out += L'&';
+                ++i;
+            }
+            continue;
+        }
+        out += text[i];
+    }
+    out = TrimWhitespace(out);
+    while (!out.empty() && (out.back() == L'.' || out.back() == 0x2026)) {
+        out.pop_back();
+    }
+    return TrimWhitespace(out);
 }
 
 std::vector<std::wstring> ParseAdvancedItems(const std::wstring& text) {
@@ -150,7 +173,7 @@ void LoadSettings() {
 
     PCWSTR advancedLabel = Wh_GetStringSetting(L"advancedSubmenuLabel");
     g_settings.advancedSubmenuLabel =
-        (advancedLabel && advancedLabel[0]) ? advancedLabel : L"Advanced";
+        (advancedLabel && advancedLabel[0]) ? advancedLabel : L"More options";
     Wh_FreeStringSetting(advancedLabel);
 
     PCWSTR advancedItems = Wh_GetStringSetting(L"advancedSubmenuItems");
@@ -363,22 +386,63 @@ bool EqualsIgnoreCase(const std::wstring& left, const std::wstring& right) {
            _wcsicmp(left.c_str(), right.c_str()) == 0;
 }
 
+bool LabelsMatchIgnoreCase(const std::wstring& left, const std::wstring& right) {
+    if (left.empty() || right.empty()) {
+        return false;
+    }
+    const std::wstring a = NormalizeMenuLabel(left);
+    const std::wstring b = NormalizeMenuLabel(right);
+    return !a.empty() && !b.empty() && _wcsicmp(a.c_str(), b.c_str()) == 0;
+}
+
+// Verbs used by Windows' own menu items. Items with any other verb come from
+// third-party shell extensions and belong in the advanced submenu. Windows
+// extras that should stay on top are protected by this list and move only
+// when named in the setting.
+bool IsKnownWindowsVerb(const std::wstring& verb) {
+    if (verb.empty()) {
+        return false;
+    }
+    static const wchar_t* kVerbs[] = {
+        L"open",       L"opennew",       L"opennewtab",  L"opennewwindow",
+        L"openas",     L"openwith",      L"edit",        L"print",
+        L"printto",    L"runas",         L"preview",     L"cut",
+        L"copy",       L"paste",         L"pastelink",   L"delete",
+        L"rename",     L"properties",    L"createshortcut", L"link",
+        L"copyaspath", L"sortby",        L"refresh",     L"new",
+        L"display",    L"personalize",   L"viewlarge",   L"viewsmall",
+        L"viewlist",   L"viewdetails",   L"pintohome",   L"pintohomefile",
+        L"pintostartscreen", L"previousversions", L"windows.modernshare",
+        L"casttodevice", L"giveaccess",  L"share",       L"includeinlibrary",
+    };
+    for (const wchar_t* known : kVerbs) {
+        if (_wcsicmp(verb.c_str(), known) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // Advanced items are third-party handler entries plus configured Windows
 // extras. Core commands and the native fallback never move.
 bool IsAdvancedItem(const MenuItem& item) {
     if (item.kind == ItemKind::Separator || item.action == ActionKind::Fallback) {
         return false;
     }
-    if (item.flags & kModelThirdParty) {
-        return true;
-    }
+    // An explicit setting entry always wins.
     for (const std::wstring& token : g_settings.advancedSubmenuItems) {
-        if (EqualsIgnoreCase(item.label, token) ||
+        if (LabelsMatchIgnoreCase(item.label, token) ||
             EqualsIgnoreCase(item.canonicalVerb, token)) {
             return true;
         }
     }
-    return false;
+    if (item.flags & kModelThirdParty) {
+        return true;
+    }
+    // Discovered items with a verb Windows does not use come from third-party
+    // handlers, regardless of how they are registered.
+    return (item.flags & kModelExtension) != 0 &&
+           !IsKnownWindowsVerb(item.canonicalVerb);
 }
 
 // Removes separators left dangling or duplicated by moving items out.
@@ -417,6 +481,13 @@ void ReorganizeAdvancedItems(std::vector<MenuItem>& items) {
     }
     if (advanced.empty()) {
         return;
+    }
+
+    if (g_settings.debugLogging) {
+        for (const MenuItem& item : advanced) {
+            Wh_Log(L"More options: moved '%s' (verb '%s')", item.label.c_str(),
+                   item.canonicalVerb.c_str());
+        }
     }
 
     MenuItem submenu{};
@@ -620,7 +691,7 @@ MenuModel MergeCoreWithCached(const MenuModel& core, const MenuModel& cached) {
     }
 
     auto matches = [](const MenuItem& left, const MenuItem& right) {
-        if (!left.label.empty() && left.label == right.label) {
+        if (LabelsMatchIgnoreCase(left.label, right.label)) {
             return true;
         }
         return !left.canonicalVerb.empty() && left.canonicalVerb == right.canonicalVerb;
@@ -630,7 +701,10 @@ MenuModel MergeCoreWithCached(const MenuModel& core, const MenuModel& cached) {
     std::unordered_set<std::wstring> coreVerbs;
     for (const MenuItem& item : result.items) {
         if (!item.label.empty()) {
-            coreLabels.insert(item.label);
+            const std::wstring normalized = NormalizeMenuLabel(item.label);
+            if (!normalized.empty()) {
+                coreLabels.insert(normalized);
+            }
         }
         if (!item.canonicalVerb.empty()) {
             coreVerbs.insert(item.canonicalVerb);
@@ -660,7 +734,8 @@ MenuModel MergeCoreWithCached(const MenuModel& core, const MenuModel& cached) {
             continue;
         }
 
-        if ((!item.label.empty() && coreLabels.count(item.label)) ||
+        const std::wstring normalizedLabel = NormalizeMenuLabel(item.label);
+        if ((!normalizedLabel.empty() && coreLabels.count(normalizedLabel)) ||
             (!item.canonicalVerb.empty() && coreVerbs.count(item.canonicalVerb))) {
             continue;
         }

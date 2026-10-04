@@ -39,9 +39,9 @@ untouched native menu, including extended verbs.
 | Clear cache | off | Turn on to delete cached models; they rebuild on next use. |
 | Debug logging | off | Logs timings and diagnostics. |
 | Instant menu open | on | Temporarily disables system menu animation (fade and slide) while this mod's menu opens, so it appears instantly. Session-only; restored immediately. |
-| Advanced submenu | off | Moves Windows extras and third-party shell extension entries into one submenu. |
-| Advanced submenu label | `Advanced` | Label of that submenu. |
-| Advanced built-in items | `Pin to Start, Open in Terminal` | Comma-separated labels or verbs of Windows items to move into the submenu. |
+| More options submenu | on | Moves Windows extras and third-party shell extension entries into one submenu. |
+| More options submenu label | `More options` | Label of that submenu. |
+| Windows items to move | Share, Add to Favorites, … | Comma-separated labels or verbs of Windows items to move into the submenu. |
 
 ## Known limitations (v1)
 
@@ -64,12 +64,14 @@ untouched native menu, including extended verbs.
   a live model, and are refreshed from the real context on first use.
 - On the first open of an uncached context, the menu shows the core commands
   and reopens with the full set as soon as discovery finishes.
-- With **Advanced submenu** on, items contributed by registered shell
-  extensions and the configured Windows extras are grouped into one submenu
+- With the **More options submenu** on, discovered items whose verb is not a
+  known Windows verb (i.e. third-party shell extensions, however they are
+  registered) and the configured Windows extras are grouped into one submenu
   just above the native fallback; separators left dangling are collapsed.
-  Third-party detection uses the same registration matching as icon lookup
-  (handler key name, DLL name, or version-info company/product, ignoring
-  generic vendor words).
+  Labels are matched with `&` accelerators and trailing ellipses stripped, so
+  what you type matches what you see. Windows items are additionally detected
+  by handler registration (key name, DLL name, or version-info
+  company/product, ignoring generic vendor words).
 - Full per-item discovery dumps and handler-candidate listings require
   **Debug logging**.
 - Core menu labels are English; cached extension labels come from the shell and

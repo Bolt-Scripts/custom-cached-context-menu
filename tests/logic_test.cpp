@@ -1401,6 +1401,97 @@ int main() {
         cmo::g_settings.advancedSubmenuItems = previousItems;
     }
 
+    // Ampersand accelerators and trailing ellipses are normalized before
+    // comparing labels: the shell's raw labels ("Add to &Favorites") never
+    // match what the user sees or types.
+    {
+        CHECK(cmo::NormalizeMenuLabel(L"Add to &Favorites") == L"Add to Favorites");
+        CHECK(cmo::NormalizeMenuLabel(L"Open wit&h...") == L"Open with");
+        CHECK(cmo::NormalizeMenuLabel(L"Smith && Sons") == L"Smith & Sons");
+
+        const bool previousEnabled = cmo::g_settings.advancedSubmenu;
+        const std::wstring previousLabel = cmo::g_settings.advancedSubmenuLabel;
+        const std::vector<std::wstring> previousItems =
+            cmo::g_settings.advancedSubmenuItems;
+        cmo::g_settings.advancedSubmenu = true;
+        cmo::g_settings.advancedSubmenuLabel = L"More options";
+        cmo::g_settings.advancedSubmenuItems =
+            cmo::ParseAdvancedItems(L"Add to Favorites, Open with");
+
+        auto extensionCommand = [](uint32_t id, const wchar_t* label,
+                                   const wchar_t* verb) {
+            cmo::MenuItem item{};
+            item.id = id;
+            item.kind = cmo::ItemKind::Command;
+            item.action = cmo::ActionKind::ShellVerb;
+            item.label = label;
+            item.canonicalVerb = verb;
+            item.flags = cmo::kModelExtension;
+            return item;
+        };
+
+        CHECK(cmo::IsAdvancedItem(
+            extensionCommand(1, L"Add to &Favorites", L"pintohomefile")));
+        CHECK(cmo::IsAdvancedItem(extensionCommand(2, L"Open wit&h...", L"openas")));
+        // Unknown verbs are third-party handlers.
+        CHECK(cmo::IsAdvancedItem(
+            extensionCommand(3, L"Extract Here", L"WinRAR.ExtractHere")));
+        CHECK(cmo::IsAdvancedItem(extensionCommand(4, L"Scan with Malwarebytes", L"")));
+        // Known Windows verbs stay unless listed.
+        CHECK(!cmo::IsAdvancedItem(extensionCommand(5, L"Print", L"Print")));
+        CHECK(!cmo::IsAdvancedItem(extensionCommand(6, L"Cu&t", L"cut")));
+
+        cmo::g_settings.advancedSubmenu = previousEnabled;
+        cmo::g_settings.advancedSubmenuLabel = previousLabel;
+        cmo::g_settings.advancedSubmenuItems = previousItems;
+    }
+
+    // Merge dedup normalizes accelerators and ellipses so the shell's version
+    // of a core item is not shown twice; the native offset is adopted.
+    {
+        cmo::MenuModel core = cmo::BuildCoreFileModel(onePath, cmo::Shape::Single);
+        cmo::MenuModel cached{};
+        cached.sig = core.sig;
+        cmo::MenuItem shortcut{};
+        shortcut.id = 20001;
+        shortcut.kind = cmo::ItemKind::Command;
+        shortcut.action = cmo::ActionKind::ShellVerb;
+        shortcut.label = L"Create &shortcut";
+        shortcut.canonicalVerb = L"link";
+        shortcut.verbOffset = 33;
+        shortcut.flags = cmo::kModelHasOffset | cmo::kModelExtension;
+        cached.items.push_back(shortcut);
+        cmo::MenuItem openWith{};
+        openWith.id = 20002;
+        openWith.kind = cmo::ItemKind::Command;
+        openWith.action = cmo::ActionKind::ShellVerb;
+        openWith.label = L"Open wit&h...";
+        openWith.canonicalVerb = L"openas";
+        openWith.verbOffset = 34;
+        openWith.flags = cmo::kModelHasOffset | cmo::kModelExtension;
+        cached.items.push_back(openWith);
+
+        cmo::MenuModel merged = cmo::MergeCoreWithCached(core, cached);
+        int shortcutCount = 0;
+        int openWithCount = 0;
+        bool adoptedShortcut = false;
+        bool adoptedOpenWith = false;
+        for (const cmo::MenuItem& item : merged.items) {
+            if (cmo::NormalizeMenuLabel(item.label) == L"Create shortcut") {
+                ++shortcutCount;
+                adoptedShortcut = adoptedShortcut || item.verbOffset == 33;
+            }
+            if (cmo::NormalizeMenuLabel(item.label) == L"Open with") {
+                ++openWithCount;
+                adoptedOpenWith = adoptedOpenWith || item.verbOffset == 34;
+            }
+        }
+        CHECK(shortcutCount == 1);
+        CHECK(openWithCount == 1);
+        CHECK(adoptedShortcut);
+        CHECK(adoptedOpenWith);
+    }
+
     // Instant menu open: while the suppressor is active the master menu
     // animation switch is off, and it is restored afterwards. Skipped when
     // the environment does not implement the SPI.

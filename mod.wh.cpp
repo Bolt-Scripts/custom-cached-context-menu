@@ -6781,7 +6781,8 @@ inline ShellViewKind ClassifyClassChain(const std::vector<std::wstring>& ancesto
 }
 
 inline bool IsReplaceableKind(ShellViewKind kind) {
-    return kind == ShellViewKind::Desktop || kind == ShellViewKind::ShellDefView;
+    return kind == ShellViewKind::Desktop || kind == ShellViewKind::ShellDefView ||
+           kind == ShellViewKind::NavPane;
 }
 
 // Maps the popup owner to a scope. A replaceable owner with an empty
@@ -10733,15 +10734,22 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
     std::vector<std::wstring>& paths = info.paths;
     Shape shape = paths.size() > 1 ? Shape::Multi : Shape::Single;
 
-    if (!IsFilesystemContext(info.folderIsFilesystem, info.allItemsAreFilesystem)) {
+    // The navigation pane has no resolvable selection path; its model comes
+    // from the captured shell menu instead (see the v2.1 spec, section 6.4).
+    const bool capturedMenuContext = kind == ShellViewKind::NavPane;
+
+    if (!capturedMenuContext &&
+        !IsFilesystemContext(info.folderIsFilesystem, info.allItemsAreFilesystem)) {
         Wh_Log(L"Non-filesystem namespace: using the native menu");
         ShowNativeReplay(capture, owner, pt);
         g_warmup.SetMenuOpen(false);
         return true;
     }
 
-    Scope scope = RefineScope(ScopeFromKind(kind, paths.empty()), info.allItemsAreFolders,
-                              AllPathsAreDrives(paths));
+    Scope scope = capturedMenuContext
+                      ? Scope::NavPane
+                      : RefineScope(ScopeFromKind(kind, paths.empty()),
+                                    info.allItemsAreFolders, AllPathsAreDrives(paths));
     const std::wstring typeKey =
         scope == Scope::Files ? MakeTypeKey(paths) : std::wstring(L"*");
     ContextSignature signature{scope, typeKey, shape, Variant::Normal};
@@ -10752,28 +10760,43 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
     g_warmup.SetMenuOpen(true);
 
     while (true) {
-        std::optional<MenuModel> cached = g_cache.Find(signature);
-        bool needsDiscovery = !cached || (cached->flags & kModelWarmup);
-        Wh_Log(L"Cache %s: scope=%d key=%s shape=%d paths=%zu",
-               cached ? (needsDiscovery ? L"warm" : L"hit") : L"miss",
-               static_cast<int>(scope), typeKey.c_str(), static_cast<int>(shape),
-               paths.size());
-
-        // A true cache miss has no menu to show. Populate first: the shell's
-        // population blocks the UI thread, so a placeholder menu would sit
-        // blank until the real menu replaced it. The native menu pays the same
-        // first-open cost. Warm entries are shown provisionally and refreshed
-        // after the menu closes.
-        if (!cached && !capture.discoveryDone) {
-            Wh_Log(L"Populating before showing the menu");
-            DiscoverIntoCache(capture, signature);
+        std::optional<MenuModel> cached;
+        bool needsDiscovery = false;
+        MenuModel model;
+        if (capturedMenuContext) {
+            HMENU capturedMenu = CreatePopupMenu();
+            if (capturedMenu) {
+                ReplayInto(capture.obj, capturedMenu, capture.indexMenu,
+                           capture.idCmdFirst, capture.idCmdLast, capture.flags);
+                model = BuildModelFromHMenu(capturedMenu, capture.idCmdFirst,
+                                            signature, capture.obj);
+                DestroyMenu(capturedMenu);
+            }
+        } else {
             cached = g_cache.Find(signature);
             needsDiscovery = !cached || (cached->flags & kModelWarmup);
-        }
+            Wh_Log(L"Cache %s: scope=%d key=%s shape=%d paths=%zu",
+                   cached ? (needsDiscovery ? L"warm" : L"hit") : L"miss",
+                   static_cast<int>(scope), typeKey.c_str(),
+                   static_cast<int>(shape), paths.size());
 
-        MenuModel model =
-            cached ? MergeCoreWithCached(BuildCoreModel(scope, paths, shape), *cached)
-                   : BuildCoreModel(scope, paths, shape);
+            // A true cache miss has no menu to show. Populate first: the shell's
+            // population blocks the UI thread, so a placeholder menu would sit
+            // blank until the real menu replaced it. The native menu pays the
+            // same first-open cost. Warm entries are shown provisionally and
+            // refreshed after the menu closes.
+            if (!cached && !capture.discoveryDone) {
+                Wh_Log(L"Populating before showing the menu");
+                DiscoverIntoCache(capture, signature);
+                cached = g_cache.Find(signature);
+                needsDiscovery = !cached || (cached->flags & kModelWarmup);
+            }
+
+            model = cached
+                        ? MergeCoreWithCached(BuildCoreModel(scope, paths, shape),
+                                              *cached)
+                        : BuildCoreModel(scope, paths, shape);
+        }
         if (!g_settings.showMoreOptionsItem) {
             std::erase_if(model.items, [](const MenuItem& item) {
                 return item.action == ActionKind::Fallback;

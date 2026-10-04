@@ -143,7 +143,7 @@ int main() {
              cmo::ShellViewKind::None);
     CHECK(cmo::IsReplaceableKind(cmo::ShellViewKind::ShellDefView));
     CHECK(cmo::IsReplaceableKind(cmo::ShellViewKind::Desktop));
-    CHECK(!cmo::IsReplaceableKind(cmo::ShellViewKind::NavPane));
+    CHECK(cmo::IsReplaceableKind(cmo::ShellViewKind::NavPane));
 
     cmo::PendingQueue queue;
     cmo::PendingCapture capture{};
@@ -472,7 +472,7 @@ int main() {
     CHECK(cmo::DecidePath(false, cmo::ShellViewKind::ShellDefView, true, true) ==
           cmo::MenuPath::Ours);
     CHECK(cmo::DecidePath(false, cmo::ShellViewKind::NavPane, true, true) ==
-          cmo::MenuPath::Passthrough);
+          cmo::MenuPath::Ours);
     CHECK(cmo::DecidePath(false, cmo::ShellViewKind::ShellDefView, false, true) ==
           cmo::MenuPath::Passthrough);
     CHECK(cmo::DecidePath(true, cmo::ShellViewKind::Desktop, true, false) ==

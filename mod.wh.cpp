@@ -3088,14 +3088,50 @@ struct LayoutPanel {
     std::vector<LayoutPanel> children;
 };
 
+struct AcceleratorText {
+    std::wstring text;
+    std::vector<std::pair<size_t, size_t>> underlineRanges;
+};
+
+// Parses shell mnemonics: && -> literal &, a single & underlines the next
+// character and is removed, a trailing & is literal.
+AcceleratorText StripAccelerators(const std::wstring& label) {
+    AcceleratorText result;
+    result.text.reserve(label.size());
+    for (size_t i = 0; i < label.size(); ++i) {
+        const wchar_t c = label[i];
+        if (c != L'&') {
+            result.text.push_back(c);
+            continue;
+        }
+        if (i + 1 < label.size() && label[i + 1] == L'&') {
+            result.text.push_back(L'&');
+            ++i;
+            continue;
+        }
+        if (i + 1 < label.size()) {
+            result.underlineRanges.push_back(
+                {result.text.size(), result.text.size() + 1});
+            result.text.push_back(label[i + 1]);
+            ++i;
+            continue;
+        }
+        result.text.push_back(L'&');
+    }
+    return result;
+}
+
 // Renderer supplies a DirectWrite-based measurer; the default estimate keeps
 // the builder pure and testable.
 using TextMeasureFn = int (*)(const wchar_t*, size_t, const LayoutMetrics&);
 
 int EstimateTextWidth(const wchar_t* label, size_t length,
                       const LayoutMetrics& metrics) {
-    (void)label;
-    return static_cast<int>(static_cast<float>(length) * metrics.fontSize * 0.6f) + 4;
+    const std::wstring raw(label, length);
+    const size_t displayLength = StripAccelerators(raw).text.size();
+    return static_cast<int>(static_cast<float>(displayLength) * metrics.fontSize *
+                            0.6f) +
+           4;
 }
 
 LayoutPanel BuildLayoutPanel(const std::vector<MenuItem>& items,
@@ -3105,11 +3141,13 @@ LayoutPanel BuildLayoutPanel(const std::vector<MenuItem>& items,
     const int textLeft = metrics.padding + metrics.gutterWidth;
     const int textGap = metrics.padding;
 
-    int y = 0;
+    int y = metrics.verticalPadding;
     int contentWidth = 0;
     for (const MenuItem& item : items) {
-        const int height = item.kind == ItemKind::Separator ? metrics.separatorHeight
-                                                            : metrics.itemHeight;
+        const int height =
+            item.kind == ItemKind::Separator
+                ? metrics.separatorHeight + 2 * metrics.separatorSpacing
+                : metrics.itemHeight;
         if (item.kind != ItemKind::Separator) {
             const int textWidth =
                 measure ? measure(item.label.c_str(), item.label.size(), metrics)
@@ -3123,9 +3161,9 @@ LayoutPanel BuildLayoutPanel(const std::vector<MenuItem>& items,
         }
         y += height;
     }
-    panel.size = {std::max(contentWidth, 80), y};
+    panel.size = {std::max(contentWidth, 80), y + metrics.verticalPadding};
 
-    int offset = 0;
+    int offset = metrics.verticalPadding;
     for (const MenuItem& item : items) {
         LayoutItem layout{};
         layout.kind = item.kind;
@@ -3147,8 +3185,10 @@ LayoutPanel BuildLayoutPanel(const std::vector<MenuItem>& items,
         layout.invocation.targetPath = item.targetPath;
         layout.invocation.hasOffset = (item.flags & kModelHasOffset) != 0;
 
-        const int height = item.kind == ItemKind::Separator ? metrics.separatorHeight
-                                                            : metrics.itemHeight;
+        const int height =
+            item.kind == ItemKind::Separator
+                ? metrics.separatorHeight + 2 * metrics.separatorSpacing
+                : metrics.itemHeight;
         layout.rect = {0, offset, panel.size.cx, offset + height};
 
         if (item.kind != ItemKind::Separator) {
@@ -4128,7 +4168,8 @@ private:
         const std::wstring key =
             item.label + L'\x1f' + metrics.fontFace + L'\x1f' +
             std::to_wstring(static_cast<int>(metrics.fontSize * 4.0f)) + L'\x1f' +
-            std::to_wstring(width);
+            std::to_wstring(width) + L'\x1f' +
+            std::to_wstring(static_cast<int>(metrics.acceleratorMode));
         if (IDWriteTextLayout** cached = text_.Find(key)) {
             return *cached;
         }
@@ -4145,12 +4186,24 @@ private:
             return nullptr;
         }
 
+        const AcceleratorText accelerated = StripAccelerators(item.label);
+        const std::wstring& display =
+            metrics.acceleratorMode == AcceleratorMode::Raw ? item.label
+                                                            : accelerated.text;
         IDWriteTextLayout* layout = nullptr;
-        dwrite_->CreateTextLayout(item.label.c_str(),
-                                  static_cast<UINT32>(item.label.size()), format,
+        dwrite_->CreateTextLayout(display.c_str(),
+                                  static_cast<UINT32>(display.size()), format,
                                   static_cast<float>(width),
                                   static_cast<float>(metrics.itemHeight), &layout);
         if (layout) {
+            if (metrics.acceleratorMode == AcceleratorMode::Underline) {
+                for (const auto& range : accelerated.underlineRanges) {
+                    const DWRITE_TEXT_RANGE textRange = {
+                        static_cast<UINT32>(range.first),
+                        static_cast<UINT32>(range.second - range.first)};
+                    layout->SetUnderline(TRUE, textRange);
+                }
+            }
             layout->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
             layout->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
             DWRITE_TRIMMING trimming = {DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0};
@@ -4669,6 +4722,9 @@ int MenuStateVisibleItems(const LayoutPanel& panel, const MenuInputState& state,
 
 int MenuStateItemAt(const LayoutPanel& panel, const MenuInputState& state,
                     POINT clientPoint) {
+    if (clientPoint.x < 0 || clientPoint.x >= panel.size.cx) {
+        return -1;
+    }
     for (size_t i = 0; i < panel.items.size(); ++i) {
         const LayoutItem& item = panel.items[i];
         if (clientPoint.y >= item.rect.top && clientPoint.y < item.rect.bottom) {
@@ -4797,6 +4853,9 @@ void OnDeviceLost();
 
 int MeasureTextWidthDirectWrite(const wchar_t* label, size_t length,
                                 const LayoutMetrics& metrics) {
+    const std::wstring display = StripAccelerators(std::wstring(label, length)).text;
+    label = display.c_str();
+    length = display.size();
     IDWriteFactory* dwrite = g_renderDevice.DWriteFactory();
     if (!dwrite || length == 0) {
         return EstimateTextWidth(label, length, metrics);

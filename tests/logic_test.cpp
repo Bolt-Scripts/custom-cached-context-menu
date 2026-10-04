@@ -2427,11 +2427,11 @@ int main() {
 
         cmo::LayoutPanel panel = cmo::BuildLayoutPanel(items, metrics);
         CHECK(panel.items.size() == 4);
-        CHECK(panel.size.cy == 28 + 7 + 28 + 28);
-        CHECK(panel.items[0].rect.top == 0);
-        CHECK(panel.items[0].rect.bottom == 28);
-        CHECK(panel.items[1].rect.top == 28);
-        CHECK(panel.items[2].rect.top == 35);
+        CHECK(panel.size.cy == 4 + 28 + 7 + 28 + 28 + 4);
+        CHECK(panel.items[0].rect.top == 4);
+        CHECK(panel.items[0].rect.bottom == 32);
+        CHECK(panel.items[1].rect.top == 32);
+        CHECK(panel.items[2].rect.top == 39);
         CHECK(panel.items[2].textColor == 0x66FFFFFFu);
         CHECK(panel.items[0].textRect.left == 6 + 22);
         CHECK(panel.items[0].gutterRect.left == 6);
@@ -2963,6 +2963,73 @@ int main() {
         std::vector<cmo::ConfigParseError> badErrors;
         CHECK(!cmo::ParseRulesConfig(L"[command \"X\"]\naction = explode\n", config,
                                      badErrors));
+    }
+
+    // v2.1 accelerators: &&, single &, trailing &, ranges.
+    {
+        cmo::AcceleratorText text = cmo::StripAccelerators(L"P&roperties");
+        CHECK(text.text == L"Properties");
+        CHECK(text.underlineRanges.size() == 1);
+        CHECK(text.underlineRanges[0].first == 1);  // 'r'
+
+        text = cmo::StripAccelerators(L"SVN Chec&kout");
+        CHECK(text.text == L"SVN Checkout");
+        CHECK(text.underlineRanges[0].first == 8);
+
+        text = cmo::StripAccelerators(L"Fish && Chips");
+        CHECK(text.text == L"Fish & Chips");
+        CHECK(text.underlineRanges.empty());
+
+        text = cmo::StripAccelerators(L"Open with &");
+        CHECK(text.text == L"Open with &");
+        CHECK(text.underlineRanges.empty());
+
+        text = cmo::StripAccelerators(L"");
+        CHECK(text.text.empty());
+    }
+
+    // v2.1 geometry: padding, separator spacing, x-bounded hit tests.
+    {
+        cmo::LayoutMetrics metrics{};
+        metrics.itemHeight = 28;
+        metrics.separatorHeight = 7;
+        metrics.verticalPadding = 4;
+        metrics.separatorSpacing = 3;
+        metrics.iconSize = 16;
+        metrics.padding = 6;
+        metrics.gutterWidth = 22;
+        metrics.submenuArrowWidth = 16;
+        metrics.markerWidth = 14;
+        metrics.textColor = 0xFFFFFFFFu;
+
+        std::vector<cmo::MenuItem> items;
+        cmo::MenuItem open{};
+        open.id = 1;
+        open.kind = cmo::ItemKind::Command;
+        open.action = cmo::ActionKind::ShellVerb;
+        open.label = L"Open";
+        items.push_back(open);
+        cmo::MenuItem sep{};
+        sep.id = 2;
+        sep.kind = cmo::ItemKind::Separator;
+        items.push_back(sep);
+        cmo::MenuItem next{};
+        next.id = 3;
+        next.kind = cmo::ItemKind::Command;
+        next.action = cmo::ActionKind::ShellVerb;
+        next.label = L"Next";
+        items.push_back(next);
+
+        cmo::LayoutPanel panel = cmo::BuildLayoutPanel(items, metrics);
+        CHECK(panel.items[0].rect.top == 4);
+        CHECK(panel.items[1].rect.bottom - panel.items[1].rect.top == 7 + 6);
+        CHECK(panel.items[2].rect.top == 4 + 28 + 13);
+        CHECK(panel.size.cy == 4 + 28 + 13 + 28 + 4);
+
+        cmo::MenuInputState state{};
+        CHECK(cmo::MenuStateItemAt(panel, state, POINT{-1, 10}) == -1);
+        CHECK(cmo::MenuStateItemAt(panel, state, POINT{panel.size.cx + 5, 10}) == -1);
+        CHECK(cmo::MenuStateItemAt(panel, state, POINT{5, 10}) == 0);
     }
 
     if (g_failures == 0) {

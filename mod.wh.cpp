@@ -5538,6 +5538,10 @@ LRESULT CustomMenuWindowProc(MenuWindow* window, HWND hwnd, UINT msg,
             POINT screen = clientPoint;
             ClientToScreen(hwnd, &screen);
             if (SessionLevelAtPoint(rects, screen) < 0) {
+                if (g_settings.debugLogging) {
+                    Wh_Log(L"Outside %s closes the session",
+                           msg == WM_RBUTTONDOWN ? L"right-click" : L"click");
+                }
                 if (msg == WM_RBUTTONDOWN) {
                     const HWND target = WindowFromPoint(screen);
                     bool ours = false;
@@ -5548,6 +5552,9 @@ LRESULT CustomMenuWindowProc(MenuWindow* window, HWND hwnd, UINT msg,
                         }
                     }
                     if (target && !ours) {
+                        if (g_settings.debugLogging) {
+                            Wh_Log(L"Forwarding WM_RBUTTONUP to %p", target);
+                        }
                         PostMessageW(target, WM_RBUTTONUP, 0,
                                      MAKELPARAM(screen.x, screen.y));
                     }
@@ -5795,6 +5802,9 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
 
     g_menuSession = &session;
     g_menuWindowMessageHook = &CustomMenuWindowProc;
+    if (g_settings.debugLogging) {
+        Wh_Log(L"Custom menu session start (margin=%d dpi=%u)", margin, key.dpi);
+    }
 
     root->Move(POINT{panelPos.x - margin, panelPos.y - margin});
     RenderMenuWindow(root, *panel, session.states[0], metrics, appearance,
@@ -5838,6 +5848,10 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
     g_menuWindowPool.Release(root);
     g_menuWindowMessageHook = nullptr;
     g_menuSession = nullptr;
+    if (g_settings.debugLogging) {
+        Wh_Log(L"Custom menu session end (chosen=%d)",
+               session.result.chosenItemId.has_value() ? 1 : 0);
+    }
 
     result = session.result;
     result.handled = true;
@@ -10397,7 +10411,9 @@ private:
         if (comInitialized) {
             CoUninitialize();
         }
-        Wh_Log(L"Warm-up finished");
+        if (g_settings.debugLogging) {
+            Wh_Log(L"Warm-up finished");
+        }
     }
 
     void WarmOneType(const std::wstring& type, const std::wstring& warmupDir) {
@@ -10451,7 +10467,9 @@ private:
                   const ContextSignature& signature) {
         IContextMenu* menu = CreateContextMenuForPath(path, background);
         if (!menu) {
-            Wh_Log(L"Warm-up: no context menu for %s", path.c_str());
+            if (g_settings.debugLogging) {
+                Wh_Log(L"Warm-up: no context menu for %s", path.c_str());
+            }
             return;
         }
 
@@ -10853,7 +10871,9 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
         if (mode == MenuMode::Custom) {
             if (g_menuSession != nullptr) {
                 // A session already owns the mouse; never clobber it.
-                Wh_Log(L"Refusing a second custom menu session");
+                if (g_settings.debugLogging) {
+                    Wh_Log(L"Refusing a second custom menu session");
+                }
                 g_modeController.RecordSuccess();
                 customShown = true;
             } else {

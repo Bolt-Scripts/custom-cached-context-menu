@@ -2,7 +2,9 @@
 
 A [Windhawk](https://windhawk.net/) mod that replaces the Windows Explorer file
 and desktop context menu with an instantly-opening cached menu, then discovers
-real shell extension items asynchronously in the background.
+real shell extension items asynchronously in the background. It can render the
+menu itself (DirectComposition/Direct2D, fully configurable via `menu.ini`) or
+keep the classic owner-drawn menu as a fallback mode.
 
 ## Why
 
@@ -33,6 +35,7 @@ untouched native menu, including extended verbs.
 | Setting | Default | Description |
 |---|---|---|
 | Shift bypass | on | Hold Shift while right-clicking for the native menu. |
+| Menu mode | 0 (custom) | 0 = self-rendered menu (automatic fallback to the classic menu after 3 consecutive failures); 1 = classic owner-drawn menu. |
 | Show classic menu item | on | Adds a "Show classic menu" entry at the bottom of the menu. |
 | Warm-up extensions | common list | File types pre-built at Explorer startup. |
 | Warm-up delay | 5 s | Delay before background warm-up starts. |
@@ -44,7 +47,64 @@ untouched native menu, including extended verbs.
 | More options submenu label | `More options` | Label of that submenu. |
 | Windows items to move | Share, Add to Favorites, … | Comma-separated labels or verbs of Windows items to move into the submenu. |
 
-## Known limitations (v1)
+## Menu configuration (`menu.ini`)
+
+In custom mode the menu appearance and item rules are read from `menu.ini` in
+the mod's storage directory (created with commented defaults on first run) and
+**live-reloaded** when the file changes. Errors are logged as
+`menu.ini:<line>: <message>` and the last good configuration stays in effect.
+Colors are `#RRGGBB` or `#AARRGGBB`; comments start with `;`.
+
+```ini
+[appearance]                ; base appearance
+background = #1E1E1EF0      ; also used as the blur tint
+blur = true                 ; blur the screen behind the menu
+cornerRadius = 8
+border = #FFFFFF22
+shadow = true
+font = Segoe UI, 9
+itemHeight = 28
+iconSize = 16
+padding = 6
+hoverBackground = #FFFFFF14
+textColor = #FFFFFF
+animation = none            ; none | fade | slide
+
+[appearance.light]          ; overrides when light theme is active
+background = #F5F5F5F2
+textColor = #202020
+
+[rules]
+hide = label:"Cast to Device"
+keep = label:Share
+move = thirdParty -> "More options"
+
+[command "Open in VS Code"]
+command = code.exe "%1"
+workingDir = %dir%
+match.ext = .cs, .cpp
+menu = Tools
+
+[submenu "Tools"]
+icon = @glyph:E712
+position = top
+```
+
+- **Predicates**: `label:` (glob with `*`, `&`/ellipsis-insensitive), `verb:`,
+  `ext:`, `scope:` (`files`, `folders`, `background`, `desktop`, `drive`),
+  `multi`, `thirdParty`. Combine with `and`.
+- **Rules**: `hide` removes matching items (never the classic-menu fallback),
+  `keep` protects items from `move`, `move` sends matching top-level items into
+  a submenu (created automatically; the built-in "More options" grouping steps
+  aside when move rules exist). Precedence: hide > keep > move.
+- **Commands**: `command`, `workingDir`, `icon`, `menu`, `match.*`, `runAs`
+  (`none`/`admin`), `showWindow`, `separator`. Placeholders: `%1`, `%*`,
+  `%dir%`, plus environment variables.
+- **Submenus**: `icon`, `position` (`top`, `bottom`, `after:"Label"`,
+  `before:"Label"`), `match.*`. Nesting comes from `menu = A/B` (up to 3
+  levels).
+
+## Known limitations
 
 - Menus inside other applications' file dialogs and third-party file managers
   are untouched; the mod targets `explorer.exe`.
@@ -103,6 +163,16 @@ untouched native menu, including extended verbs.
   Group by includes `(None)`.
 - Undo, "Expand/Collapse all groups", and the "More..." pickers are not
   implemented: the shell does not expose them through documented interfaces.
+- **Custom mode has no UI Automation support yet** — screen readers should set
+  **Menu mode** to 1 (classic menu). Custom mode also requires Direct3D 11 /
+  DirectComposition; if the device cannot be created it falls back to the
+  classic menu, and three consecutive custom-render failures disable custom
+  mode for the session.
+- Custom mode's backdrop blur samples the screen once per menu level when it
+  opens (it is a blurred snapshot, not a live blur), and the drop shadow is a
+  layered approximation. Tall menus do not scroll visually yet (wheel input is
+  tracked but the drawing does not offset). Animations are off by default
+  (`animation = none`); `fade` and `slide` are compositor-driven.
 
 Menu models persist to disk (`menu-cache.bin` in the mod's storage directory)
 and are pre-warmed at Explorer start, so extension items survive restarts.
@@ -121,6 +191,8 @@ and which items the More options submenu moved or kept (with their verbs).
 
 - Design: `docs/superpowers/specs/2026-10-04-context-menu-overhaul-design.md`
 - Implementation plan: `docs/superpowers/plans/2026-10-04-context-menu-overhaul.md`
+- Custom renderer design: `docs/superpowers/specs/2026-10-04-custom-menu-renderer-design.md`
+- Custom renderer plan: `docs/superpowers/plans/2026-10-04-custom-menu-renderer.md`
 - Tests: `bash tests/run.sh` (mingw-w64 cross-compile + Wine), covering
   signatures, models, cache serialization, LRU, invalidation stamps, warm-up
   type normalization, and decision logic.

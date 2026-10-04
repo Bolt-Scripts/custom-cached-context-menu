@@ -2643,6 +2643,28 @@ int main() {
         CHECK(spec.animate && spec.slide && spec.durationMs == 120);
     }
 
+    // v2 cache keys include config revisions; device loss clears layouts.
+    {
+        cmo::RulesConfig config;
+        config.revision = 7;
+        cmo::LayoutKey a = cmo::MakeLayoutKey(
+            cmo::ContextSignature{cmo::Scope::Files, L".txt", cmo::Shape::Single,
+                                  cmo::Variant::Normal},
+            config, 96, true);
+        cmo::LayoutKey b = a;
+        CHECK(a == b);
+        config.revision = 8;
+        cmo::LayoutKey c = cmo::MakeLayoutKey(a.sig, config, 96, true);
+        CHECK(!(a == c));
+
+        auto panel = std::make_shared<cmo::LayoutPanel>();
+        cmo::g_layoutCache.SetMaxEntries(4);
+        cmo::g_layoutCache.Put(a, panel);
+        CHECK(cmo::g_layoutCache.Find(a) != nullptr);
+        cmo::g_layoutCache.InvalidateDevice();
+        CHECK(cmo::g_layoutCache.Find(a) == nullptr);
+    }
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

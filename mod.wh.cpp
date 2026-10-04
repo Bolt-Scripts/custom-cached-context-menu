@@ -2,7 +2,7 @@
 // @id              context-menu-overhaul
 // @name            Context Menu Overhaul
 // @description     Replaces the Explorer context menu with an instantly-opening cached menu, then discovers and caches shell extension items asynchronously.
-// @version         0.3.25
+// @version         0.4.0
 // @include         explorer.exe
 // @architecture    x86-64
 // @compilerOptions -lole32 -lshlwapi -luuid -lcomctl32 -ladvapi32 -lgdi32 -luxtheme -lversion -ld3d11 -ld2d1 -ldwrite -ldcomp -ldxgi
@@ -2738,6 +2738,17 @@ struct LayoutKey {
     }
 };
 
+LayoutKey MakeLayoutKey(const ContextSignature& sig, const RulesConfig& config,
+                        uint32_t dpi, bool darkTheme) {
+    LayoutKey key{};
+    key.sig = sig;
+    key.rulesRevision = config.revision;
+    key.appearanceRevision = config.revision;
+    key.dpi = dpi;
+    key.darkTheme = darkTheme;
+    return key;
+}
+
 class LayoutCache {
 public:
     std::shared_ptr<const LayoutPanel> Find(const LayoutKey& key) {
@@ -4169,6 +4180,8 @@ struct MenuSession {
 
 inline MenuSession* g_menuSession = nullptr;
 
+void OnDeviceLost();
+
 struct AnimationSpec {
     bool animate = false;
     bool slide = false;
@@ -4250,8 +4263,7 @@ void RenderMenuWindow(MenuWindow* window, const LayoutPanel& panel,
                       const BackdropBitmap* backdrop, int margin) {
     if (!window || !window->SwapChain() || !g_renderDevice.D2DDevice()) {
         return;
-    }
-    IDXGISurface* surface = nullptr;
+    }    IDXGISurface* surface = nullptr;
     if (FAILED(window->SwapChain()->GetBuffer(
             0, kIidIDXGISurface, reinterpret_cast<void**>(&surface))) ||
         !surface) {
@@ -4274,8 +4286,11 @@ void RenderMenuWindow(MenuWindow* window, const LayoutPanel& panel,
         dc->BeginDraw();
         dc->Clear(nullptr);
         DrawPanel(dc, panel, state, metrics, appearance, backdrop, margin);
-        dc->EndDraw();
+        const HRESULT drawResult = dc->EndDraw();
         target->Release();
+        if (drawResult == D2DERR_RECREATE_TARGET) {
+            OnDeviceLost();
+        }
     }
     dc->Release();
     surface->Release();
@@ -4709,6 +4724,43 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
     result = session.result;
     result.handled = true;
     return result;
+}
+
+void PrebuildLayoutsForWarmup(const std::vector<MenuModel>& models, uint32_t dpi,
+                              bool darkTheme) {
+    if (!g_renderDevice.IsReady() && !g_renderDevice.Initialize()) {
+        return;
+    }
+    std::shared_ptr<const RulesConfig> config = g_configStore.Snapshot();
+    const RulesConfig emptyConfig;
+    const RulesConfig& effective = config ? *config : emptyConfig;
+    const Appearance appearance = ResolveAppearance(effective, darkTheme);
+    const LayoutMetrics metrics =
+        ResolveLayoutMetrics(appearance, dpi, darkTheme);
+
+    ID2D1DeviceContext* dc = nullptr;
+    if (FAILED(g_renderDevice.D2DDevice()->CreateDeviceContext(
+            D2D1_DEVICE_CONTEXT_OPTIONS_NONE, &dc)) ||
+        !dc) {
+        return;
+    }
+    for (const MenuModel& model : models) {
+        const LayoutKey key = MakeLayoutKey(model.sig, effective, dpi, darkTheme);
+        if (g_layoutCache.Find(key)) {
+            continue;
+        }
+        auto panel =
+            std::make_shared<LayoutPanel>(BuildLayoutPanel(model.items, metrics));
+        g_contentCaches.Bind(*panel, metrics, dc);
+        g_layoutCache.Put(key, panel);
+    }
+    dc->Release();
+}
+
+void OnDeviceLost() {
+    g_layoutCache.InvalidateDevice();
+    g_contentCaches.Clear();
+    g_renderDevice.HandleDeviceLost();
 }
 
 // Shell property keys used by the Sort by and Group by submenus (all in the
@@ -6812,6 +6864,10 @@ void DiscoverIntoCache(PendingCapture& capture, const ContextSignature& signatur
     if (g_settings.debugLogging) {
         DumpModelItems(model.items, 0);
     }
+    // Warm the render-ready layout for the custom menu while we are already
+    // paying discovery cost, so the next open is a cache hit.
+    PrebuildLayoutsForWarmup({model}, DpiForWindow(GetDesktopWindow()),
+                             IsDarkThemeActive());
     g_cache.Put(std::move(model));
 }
 

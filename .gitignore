@@ -1,2 +1,3 @@
+*.log
 tests/logic_test.exe
 cmo-test-storage/

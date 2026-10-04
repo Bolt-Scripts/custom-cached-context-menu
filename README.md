@@ -52,11 +52,16 @@ untouched native menu, including extended verbs.
   Refresh) use built-in icon-font glyphs; extension entries use the bitmap the
   shell provides, an icon captured by asking the extension to draw the item
   (owner-draw), the verb's registry `Icon` value (matched by verb or display
-  label), or — as a last resort — icon 0 from a matching handler DLL.
-  Everything is composited over the themed menu background; checked items keep
-  the checkmark gutter.
+  label), or — as a last resort — icon 0 from a handler DLL matched by key
+  name, file name, or version-info company/product name. Everything is
+  composited over the themed menu background; checked items keep the
+  checkmark gutter.
 - Warm-up models are provisional: they are shown instantly but never overwrite
   a live model, and are refreshed from the real context on first use.
+- On the first open of an uncached context, the menu shows the core commands
+  and reopens with the full set as soon as discovery finishes.
+- Full per-item discovery dumps and handler-candidate listings require
+  **Debug logging**.
 - Core menu labels are English; cached extension labels come from the shell and
   are localized.
 - "Sort by" / "New" / "Paste shortcut" fall back to the native menu on builds

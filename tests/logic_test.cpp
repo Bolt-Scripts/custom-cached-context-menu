@@ -1213,6 +1213,13 @@ int main() {
         }
     }
 
+    // Handler matching helpers: word matching for version info and the
+    // no-crash path for DLLs without version info.
+    CHECK(cmo::LabelMatchesWords(L"Scan with Malwarebytes", L"Malwarebytes Inc."));
+    CHECK(!cmo::LabelMatchesWords(L"Scan with Malwarebytes", L"Contoso Ltd."));
+    CHECK(!cmo::VersionInfoMatchesLabel(L"Z:\\nonexistent\\nope.dll",
+                                        L"Anything"));
+
     // Instant menu open: while the suppressor is active the master menu
     // animation switch is off, and it is restored afterwards. Skipped when
     // the environment does not implement the SPI.

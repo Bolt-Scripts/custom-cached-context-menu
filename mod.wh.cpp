@@ -2,10 +2,10 @@
 // @id              context-menu-overhaul
 // @name            Context Menu Overhaul
 // @description     Replaces the Explorer context menu with an instantly-opening cached menu, then discovers and caches shell extension items asynchronously.
-// @version         0.3.6
+// @version         0.3.7
 // @include         explorer.exe
 // @architecture    x86-64
-// @compilerOptions -lole32 -lshlwapi -luuid -lcomctl32 -ladvapi32 -lgdi32 -luxtheme
+// @compilerOptions -lole32 -lshlwapi -luuid -lcomctl32 -ladvapi32 -lgdi32 -luxtheme -lversion
 // @license         MIT
 // ==/WindhawkMod==
 
@@ -70,6 +70,8 @@ Design document: `docs/superpowers/specs/2026-10-04-context-menu-overhaul-design
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <cwchar>
+#include <cwctype>
 #include <mutex>
 #include <optional>
 #include <span>
@@ -550,7 +552,7 @@ MenuModel MergeCoreWithCached(const MenuModel& core, const MenuModel& cached) {
 namespace cmo {
 
 constexpr uint32_t kCacheMagic = 0x434F4D4F;  // "COMO"
-constexpr uint32_t kCacheVersion = 12;
+constexpr uint32_t kCacheVersion = 13;
 constexpr uint32_t kMaxCacheEntries = 1024;
 constexpr uint32_t kMaxModelItems = 4096;
 constexpr uint32_t kMaxMenuDepth = 16;
@@ -1270,6 +1272,7 @@ struct PendingCapture {
     std::vector<std::wstring> handlerModules;
     uint64_t sourceStamp = 0;
     bool discoveryDone = false;
+    bool reopenRequested = false;
 };
 
 // Releases every resource a capture owns.
@@ -1614,8 +1617,76 @@ std::wstring ResolveRegistryIconByLabel(const ContextSignature& signature,
     return L"";
 }
 
+// True when any significant word (5+ characters) of `text` appears in the
+// label. Used to match handler DLL version info against menu item labels.
+bool LabelMatchesWords(const std::wstring& label, const std::wstring& text) {
+    std::wstring word;
+    for (size_t i = 0; i <= text.size(); ++i) {
+        const wchar_t c = (i < text.size()) ? text[i] : L' ';
+        if (iswalnum(c)) {
+            word += c;
+            continue;
+        }
+        if (word.size() >= 5 && StrStrIW(label.c_str(), word.c_str()) != nullptr) {
+            return true;
+        }
+        word.clear();
+    }
+    return false;
+}
+
+// Matches a handler DLL by its version-info company/product/description.
+bool VersionInfoMatchesLabel(const std::wstring& path, const std::wstring& label) {
+    DWORD ignored = 0;
+    const DWORD size = GetFileVersionInfoSizeW(path.c_str(), &ignored);
+    if (size == 0) {
+        return false;
+    }
+
+    std::vector<uint8_t> data(size);
+    if (!GetFileVersionInfoW(path.c_str(), 0, size, data.data())) {
+        return false;
+    }
+
+    struct Translation {
+        WORD language;
+        WORD codePage;
+    };
+    Translation fallback = {0x0409, 0x04B0};
+    Translation* translations = nullptr;
+    UINT translationBytes = 0;
+    if (!VerQueryValueW(data.data(), L"\\VarFileInfo\\Translation",
+                        reinterpret_cast<LPVOID*>(&translations),
+                        &translationBytes) ||
+        translationBytes < sizeof(Translation)) {
+        translations = &fallback;
+        translationBytes = sizeof(fallback);
+    }
+
+    static const wchar_t* kFields[] = {L"CompanyName", L"ProductName",
+                                       L"FileDescription"};
+    const size_t translationCount = translationBytes / sizeof(Translation);
+    for (size_t t = 0; t < translationCount; ++t) {
+        for (const wchar_t* field : kFields) {
+            wchar_t query[128] = {};
+            swprintf(query, ARRAYSIZE(query),
+                     L"\\StringFileInfo\\%04x%04x\\%s", translations[t].language,
+                     translations[t].codePage, field);
+            wchar_t* value = nullptr;
+            UINT valueChars = 0;
+            if (VerQueryValueW(data.data(), query, reinterpret_cast<LPVOID*>(&value),
+                               &valueChars) &&
+                value && valueChars > 0 && LabelMatchesWords(label, value)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 // Last resort: find a ContextMenuHandlers key that matches the item label
-// (by key name or handler DLL name) and extract icon 0 from its DLL.
+// (by key name, handler DLL name, or DLL version info) and extract icon 0
+// from its DLL.
 std::wstring ResolveHandlerDllIconByLabel(const ContextSignature& signature,
                                           const std::wstring& label) {
     if (label.empty()) {
@@ -1672,6 +1743,10 @@ std::wstring ResolveHandlerDllIconByLabel(const ContextSignature& signature,
                     }
                     matches = stem.size() >= 5 &&
                               StrStrIW(label.c_str(), stem.c_str()) != nullptr;
+                }
+                if (!matches) {
+                    // Or match the DLL's version info (company/product name).
+                    matches = VersionInfoMatchesLabel(expanded, label);
                 }
                 if (!matches) {
                     continue;
@@ -1744,8 +1819,8 @@ void ApplyRegistryIcons(std::vector<MenuItem>& items,
             Wh_Log(L"Registry icon for '%s' (verb '%s'): %s", item.label.c_str(),
                    item.canonicalVerb.c_str(), icon.c_str());
         } else {
-            LogHandlerCandidates(signature, item.label);
             if (g_settings.debugLogging) {
+                LogHandlerCandidates(signature, item.label);
                 Wh_Log(L"No registry icon for '%s' (verb '%s')", item.label.c_str(),
                        item.canonicalVerb.c_str());
             }
@@ -2081,7 +2156,9 @@ void DiscoverIntoCache(PendingCapture& capture, const ContextSignature& signatur
 
     Wh_Log(L"Discovered %zu menu items in %llu ms", model.items.size(),
            static_cast<unsigned long long>(GetTickCount64() - start));
-    DumpModelItems(model.items, 0);
+    if (g_settings.debugLogging) {
+        DumpModelItems(model.items, 0);
+    }
     g_cache.Put(std::move(model));
 }
 
@@ -3573,6 +3650,11 @@ private:
             if (capture_ && !capture_->discoveryDone) {
                 DiscoverIntoCache(*capture_, discoverySignature_);
             }
+            if (capture_ && capture_->discoveryDone && !capture_->reopenRequested) {
+                // Refresh the visible menu with the freshly discovered items.
+                capture_->reopenRequested = true;
+                EndMenu();
+            }
             return 0;
         }
 
@@ -4161,117 +4243,127 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
         scope == Scope::Files ? MakeTypeKey(paths) : std::wstring(L"*");
     ContextSignature signature{scope, typeKey, shape, Variant::Normal};
 
-    std::optional<MenuModel> cached = g_cache.Find(signature);
-    const bool needsDiscovery = !cached || (cached->flags & kModelWarmup);
-    Wh_Log(L"Cache %s: scope=%d key=%s shape=%d paths=%zu",
-           cached ? (needsDiscovery ? L"warm" : L"hit") : L"miss",
-           static_cast<int>(scope), typeKey.c_str(), static_cast<int>(shape),
-           paths.size());
-
-    MenuModel model =
-        cached ? MergeCoreWithCached(BuildCoreModel(scope, paths, shape), *cached)
-               : BuildCoreModel(scope, paths, shape);
-    if (!g_settings.showMoreOptionsItem) {
-        std::erase_if(model.items, [](const MenuItem& item) {
-            return item.action == ActionKind::Fallback;
-        });
-    }
-    DumpSuspiciousItems(model.items, 0);
-    PruneMenuItems(model.items);
-
-    if (ShouldShowNativeReplay(model.flags)) {
-        Wh_Log(L"Owner-draw context: using the native menu");
-        ShowNativeReplay(capture, owner, pt);
-        g_warmup.SetMenuOpen(false);
-        return true;
-    }
-
     const DWORD clipboardSequence = GetClipboardSequenceNumber();
     const bool clipboardHadData = ClipboardHasFileData();
-    for (MenuItem& item : model.items) {
-        if (item.canonicalVerb == L"paste" && !clipboardHadData) {
-            item.flags |= kModelDisabled;
-        }
-        if (item.kind == ItemKind::Submenu && item.label == L"Send to" &&
-            item.children.empty()) {
-            item.children = GetSendToChildren();
-        }
-    }
-
-    Wh_Log(L"Menu prep: %llu ms",
-           static_cast<unsigned long long>(g_perf.OpenPathElapsedMs()));
 
     g_warmup.SetMenuOpen(true);
-    bool creationFailed = false;
-    std::optional<uint32_t> chosen;
-    {
-        // On a cache miss the menu paints immediately and discovery runs from
-        // the timer while the menu is interactive, so closing stays instant.
-        // Cache hits skip population entirely; extension items populate
-        // lazily if they are clicked.
-        if (!needsDiscovery) {
-            chosen = NativeMenuView::Show(model, owner, pt, &creationFailed);
-        } else {
-            OwnerSubclass subclass(owner, &capture, /*forwardMenuMessages=*/false);
-            subclass.StartDiscoveryTimer(signature);
-            chosen = NativeMenuView::Show(model, owner, pt, &creationFailed);
-        }
-    }
 
-    if (creationFailed) {
-        Wh_Log(L"Menu creation failed; using the native menu");
-        ShowNativeReplay(capture, owner, pt);
+    while (true) {
+        std::optional<MenuModel> cached = g_cache.Find(signature);
+        const bool needsDiscovery = !cached || (cached->flags & kModelWarmup);
+        Wh_Log(L"Cache %s: scope=%d key=%s shape=%d paths=%zu",
+               cached ? (needsDiscovery ? L"warm" : L"hit") : L"miss",
+               static_cast<int>(scope), typeKey.c_str(), static_cast<int>(shape),
+               paths.size());
+
+        MenuModel model =
+            cached ? MergeCoreWithCached(BuildCoreModel(scope, paths, shape), *cached)
+                   : BuildCoreModel(scope, paths, shape);
+        if (!g_settings.showMoreOptionsItem) {
+            std::erase_if(model.items, [](const MenuItem& item) {
+                return item.action == ActionKind::Fallback;
+            });
+        }
+        DumpSuspiciousItems(model.items, 0);
+        PruneMenuItems(model.items);
+
+        if (ShouldShowNativeReplay(model.flags)) {
+            Wh_Log(L"Owner-draw context: using the native menu");
+            ShowNativeReplay(capture, owner, pt);
+            break;
+        }
+
+        for (MenuItem& item : model.items) {
+            if (item.canonicalVerb == L"paste" && !clipboardHadData) {
+                item.flags |= kModelDisabled;
+            }
+            if (item.kind == ItemKind::Submenu && item.label == L"Send to" &&
+                item.children.empty()) {
+                item.children = GetSendToChildren();
+            }
+        }
+
+        Wh_Log(L"Menu prep: %llu ms",
+               static_cast<unsigned long long>(g_perf.OpenPathElapsedMs()));
+
+        bool creationFailed = false;
+        std::optional<uint32_t> chosen;
+        {
+            // On a cache miss the menu paints immediately and discovery runs
+            // from the timer while the menu is interactive, so closing stays
+            // instant. Cache hits skip population entirely.
+            if (!needsDiscovery) {
+                chosen = NativeMenuView::Show(model, owner, pt, &creationFailed);
+            } else {
+                OwnerSubclass subclass(owner, &capture, /*forwardMenuMessages=*/false);
+                subclass.StartDiscoveryTimer(signature);
+                chosen = NativeMenuView::Show(model, owner, pt, &creationFailed);
+            }
+        }
+
+        if (creationFailed) {
+            Wh_Log(L"Menu creation failed; using the native menu");
+            ShowNativeReplay(capture, owner, pt);
+            if (needsDiscovery && !capture.discoveryDone) {
+                DiscoverIntoCache(capture, signature);
+            }
+            break;
+        }
+
+        if (chosen) {
+            const MenuItem* item = FindById(model, *chosen);
+            if (item) {
+                InvocationContext ctx{};
+                ctx.owner = owner;
+                ctx.pt = pt;
+                ctx.paths = paths;
+                ctx.liveContext = capture.obj;
+                ctx.idCmdFirst = capture.idCmdFirst;
+                ctx.kind = kind;
+                ctx.clipboardSequence = clipboardSequence;
+                ctx.clipboardHadData = clipboardHadData;
+
+                InvokeResult result = InvokeResult::Failed;
+                if (item->flags & kModelExtension) {
+                    result = (model.flags & kModelOwnerDraw)
+                                 ? InvokeResult::FallbackNative
+                                 : InvokeExtensionItem(*item, ctx, capture);
+                } else if (item->action == ActionKind::ViewAction) {
+                    // View actions act on the view's current selection; never
+                    // act on a different selection than the one captured.
+                    SelectionInfo current = GetSelection(owner, kind);
+                    result = PathSetsEqual(current.paths, paths)
+                                 ? InvokeItem(*item, ctx, capture)
+                                 : InvokeResult::FallbackNative;
+                } else {
+                    result = InvokeItem(*item, ctx, capture);
+                }
+
+                Wh_Log(L"Invoke '%s' -> %d", item->label.c_str(),
+                       static_cast<int>(result));
+
+                if (result == InvokeResult::FallbackNative) {
+                    ShowNativeReplay(capture, owner, pt);
+                }
+            }
+            break;
+        }
+
+        // Discovery finished while the menu was open: show the updated menu.
+        if (capture.reopenRequested) {
+            capture.reopenRequested = false;
+            continue;
+        }
+
+        // If the timer did not run while the menu was open (fast dismissal),
+        // warm the cache now. Warm-up entries are refreshed from the real
+        // context on first use; live entries never populate again.
         if (needsDiscovery && !capture.discoveryDone) {
             DiscoverIntoCache(capture, signature);
         }
-        g_warmup.SetMenuOpen(false);
-        return true;
+        break;
     }
 
-    if (chosen) {
-        const MenuItem* item = FindById(model, *chosen);
-        if (item) {
-            InvocationContext ctx{};
-            ctx.owner = owner;
-            ctx.pt = pt;
-            ctx.paths = paths;
-            ctx.liveContext = capture.obj;
-            ctx.idCmdFirst = capture.idCmdFirst;
-            ctx.kind = kind;
-            ctx.clipboardSequence = clipboardSequence;
-            ctx.clipboardHadData = clipboardHadData;
-
-            InvokeResult result = InvokeResult::Failed;
-            if (item->flags & kModelExtension) {
-                result = (model.flags & kModelOwnerDraw)
-                             ? InvokeResult::FallbackNative
-                             : InvokeExtensionItem(*item, ctx, capture);
-            } else if (item->action == ActionKind::ViewAction) {
-                // View actions act on the view's current selection; never act
-                // on a different selection than the one captured.
-                SelectionInfo current = GetSelection(owner, kind);
-                result = PathSetsEqual(current.paths, paths)
-                             ? InvokeItem(*item, ctx, capture)
-                             : InvokeResult::FallbackNative;
-            } else {
-                result = InvokeItem(*item, ctx, capture);
-            }
-
-            Wh_Log(L"Invoke '%s' -> %d", item->label.c_str(),
-                   static_cast<int>(result));
-
-            if (result == InvokeResult::FallbackNative) {
-                ShowNativeReplay(capture, owner, pt);
-            }
-        }
-    }
-
-    // If the timer did not run while the menu was open (fast dismissal),
-    // warm the cache now. Warm-up entries are refreshed from the real
-    // context on first use; live entries never populate again.
-    if (needsDiscovery && !capture.discoveryDone) {
-        DiscoverIntoCache(capture, signature);
-    }
     g_warmup.SetMenuOpen(false);
     return true;
 }

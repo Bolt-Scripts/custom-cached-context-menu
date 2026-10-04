@@ -2647,14 +2647,15 @@ int main() {
     {
         cmo::RulesConfig config;
         config.revision = 7;
+        cmo::MenuModel emptyModel{};
         cmo::LayoutKey a = cmo::MakeLayoutKey(
             cmo::ContextSignature{cmo::Scope::Files, L".txt", cmo::Shape::Single,
                                   cmo::Variant::Normal},
-            config, 96, true);
+            config, 96, true, emptyModel);
         cmo::LayoutKey b = a;
         CHECK(a == b);
         config.revision = 8;
-        cmo::LayoutKey c = cmo::MakeLayoutKey(a.sig, config, 96, true);
+        cmo::LayoutKey c = cmo::MakeLayoutKey(a.sig, config, 96, true, emptyModel);
         CHECK(!(a == c));
 
         auto panel = std::make_shared<cmo::LayoutPanel>();
@@ -2776,6 +2777,35 @@ int main() {
         CHECK(store.Revision() == 2);
         CHECK(store.Snapshot()->appearance.cornerRadius == 7);
         DeleteFileW(path.c_str());
+    }
+
+    // v2.1 model fingerprint: flags, labels, and structure all matter.
+    {
+        cmo::MenuModel model = cmo::BuildCoreFileModel({L"a.txt"}, cmo::Shape::Single);
+        cmo::RulesConfig config;
+        config.revision = 3;
+        const cmo::LayoutKey base = cmo::MakeLayoutKey(
+            cmo::ContextSignature{cmo::Scope::Files, L".txt", cmo::Shape::Single,
+                                  cmo::Variant::Normal},
+            config, 96, true, model);
+        CHECK(base.modelFingerprint != 0);
+        CHECK(base == cmo::MakeLayoutKey(base.sig, config, 96, true, model));
+
+        cmo::MenuModel flagged = model;
+        flagged.items[0].flags |= cmo::kModelChecked;
+        CHECK(!(base == cmo::MakeLayoutKey(base.sig, config, 96, true, flagged)));
+
+        cmo::MenuModel relabeled = model;
+        relabeled.items[0].label += L"!";
+        CHECK(!(base == cmo::MakeLayoutKey(base.sig, config, 96, true, relabeled)));
+
+        cmo::MenuModel restructured = model;
+        cmo::MenuItem extra{};
+        extra.id = 4242;
+        extra.kind = cmo::ItemKind::Command;
+        extra.label = L"Extra";
+        restructured.items.push_back(extra);
+        CHECK(!(base == cmo::MakeLayoutKey(base.sig, config, 96, true, restructured)));
     }
 
     if (g_failures == 0) {

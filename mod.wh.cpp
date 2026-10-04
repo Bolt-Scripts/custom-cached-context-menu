@@ -2831,12 +2831,29 @@ POINT SubmenuPosition(const RECT& parentItemScreenRect, SIZE childSize,
     return POINT{x, y};
 }
 
+uint64_t ModelFingerprint(const std::vector<MenuItem>& items) {
+    uint64_t hash = 1469598103934665603ull;
+    for (const MenuItem& item : items) {
+        hash = HashCombine(hash, item.id);
+        hash = HashCombine(hash, static_cast<uint64_t>(item.kind));
+        hash = HashCombine(hash, static_cast<uint64_t>(item.action));
+        hash = HashCombine(hash, item.flags);
+        hash = HashCombine(hash, static_cast<uint64_t>(item.children.size()));
+        for (wchar_t c : item.label) {
+            hash = HashCombine(hash, static_cast<uint64_t>(c));
+        }
+        hash = HashCombine(hash, ModelFingerprint(item.children));
+    }
+    return hash;
+}
+
 struct LayoutKey {
     ContextSignature sig;
     uint64_t rulesRevision = 0;
     uint64_t appearanceRevision = 0;
     uint32_t dpi = 96;
     bool darkTheme = false;
+    uint64_t modelFingerprint = 0;
 
     bool operator==(const LayoutKey&) const = default;
 
@@ -2846,18 +2863,20 @@ struct LayoutKey {
         hash = HashCombine(hash, appearanceRevision);
         hash = HashCombine(hash, dpi);
         hash = HashCombine(hash, darkTheme ? 1 : 0);
+        hash = HashCombine(hash, modelFingerprint);
         return hash;
     }
 };
 
 LayoutKey MakeLayoutKey(const ContextSignature& sig, const RulesConfig& config,
-                        uint32_t dpi, bool darkTheme) {
+                        uint32_t dpi, bool darkTheme, const MenuModel& model) {
     LayoutKey key{};
     key.sig = sig;
     key.rulesRevision = config.revision;
     key.appearanceRevision = config.revision;
     key.dpi = dpi;
     key.darkTheme = darkTheme;
+    key.modelFingerprint = ModelFingerprint(model.items);
     return key;
 }
 
@@ -4958,7 +4977,8 @@ void PrebuildLayoutsForWarmup(const std::vector<MenuModel>& models, uint32_t dpi
         return;
     }
     for (const MenuModel& model : models) {
-        const LayoutKey key = MakeLayoutKey(model.sig, effective, dpi, darkTheme);
+        const LayoutKey key =
+            MakeLayoutKey(model.sig, effective, dpi, darkTheme, model);
         if (g_layoutCache.Find(key)) {
             continue;
         }
@@ -9886,12 +9906,11 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
         const MenuMode mode = ResolveMenuMode(
             g_settings.menuMode, g_modeController.ConsecutiveFailures());
         if (mode == MenuMode::Custom) {
-            LayoutKey layoutKey{};
-            layoutKey.sig = signature;
-            layoutKey.rulesRevision = rules ? rules->revision : 0;
-            layoutKey.appearanceRevision = rules ? rules->revision : 0;
-            layoutKey.dpi = DpiForWindow(owner);
-            layoutKey.darkTheme = IsDarkThemeActive();
+            const RulesConfig emptyConfig;
+            const RulesConfig& effectiveRules = rules ? *rules : emptyConfig;
+            const LayoutKey layoutKey =
+                MakeLayoutKey(signature, effectiveRules, DpiForWindow(owner),
+                              IsDarkThemeActive(), model);
 
             const CustomMenuResult custom =
                 ShowCustomMenu(model, layoutKey, owner, pt);

@@ -2808,6 +2808,26 @@ int main() {
         CHECK(!(base == cmo::MakeLayoutKey(base.sig, config, 96, true, restructured)));
     }
 
+    // v2.1 LRU: eviction order, promotion, clear releases.
+    {
+        cmo::LruMap<int> map;
+        int released = 0;
+        auto release = [&released](int) { ++released; };
+        map.SetMaxEntries(2);
+        map.Insert(L"a", 1, release);
+        map.Insert(L"b", 2, release);
+        CHECK(map.Size() == 2);
+        CHECK(map.Find(L"a") != nullptr && *map.Find(L"a") == 1);
+        map.Insert(L"c", 3, release);
+        CHECK(map.Size() == 2);
+        CHECK(released == 1);  // "b" was the least recent
+        CHECK(map.Find(L"b") == nullptr);
+        CHECK(map.Find(L"c") != nullptr);
+        map.Clear(release);
+        CHECK(map.Size() == 0);
+        CHECK(released == 3);
+    }
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

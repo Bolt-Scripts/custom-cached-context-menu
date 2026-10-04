@@ -2949,6 +2949,72 @@ private:
 
 inline LayoutCache g_layoutCache;
 
+// Bounded least-recently-used map; Find promotes, Insert evicts the oldest
+// and releases its value.
+template <typename T>
+class LruMap {
+public:
+    void SetMaxEntries(size_t maxEntries) {
+        maxEntries_ = maxEntries == 0 ? 1 : maxEntries;
+    }
+
+    size_t MaxEntries() const { return maxEntries_; }
+    size_t Size() const { return map_.size(); }
+
+    T* Find(const std::wstring& key) {
+        auto it = map_.find(key);
+        if (it == map_.end()) {
+            return nullptr;
+        }
+        order_.splice(order_.begin(), order_, it->second.orderIt);
+        return &it->second.value;
+    }
+
+    template <typename F>
+    void Insert(const std::wstring& key, T value, F release) {
+        auto it = map_.find(key);
+        if (it != map_.end()) {
+            it->second.value = std::move(value);
+            order_.splice(order_.begin(), order_, it->second.orderIt);
+            return;
+        }
+        order_.push_front(key);
+        Entry entry;
+        entry.value = std::move(value);
+        entry.orderIt = order_.begin();
+        map_.emplace(key, std::move(entry));
+
+        while (map_.size() > maxEntries_ && !order_.empty()) {
+            const std::wstring victim = order_.back();
+            order_.pop_back();
+            auto victimIt = map_.find(victim);
+            if (victimIt != map_.end()) {
+                release(victimIt->second.value);
+                map_.erase(victimIt);
+            }
+        }
+    }
+
+    template <typename F>
+    void Clear(F release) {
+        for (auto& pair : map_) {
+            release(pair.second.value);
+        }
+        map_.clear();
+        order_.clear();
+    }
+
+private:
+    struct Entry {
+        T value;
+        std::list<std::wstring>::iterator orderIt;
+    };
+
+    std::unordered_map<std::wstring, Entry> map_;
+    std::list<std::wstring> order_;
+    size_t maxEntries_ = 256;
+};
+
 // ===========================================================================
 // [CMO:Mode] Custom vs HMENU mode selection and failure fallback.
 // ===========================================================================
@@ -3618,6 +3684,11 @@ HBITMAP GetIconBitmapForMenu(const std::wstring& iconRef,
 
 class ContentCaches {
 public:
+    ContentCaches() {
+        text_.SetMaxEntries(256);
+        icons_.SetMaxEntries(256);
+    }
+
     void SetDevice(ID2D1DeviceContext* dc, IDWriteFactory* dwrite) {
         dc_ = dc;
         dwrite_ = dwrite;
@@ -3630,23 +3701,21 @@ public:
     }
 
     void Clear() {
-        for (auto& pair : text_) {
-            if (pair.second) {
-                pair.second->Release();
+        text_.Clear([](IDWriteTextLayout* layout) {
+            if (layout) {
+                layout->Release();
             }
-        }
-        text_.clear();
-        for (auto& pair : icons_) {
-            if (pair.second) {
-                pair.second->Release();
+        });
+        icons_.Clear([](ID2D1Bitmap* bitmap) {
+            if (bitmap) {
+                bitmap->Release();
             }
-        }
-        icons_.clear();
+        });
         dc_ = nullptr;
     }
 
-    size_t TextCount() const { return text_.size(); }
-    size_t IconCount() const { return icons_.size(); }
+    size_t TextCount() const { return text_.Size(); }
+    size_t IconCount() const { return icons_.Size(); }
 
 private:
     void BindPanel(LayoutPanel& panel, const LayoutMetrics& metrics) {
@@ -3681,9 +3750,8 @@ private:
             item.label + L'\x1f' + metrics.fontFace + L'\x1f' +
             std::to_wstring(static_cast<int>(metrics.fontSize * 4.0f)) + L'\x1f' +
             std::to_wstring(width);
-        auto it = text_.find(key);
-        if (it != text_.end()) {
-            return it->second;
+        if (IDWriteTextLayout** cached = text_.Find(key)) {
+            return *cached;
         }
         if (!dc_ || !dwrite_) {
             return nullptr;
@@ -3713,7 +3781,11 @@ private:
                 layout->SetTrimming(&trimming, ellipsis);
                 ellipsis->Release();
             }
-            text_[key] = layout;
+            text_.Insert(key, layout, [](IDWriteTextLayout* value) {
+                if (value) {
+                    value->Release();
+                }
+            });
         }
         format->Release();
         return layout;
@@ -3734,9 +3806,8 @@ private:
             }
             key += L'#' + std::to_wstring(hash);
         }
-        auto it = icons_.find(key);
-        if (it != icons_.end()) {
-            return it->second;
+        if (ID2D1Bitmap** cached = icons_.Find(key)) {
+            return *cached;
         }
         if (!dc_) {
             return nullptr;
@@ -3748,7 +3819,11 @@ private:
         }
         ID2D1Bitmap* bitmap = BitmapFromHBITMAP(hbitmap);
         if (bitmap) {
-            icons_[key] = bitmap;
+            icons_.Insert(key, bitmap, [](ID2D1Bitmap* value) {
+                if (value) {
+                    value->Release();
+                }
+            });
         }
         return bitmap;
     }
@@ -3795,8 +3870,8 @@ private:
 
     ID2D1DeviceContext* dc_ = nullptr;
     IDWriteFactory* dwrite_ = nullptr;
-    std::unordered_map<std::wstring, IDWriteTextLayout*> text_;
-    std::unordered_map<std::wstring, ID2D1Bitmap*> icons_;
+    LruMap<IDWriteTextLayout*> text_;
+    LruMap<ID2D1Bitmap*> icons_;
 };
 
 inline ContentCaches g_contentCaches;

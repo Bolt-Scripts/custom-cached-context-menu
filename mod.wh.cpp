@@ -1763,6 +1763,130 @@ std::optional<uint32_t> ShowNativeReplay(const PendingCapture& capture, HWND own
     return static_cast<uint32_t>(command);
 }
 
+// Parses a shell icon reference: "file,index", "file", or a quoted path with
+// an optional trailing ",index". Environment expansion happens at load time.
+bool ParseIconRef(std::wstring_view ref, std::wstring& path, int& index) {
+    path.clear();
+    index = 0;
+
+    std::wstring_view text = ref;
+    while (!text.empty() && (text.front() == L' ' || text.front() == L'\t')) {
+        text.remove_prefix(1);
+    }
+    while (!text.empty() && (text.back() == L' ' || text.back() == L'\t')) {
+        text.remove_suffix(1);
+    }
+    if (text.empty()) {
+        return false;
+    }
+
+    if (text.front() == L'"') {
+        text.remove_prefix(1);
+        const size_t quote = text.find(L'"');
+        if (quote == std::wstring_view::npos) {
+            return false;
+        }
+        path.assign(text.substr(0, quote));
+        text.remove_prefix(quote + 1);
+        if (!text.empty() && text.front() == L',') {
+            text.remove_prefix(1);
+            index = _wtoi(std::wstring(text).c_str());
+        }
+        return !path.empty();
+    }
+
+    const size_t comma = text.find_last_of(L',');
+    if (comma != std::wstring_view::npos) {
+        const std::wstring_view suffix = text.substr(comma + 1);
+        bool numeric = !suffix.empty();
+        for (wchar_t c : suffix) {
+            if (c < L'0' || c > L'9') {
+                numeric = false;
+                break;
+            }
+        }
+        if (numeric) {
+            path.assign(text.substr(0, comma));
+            index = _wtoi(std::wstring(suffix).c_str());
+            return !path.empty();
+        }
+    }
+
+    path.assign(text);
+    return true;
+}
+
+// Memoized HICONs, keyed by reference and pixel size. Owned and released by
+// this cache; callers must not destroy the returned icons.
+class IconCache {
+public:
+    ~IconCache() { Clear(); }
+
+    HICON Get(std::wstring_view ref, int sizePx) {
+        if (ref.empty()) {
+            return nullptr;
+        }
+        const std::wstring key = std::wstring(ref) + L"#" + std::to_wstring(sizePx);
+        auto it = icons_.find(key);
+        if (it != icons_.end()) {
+            return it->second;
+        }
+
+        HICON icon = nullptr;
+        std::wstring path;
+        int index = 0;
+        if (ParseIconRef(ref, path, index)) {
+            wchar_t expanded[MAX_PATH] = {};
+            if (ExpandEnvironmentStringsW(path.c_str(), expanded,
+                                          ARRAYSIZE(expanded))) {
+                HICON large = nullptr;
+                if (SUCCEEDED(SHDefExtractIconW(expanded, index, 0, &large, nullptr,
+                                                MAKELONG(sizePx, sizePx)))) {
+                    icon = large;
+                }
+            }
+        }
+        icons_[key] = icon;
+        return icon;
+    }
+
+    void Clear() {
+        for (auto& pair : icons_) {
+            if (pair.second) {
+                DestroyIcon(pair.second);
+            }
+        }
+        icons_.clear();
+    }
+
+private:
+    std::unordered_map<std::wstring, HICON> icons_;
+};
+
+inline IconCache g_iconCache;
+
+// Open-path timing, active only with debugLogging.
+class Perf {
+public:
+    void MarkOpenPathStart() {
+        if (g_settings.debugLogging) {
+            startTick_ = GetTickCount64();
+        }
+    }
+
+    uint64_t OpenPathElapsedMs() {
+        if (!g_settings.debugLogging || startTick_ == 0) {
+            return 0;
+        }
+        return GetTickCount64() - startTick_;
+    }
+
+private:
+    uint64_t startTick_ = 0;
+};
+
+inline Perf g_perf;
+
 }  // namespace cmo
 
 // ===========================================================================
@@ -2180,6 +2304,8 @@ MenuPath DecidePath(bool shiftHeld, ShellViewKind kind, bool hasPendingCapture,
 }
 
 bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner, POINT pt) {
+    g_perf.MarkOpenPathStart();
+
     std::vector<std::wstring> paths = GetSelectedPaths(owner, kind);
     Shape shape = paths.size() > 1 ? Shape::Multi : Shape::Single;
 
@@ -2217,6 +2343,8 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
 
     g_warmup.SetMenuOpen(true);
     std::optional<uint32_t> selection = NativeMenuView::Show(model, owner, pt);
+    Wh_Log(L"Menu open path: %llu ms",
+           static_cast<unsigned long long>(g_perf.OpenPathElapsedMs()));
     if (selection) {
         const MenuItem* item = FindById(model, *selection);
         if (item) {
@@ -2491,6 +2619,7 @@ void Wh_ModUninit() {
     Wh_Log(L"Context Menu Overhaul uninit");
     cmo::g_warmup.Stop();
     cmo::g_invalidation.Stop();
+    cmo::g_iconCache.Clear();
 
     const std::wstring cachePath = cmo::CacheFilePath();
     if (!cachePath.empty()) {

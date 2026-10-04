@@ -375,6 +375,26 @@ int main() {
     CHECK(hasPersonalize);
     CHECK(hasDisplaySettings);
 
+    std::wstring iconPath;
+    int iconIndex = -1;
+    CHECK(cmo::ParseIconRef(L"shell32.dll,3", iconPath, iconIndex));
+    CHECK_EQ(iconPath, std::wstring(L"shell32.dll"));
+    CHECK(iconIndex == 3);
+    CHECK(cmo::ParseIconRef(L"shell32.dll", iconPath, iconIndex));
+    CHECK_EQ(iconPath, std::wstring(L"shell32.dll"));
+    CHECK(iconIndex == 0);
+    CHECK(cmo::ParseIconRef(L"\"C:\\Program Files\\App\\app.exe\",12", iconPath,
+                            iconIndex));
+    CHECK_EQ(iconPath, std::wstring(L"C:\\Program Files\\App\\app.exe"));
+    CHECK(iconIndex == 12);
+    CHECK(!cmo::ParseIconRef(L"", iconPath, iconIndex));
+    CHECK(cmo::ParseIconRef(L"file,notanumber", iconPath, iconIndex));
+    CHECK_EQ(iconPath, std::wstring(L"file,notanumber"));
+
+    cmo::Perf perf;
+    perf.MarkOpenPathStart();
+    CHECK(perf.OpenPathElapsedMs() == 0);
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

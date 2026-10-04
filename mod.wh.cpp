@@ -2,7 +2,7 @@
 // @id              context-menu-overhaul
 // @name            Context Menu Overhaul
 // @description     Replaces the Explorer context menu with an instantly-opening cached menu, then discovers and caches shell extension items asynchronously.
-// @version         0.3.16
+// @version         0.3.17
 // @include         explorer.exe
 // @architecture    x86-64
 // @compilerOptions -lole32 -lshlwapi -luuid -lcomctl32 -ladvapi32 -lgdi32 -luxtheme -lversion
@@ -270,7 +270,13 @@ inline std::wstring MakeTypeKey(const std::vector<std::wstring>& paths) {
 namespace cmo {
 
 enum class ItemKind : uint8_t { Command, Submenu, Separator };
-enum class ActionKind : uint8_t { ViewAction, ShellVerb, Fallback, Submenu };
+enum class ActionKind : uint8_t {
+    ViewAction,
+    ShellVerb,
+    Fallback,
+    Submenu,
+    NewItem,
+};
 
 // Documented view operations, dispatched through IFolderView2 / IShellView.
 // The old FCIDM_* view command IDs are not defined by the Windows SDK and
@@ -310,6 +316,8 @@ struct MenuItem {
     uint32_t flags = kModelNone;
     std::wstring iconRef;
     std::wstring targetPath;
+    // Index into the ShellNew template list for ActionKind::NewItem.
+    uint32_t newIndex = 0;
     // 16x16 BGRA icon captured from the shell's own menu bitmap.
     std::vector<uint8_t> iconPixels;
     std::vector<MenuItem> children;
@@ -549,6 +557,316 @@ void ReorganizeAdvancedItems(std::vector<MenuItem>& items) {
     items = std::move(kept);
 }
 
+// ===========================================================================
+// [CMO:NewMenu] The New submenu is built from ShellNew templates.
+// ===========================================================================
+
+// One entry of the New submenu. Enumerated once from the registry (Folder and
+// Shortcut are synthetic) and referenced by index from the core model.
+struct NewTemplate {
+    enum class Kind : uint8_t { Folder, Shortcut, NullFile, Data, FileName, Command };
+    Kind kind = Kind::NullFile;
+    std::wstring displayName;
+    std::wstring extension;      // includes the leading dot
+    std::wstring fileName;       // FileName templates
+    std::wstring command;        // Command/Shortcut templates
+    std::vector<uint8_t> data;   // Data templates
+};
+
+std::mutex g_newTemplatesMutex;
+std::atomic<bool> g_newTemplatesReady{false};
+std::vector<NewTemplate> g_newTemplates;
+std::wstring g_shortcutCommand;
+
+std::wstring ExpandEnv(const std::wstring& text) {
+    wchar_t buffer[1024] = {};
+    if (ExpandEnvironmentStringsW(text.c_str(), buffer, ARRAYSIZE(buffer))) {
+        return buffer;
+    }
+    return text;
+}
+
+bool RegKeyExists(HKEY root, const std::wstring& subkey) {
+    HKEY key = nullptr;
+    if (RegOpenKeyExW(root, subkey.c_str(), 0, KEY_READ, &key) == ERROR_SUCCESS) {
+        RegCloseKey(key);
+        return true;
+    }
+    return false;
+}
+
+std::wstring ReadRegString(HKEY root, const std::wstring& subkey, const wchar_t* name) {
+    wchar_t buffer[1024] = {};
+    DWORD bytes = sizeof(buffer);
+    if (RegGetValueW(root, subkey.c_str(), name, RRF_RT_REG_SZ, nullptr, buffer,
+                     &bytes) == ERROR_SUCCESS) {
+        return buffer;
+    }
+    return L"";
+}
+
+void AddShellNewTemplate(HKEY root, const std::wstring& ext,
+                         std::vector<NewTemplate>& out) {
+    const std::wstring extKey = L"Software\\Classes\\" + ext;
+    std::wstring shellNew = extKey + L"\\ShellNew";
+    if (!RegKeyExists(root, shellNew)) {
+        const std::wstring progId = ReadRegString(root, extKey, nullptr);
+        if (progId.empty()) {
+            return;
+        }
+        shellNew = L"Software\\Classes\\" + progId + L"\\ShellNew";
+        if (!RegKeyExists(root, shellNew)) {
+            return;
+        }
+    }
+
+    NewTemplate tmpl;
+    tmpl.extension = ext;
+
+    SHFILEINFOW info = {};
+    if (SHGetFileInfoW(ext.c_str(), FILE_ATTRIBUTE_NORMAL, &info, sizeof(info),
+                       SHGFI_USEFILEATTRIBUTES | SHGFI_TYPENAME) &&
+        info.szTypeName[0]) {
+        tmpl.displayName = info.szTypeName;
+    } else {
+        tmpl.displayName = ext;
+    }
+    if (tmpl.displayName.empty()) {
+        return;
+    }
+
+    HKEY key = nullptr;
+    if (RegOpenKeyExW(root, shellNew.c_str(), 0, KEY_READ, &key) != ERROR_SUCCESS) {
+        return;
+    }
+
+    if (RegQueryValueExW(key, L"NullFile", nullptr, nullptr, nullptr, nullptr) ==
+        ERROR_SUCCESS) {
+        tmpl.kind = NewTemplate::Kind::NullFile;
+        out.push_back(std::move(tmpl));
+    } else {
+        DWORD type = 0;
+        DWORD bytes = 0;
+        if (RegQueryValueExW(key, L"Data", nullptr, &type, nullptr, &bytes) ==
+                ERROR_SUCCESS &&
+            type == REG_BINARY && bytes > 0 && bytes <= 65536) {
+            tmpl.kind = NewTemplate::Kind::Data;
+            tmpl.data.resize(bytes);
+            if (RegQueryValueExW(key, L"Data", nullptr, nullptr, tmpl.data.data(),
+                                 &bytes) == ERROR_SUCCESS) {
+                out.push_back(std::move(tmpl));
+            }
+        } else if (!(tmpl.fileName = ReadRegString(root, shellNew, L"FileName"))
+                        .empty()) {
+            tmpl.kind = NewTemplate::Kind::FileName;
+            tmpl.fileName = ExpandEnv(tmpl.fileName);
+            out.push_back(std::move(tmpl));
+        } else if (!(tmpl.command = ReadRegString(root, shellNew, L"Command")).empty()) {
+            tmpl.kind = NewTemplate::Kind::Command;
+            out.push_back(std::move(tmpl));
+        }
+    }
+    RegCloseKey(key);
+}
+
+std::vector<NewTemplate> EnumerateShellNewTemplates() {
+    std::vector<NewTemplate> templates;
+    std::unordered_set<std::wstring> seenExtensions;
+    for (HKEY root : {HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE}) {
+        HKEY classes = nullptr;
+        if (RegOpenKeyExW(root, L"Software\\Classes", 0, KEY_READ, &classes) !=
+            ERROR_SUCCESS) {
+            continue;
+        }
+        for (DWORD i = 0;; ++i) {
+            wchar_t ext[256] = {};
+            DWORD length = ARRAYSIZE(ext);
+            if (RegEnumKeyExW(classes, i, ext, &length, nullptr, nullptr, nullptr,
+                              nullptr) != ERROR_SUCCESS) {
+                break;
+            }
+            if (ext[0] != L'.') {
+                continue;
+            }
+            std::wstring lower = ext;
+            std::transform(lower.begin(), lower.end(), lower.begin(), towlower);
+            if (!seenExtensions.insert(lower).second) {
+                continue;  // HKCU wins over HKLM
+            }
+            AddShellNewTemplate(root, ext, templates);
+        }
+        RegCloseKey(classes);
+    }
+
+    std::sort(templates.begin(), templates.end(),
+              [](const NewTemplate& a, const NewTemplate& b) {
+                  return _wcsicmp(a.displayName.c_str(), b.displayName.c_str()) < 0;
+              });
+
+    // Windows shows one entry per type name; keep the first.
+    std::vector<NewTemplate> unique;
+    std::unordered_set<std::wstring> seenNames;
+    for (NewTemplate& tmpl : templates) {
+        std::wstring nameKey = tmpl.displayName;
+        std::transform(nameKey.begin(), nameKey.end(), nameKey.begin(), towlower);
+        if (!seenNames.insert(nameKey).second) {
+            continue;
+        }
+        unique.push_back(std::move(tmpl));
+    }
+    return unique;
+}
+
+// Builds the template list once. Warm-up prebuilds it; a first open can build
+// it synchronously as a one-time fallback.
+void EnsureNewTemplates() {
+    if (g_newTemplatesReady.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(g_newTemplatesMutex);
+    if (g_newTemplatesReady.load(std::memory_order_relaxed)) {
+        return;
+    }
+
+    std::vector<NewTemplate> templates = EnumerateShellNewTemplates();
+    std::wstring shortcutCommand =
+        L"%SystemRoot%\\System32\\rundll32.exe appwiz.cpl,NewLinkHere %1";
+    std::vector<NewTemplate> filtered;
+    for (NewTemplate& tmpl : templates) {
+        if (_wcsicmp(tmpl.extension.c_str(), L".lnk") == 0) {
+            if (tmpl.kind == NewTemplate::Kind::Command && !tmpl.command.empty()) {
+                shortcutCommand = tmpl.command;
+            }
+            continue;
+        }
+        filtered.push_back(std::move(tmpl));
+    }
+
+    std::vector<NewTemplate> built;
+    NewTemplate folder;
+    folder.kind = NewTemplate::Kind::Folder;
+    folder.displayName = L"Folder";
+    built.push_back(std::move(folder));
+    NewTemplate shortcut;
+    shortcut.kind = NewTemplate::Kind::Shortcut;
+    shortcut.displayName = L"Shortcut";
+    shortcut.command = ExpandEnv(shortcutCommand);
+    built.push_back(std::move(shortcut));
+    for (NewTemplate& tmpl : filtered) {
+        built.push_back(std::move(tmpl));
+    }
+
+    g_shortcutCommand = std::move(shortcutCommand);
+    g_newTemplates = std::move(built);
+    g_newTemplatesReady.store(true, std::memory_order_release);
+}
+
+#ifdef CMO_TESTING
+void ResetNewTemplatesForTesting() {
+    std::lock_guard<std::mutex> lock(g_newTemplatesMutex);
+    g_newTemplates.clear();
+    g_newTemplatesReady.store(false, std::memory_order_relaxed);
+}
+#endif
+
+void BuildNewMenuChildren(std::vector<MenuItem>& children, uint32_t& nextId) {
+    EnsureNewTemplates();
+    for (size_t i = 0; i < g_newTemplates.size(); ++i) {
+        MenuItem item{};
+        item.id = nextId++;
+        item.kind = ItemKind::Command;
+        item.action = ActionKind::NewItem;
+        item.label = g_newTemplates[i].displayName;
+        item.newIndex = static_cast<uint32_t>(i);
+        children.push_back(std::move(item));
+    }
+}
+
+// Returns a path in `directory` that does not exist yet, using Windows'
+// "New folder (2)" naming pattern.
+std::wstring MakeUniquePath(const std::wstring& directory, const std::wstring& baseName,
+                            const std::wstring& extension) {
+    std::wstring candidate = directory + L"\\" + baseName + extension;
+    if (GetFileAttributesW(candidate.c_str()) == INVALID_FILE_ATTRIBUTES) {
+        return candidate;
+    }
+    for (int i = 2; i < 1000; ++i) {
+        candidate = directory + L"\\" + baseName + L" (" + std::to_wstring(i) + L")" +
+                    extension;
+        if (GetFileAttributesW(candidate.c_str()) == INVALID_FILE_ATTRIBUTES) {
+            return candidate;
+        }
+    }
+    return L"";
+}
+
+// Creates one New item in `directory`; `createdPath` is empty for commands
+// that create their item themselves (the shortcut wizard).
+bool CreateNewItemInFolder(const NewTemplate& tmpl, const std::wstring& directory,
+                           std::wstring& createdPath) {
+    createdPath.clear();
+    if (directory.empty()) {
+        return false;
+    }
+
+    if (tmpl.kind == NewTemplate::Kind::Folder) {
+        const std::wstring path = MakeUniquePath(directory, L"New folder", L"");
+        if (path.empty() || !CreateDirectoryW(path.c_str(), nullptr)) {
+            return false;
+        }
+        createdPath = path;
+        return true;
+    }
+
+    if (tmpl.kind == NewTemplate::Kind::Shortcut ||
+        tmpl.kind == NewTemplate::Kind::Command) {
+        std::wstring command = ExpandEnv(tmpl.command);
+        const size_t placeholder = command.find(L"%1");
+        if (placeholder != std::wstring::npos) {
+            command.replace(placeholder, 2, directory);
+        }
+        STARTUPINFOW si = {};
+        si.cb = sizeof(si);
+        PROCESS_INFORMATION pi = {};
+        std::vector<wchar_t> mutableCommand(command.begin(), command.end());
+        mutableCommand.push_back(L'\0');
+        const BOOL ok = CreateProcessW(nullptr, mutableCommand.data(), nullptr, nullptr,
+                                       FALSE, 0, nullptr, directory.c_str(), &si, &pi);
+        if (ok) {
+            CloseHandle(pi.hThread);
+            CloseHandle(pi.hProcess);
+        }
+        return ok != FALSE;
+    }
+
+    const std::wstring baseName = L"New " + tmpl.displayName;
+    const std::wstring path = MakeUniquePath(directory, baseName, tmpl.extension);
+    if (path.empty()) {
+        return false;
+    }
+
+    HANDLE file = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW,
+                              FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+    if (tmpl.kind == NewTemplate::Kind::Data && !tmpl.data.empty()) {
+        DWORD written = 0;
+        WriteFile(file, tmpl.data.data(), static_cast<DWORD>(tmpl.data.size()), &written,
+                  nullptr);
+    }
+    CloseHandle(file);
+
+    if (tmpl.kind == NewTemplate::Kind::FileName && !tmpl.fileName.empty()) {
+        if (!CopyFileW(tmpl.fileName.c_str(), path.c_str(), FALSE)) {
+            DeleteFileW(path.c_str());
+            return false;
+        }
+    }
+    createdPath = path;
+    return true;
+}
+
 // Logs any unlabeled item with its full descriptor so the extension behavior
 // can be identified from a single run.
 void DumpSuspiciousItems(const std::vector<MenuItem>& items, int depth) {
@@ -656,7 +974,8 @@ MenuModel BuildCoreModel(Scope scope, const std::vector<std::wstring>& paths, Sh
         addCommand(L"Paste", L"paste", kModelNone, L"@glyph:E77F");
         addCommand(L"Paste shortcut", L"pastelink");
         addSeparator();
-        addCommand(L"New", L"new");
+        MenuItem& newMenu = addSubmenu(L"New");
+        BuildNewMenuChildren(newMenu.children, nextId);
         if (scope == Scope::Desktop) {
             addSeparator();
             addCommand(L"Display settings", L"display", kModelNone, L"@glyph:E7F4");
@@ -1520,10 +1839,6 @@ struct PendingCapture {
     // Populated once per open; reused for discovery and the native fallback.
     HMENU populatedMenu = nullptr;
     bool populated = false;
-    // The menu the shell asked us to show; populated in place so the native
-    // fallback can return the shell's own menu with the shell's own IDs.
-    HMENU callerMenu = nullptr;
-    bool ownsPopulatedMenu = false;
     IContextMenu3* contextMenu3 = nullptr;
     IContextMenu2* contextMenu2 = nullptr;
     std::vector<std::wstring> handlerModules;
@@ -1535,11 +1850,10 @@ struct PendingCapture {
 
 // Releases every resource a capture owns.
 void ReleaseCapture(PendingCapture& capture) {
-    if (capture.populatedMenu && capture.ownsPopulatedMenu) {
+    if (capture.populatedMenu) {
         DestroyMenu(capture.populatedMenu);
+        capture.populatedMenu = nullptr;
     }
-    capture.populatedMenu = nullptr;
-    capture.ownsPopulatedMenu = false;
     if (capture.contextMenu3) {
         capture.contextMenu3->Release();
         capture.contextMenu3 = nullptr;
@@ -2310,9 +2624,43 @@ void InitializeMenuRecursive(PendingCapture& capture, HMENU menu, UINT position)
     }
 }
 
+// Debug dump of a native menu: labels, ids, offsets and bitmap sentinels.
+// Run with Debug logging after the menu closes, when dynamic submenus have
+// been populated.
+void DumpMenuTree(HMENU menu, UINT idCmdFirst, int depth) {
+    if (!g_settings.debugLogging || !menu) {
+        return;
+    }
+    const int count = GetMenuItemCount(menu);
+    for (int i = 0; i < count; ++i) {
+        MENUITEMINFOW info = {};
+        info.cbSize = sizeof(info);
+        info.fMask = MIIM_ID | MIIM_FTYPE | MIIM_SUBMENU | MIIM_STATE | MIIM_BITMAP;
+        if (!GetMenuItemInfoW(menu, static_cast<UINT>(i), TRUE, &info)) {
+            continue;
+        }
+        wchar_t label[256] = {};
+        GetMenuStringW(menu, static_cast<UINT>(i), label, ARRAYSIZE(label),
+                       MF_BYPOSITION);
+        const long long bitmap = static_cast<long long>(reinterpret_cast<INT_PTR>(
+            info.hbmpItem));
+        if (info.hSubMenu) {
+            Wh_Log(L"[menu d%d] submenu '%s' id=%u state=%04X bmp=%lld children=%d",
+                   depth, label, info.wID, info.fState, bitmap,
+                   GetMenuItemCount(info.hSubMenu));
+            DumpMenuTree(info.hSubMenu, idCmdFirst, depth + 1);
+        } else if (!(info.fType & MFT_SEPARATOR)) {
+            const long offset = info.wID >= idCmdFirst
+                                    ? static_cast<long>(info.wID - idCmdFirst)
+                                    : -1;
+            Wh_Log(L"[menu d%d] item '%s' id=%u offset=%ld state=%04X bmp=%lld",
+                   depth, label, info.wID, offset, info.fState, bitmap);
+        }
+    }
+}
+
 // Debug dump of a discovered model; helps identify unlabeled or unusual items.
-void DumpModelItems(const std::vector<MenuItem>& items, int depth) {
-    for (const MenuItem& item : items) {
+void DumpModelItems(const std::vector<MenuItem>& items, int depth) {    for (const MenuItem& item : items) {
         Wh_Log(L"[d%d] kind=%d action=%d flags=%04X offset=%u verb='%s' label='%s' "
                L"children=%zu icons=%zu",
                depth, static_cast<int>(item.kind), static_cast<int>(item.action),
@@ -2968,6 +3316,88 @@ IShellView* GetActiveShellView(HWND owner, ShellViewKind kind) {
     return view;
 }
 
+// Current folder shown by the view: the target directory for New items.
+std::wstring GetCurrentFolderPath(HWND owner, ShellViewKind kind) {
+    IShellView* view = GetActiveShellView(owner, kind);
+    if (!view) {
+        return L"";
+    }
+
+    std::wstring path;
+    IFolderView* folderView = nullptr;
+    if (SUCCEEDED(view->QueryInterface(IID_IFolderView, (void**)&folderView)) &&
+        folderView) {
+        IShellFolder* folder = nullptr;
+        if (SUCCEEDED(folderView->GetFolder(IID_IShellFolder, (void**)&folder)) &&
+            folder) {
+            IPersistFolder2* persist = nullptr;
+            if (SUCCEEDED(folder->QueryInterface(IID_IPersistFolder2, (void**)&persist)) &&
+                persist) {
+                PIDLIST_ABSOLUTE pidl = nullptr;
+                if (SUCCEEDED(persist->GetCurFolder(&pidl)) && pidl) {
+                    wchar_t buffer[MAX_PATH] = {};
+                    if (SHGetPathFromIDListW(pidl, buffer)) {
+                        path = buffer;
+                    }
+                    CoTaskMemFree(pidl);
+                }
+                persist->Release();
+            }
+            folder->Release();
+        }
+        folderView->Release();
+    }
+    view->Release();
+    return path;
+}
+
+// Selects a newly created item in the view, optionally in rename mode.
+void SelectCreatedItem(HWND owner, ShellViewKind kind, const std::wstring& path,
+                       bool edit) {
+    IShellView* view = GetActiveShellView(owner, kind);
+    if (!view) {
+        return;
+    }
+    PIDLIST_ABSOLUTE pidl = nullptr;
+    if (SUCCEEDED(SHILCreateFromPath(path.c_str(), &pidl, nullptr)) && pidl) {
+        SVSIF flags =
+            SVSI_DESELECTOTHERS | SVSI_ENSUREVISIBLE | SVSI_FOCUSED | SVSI_SELECT;
+        if (edit) {
+            flags |= SVSI_EDIT;
+        }
+        view->SelectItem(ILFindLastID(pidl), flags);
+        CoTaskMemFree(pidl);
+    }
+    view->Release();
+}
+
+// Creates the New submenu item chosen from the core model.
+bool CreateNewItemFromTemplate(const MenuItem& item, const InvocationContext& ctx) {
+    if (item.newIndex >= g_newTemplates.size()) {
+        return false;
+    }
+    const NewTemplate& tmpl = g_newTemplates[item.newIndex];
+    const std::wstring directory = GetCurrentFolderPath(ctx.owner, ctx.kind);
+    if (directory.empty()) {
+        return false;
+    }
+
+    std::wstring createdPath;
+    if (!CreateNewItemInFolder(tmpl, directory, createdPath)) {
+        return false;
+    }
+
+    if (!createdPath.empty()) {
+        const DWORD event =
+            tmpl.kind == NewTemplate::Kind::Folder ? SHCNE_MKDIR : SHCNE_CREATE;
+        SHChangeNotify(event, SHCNF_PATHW | SHCNF_FLUSH, createdPath.c_str(), nullptr);
+        const bool edit = tmpl.kind != NewTemplate::Kind::Shortcut &&
+                          tmpl.kind != NewTemplate::Kind::Command;
+        SelectCreatedItem(ctx.owner, ctx.kind, createdPath, edit);
+    }
+    return true;
+}
+
 bool CreateShortcutForPaths(const std::vector<std::wstring>& paths) {
     if (paths.empty()) {
         return false;
@@ -3186,17 +3616,9 @@ bool EnsureContextPopulated(PendingCapture& capture) {
     const std::vector<std::wstring> modulesBefore = SnapshotLoadedModules();
     const ULONGLONG start = GetTickCount64();
 
-    // Populate the menu the shell actually asked to show when there is one:
-    // the shell only recognizes dynamic submenus (New's templates) and view
-    // commands in its own menu, so the native fallback can hand it back
-    // untouched. Warm-up/offscreen captures get a private menu instead.
-    HMENU menu = capture.callerMenu;
+    HMENU menu = CreatePopupMenu();
     if (!menu) {
-        menu = CreatePopupMenu();
-        if (!menu) {
-            return false;
-        }
-        capture.ownsPopulatedMenu = true;
+        return false;
     }
     // Extensions may attach bitmaps with SetMenuItemBitmaps during population;
     // start a fresh recording so lookups match this menu.
@@ -3303,6 +3725,9 @@ InvokeResult InvokeItem(const MenuItem& item, const InvocationContext& ctx,
             return InvokeResult::FallbackNative;
         case ActionKind::Submenu:
             return InvokeResult::Handled;
+        case ActionKind::NewItem:
+            return CreateNewItemFromTemplate(item, ctx) ? InvokeResult::Handled
+                                                        : InvokeResult::Failed;
         case ActionKind::ViewAction:
             return InvokeViewAction(item, ctx);
         case ActionKind::ShellVerb:
@@ -4039,8 +4464,8 @@ constexpr UINT_PTR kOwnerSubclassId = 0xC0DE;
 
 class OwnerSubclass {
 public:
-    OwnerSubclass(HWND owner, PendingCapture* capture)
-        : owner_(owner), capture_(capture) {
+    OwnerSubclass(HWND owner, PendingCapture* capture, bool forwardMenuMessages)
+        : owner_(owner), capture_(capture), forward_(forwardMenuMessages) {
         if (SetWindowSubclass(owner, &OwnerSubclass::Proc, kOwnerSubclassId,
                               reinterpret_cast<DWORD_PTR>(this))) {
             subclassed_ = true;
@@ -4090,15 +4515,85 @@ private:
             return 0;
         }
 
+        if (forward_ && capture_) {
+            switch (msg) {
+                case WM_INITMENUPOPUP:
+                case WM_DRAWITEM:
+                case WM_MEASUREITEM:
+                case WM_MENUCHAR: {
+                    LRESULT result = 0;
+                    bool handled = false;
+                    if (capture_->contextMenu3) {
+                        handled = SUCCEEDED(capture_->contextMenu3->HandleMenuMsg2(
+                            msg, wParam, lParam, &result));
+                    } else if (capture_->contextMenu2) {
+                        handled = SUCCEEDED(capture_->contextMenu2->HandleMenuMsg(
+                            msg, wParam, lParam));
+                    }
+                    if (msg == WM_MENUCHAR && handled) {
+                        return result;
+                    }
+                    break;
+                }
+                default:
+                    break;
+            }
+        }
+
         return DefSubclassProc(hwnd, msg, wParam, lParam);
     }
 
     HWND owner_ = nullptr;
     PendingCapture* capture_ = nullptr;
+    bool forward_ = false;
     bool subclassed_ = false;
     bool timerSet_ = false;
     ContextSignature discoverySignature_{};
 };
+
+// Shows the retained, really-populated native menu with menu-message
+// forwarding and invokes the selection through the live object. Used by the
+// fallback item and the Shift bypass.
+std::optional<uint32_t> ShowNativeReplay(PendingCapture& capture, HWND owner, POINT pt) {
+    if (!EnsureContextPopulated(capture) || !capture.populatedMenu ||
+        !TrackPopupMenuEx_Original) {
+        return std::nullopt;
+    }
+
+    // Submenus are populated on WM_INITMENUPOPUP; initialize the retained menu
+    // before showing it or placeholders (such as the New submenu's) would be
+    // displayed and their invocation would fail.
+    if (!capture.menuInitialized) {
+        InitializeMenuRecursive(capture, capture.populatedMenu, 0);
+        capture.menuInitialized = true;
+    }
+    DumpMenuTree(capture.populatedMenu, capture.idCmdFirst, 0);
+
+    OwnerSubclass subclass(owner, &capture, /*forwardMenuMessages=*/true);
+
+    const UINT flags = TPM_RETURNCMD | TPM_NONOTIFY | TPM_LEFTALIGN | TPM_TOPALIGN;
+    MenuAnimationSuppressor animationSuppressor;
+    int command = TrackPopupMenuEx_Original(capture.populatedMenu, flags, pt.x, pt.y, owner,
+                                            nullptr);
+    if (command == 0 || !capture.obj) {
+        return std::nullopt;
+    }
+
+    CMINVOKECOMMANDINFOEX info = {};
+    info.cbSize = sizeof(info);
+    info.fMask = CMIC_MASK_UNICODE;
+    info.hwnd = owner;
+    const UINT offset = static_cast<UINT>(command) - capture.idCmdFirst;
+    info.lpVerb = MAKEINTRESOURCEA(offset);
+    info.lpVerbW = MAKEINTRESOURCEW(offset);
+    info.nShow = SW_SHOWNORMAL;
+    if (FAILED(capture.obj->InvokeCommand(
+            reinterpret_cast<CMINVOKECOMMANDINFO*>(&info)))) {
+        Wh_Log(L"Native menu invocation failed for offset %u", offset);
+    }
+
+    return static_cast<uint32_t>(command);
+}
 
 // Open-path timing, active only with debugLogging.
 class Perf {
@@ -4275,6 +4770,10 @@ private:
     }
 
     void Run() {
+        // The New submenu is built from these templates; prebuild them so the
+        // first right-click does not pay for the registry walk.
+        EnsureNewTemplates();
+
         const int delaySeconds =
             g_settings.warmupDelaySeconds > 0 ? g_settings.warmupDelaySeconds : 0;
         if (WaitForSingleObject(stopEvent_, static_cast<DWORD>(delaySeconds) * 1000) ==
@@ -4596,15 +5095,7 @@ MenuPath DecidePath(bool shiftHeld, ShellViewKind kind, bool hasPendingCapture,
     return MenuPath::Ours;
 }
 
-// Result of building the replacement menu. `ShowCallerMenu` means the
-// untouched native menu should be replayed into the caller's own menu and
-// shown through the original call: the shell then populates dynamic submenus
-// (New's templates, view commands) and invokes the selection itself, which a
-// private retained menu cannot do faithfully.
-enum class MenuOutcome : uint8_t { Handled, ShowCallerMenu };
-
-MenuOutcome ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner,
-                                POINT pt) {
+bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner, POINT pt) {
     g_perf.MarkOpenPathStart();
 
     SelectionInfo info = GetSelection(owner, kind);
@@ -4613,8 +5104,9 @@ MenuOutcome ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWN
 
     if (!IsFilesystemContext(info.folderIsFilesystem, info.allItemsAreFilesystem)) {
         Wh_Log(L"Non-filesystem namespace: using the native menu");
+        ShowNativeReplay(capture, owner, pt);
         g_warmup.SetMenuOpen(false);
-        return MenuOutcome::ShowCallerMenu;
+        return true;
     }
 
     Scope scope = RefineScope(ScopeFromKind(kind, paths.empty()), info.allItemsAreFolders,
@@ -4649,8 +5141,8 @@ MenuOutcome ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWN
 
         if (ShouldShowNativeReplay(model.flags)) {
             Wh_Log(L"Owner-draw context: using the native menu");
-            g_warmup.SetMenuOpen(false);
-            return MenuOutcome::ShowCallerMenu;
+            ShowNativeReplay(capture, owner, pt);
+            break;
         }
 
         for (MenuItem& item : model.items) {
@@ -4677,7 +5169,7 @@ MenuOutcome ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWN
             if (!needsDiscovery) {
                 chosen = NativeMenuView::Show(model, owner, pt, &creationFailed);
             } else {
-                OwnerSubclass subclass(owner, &capture);
+                OwnerSubclass subclass(owner, &capture, /*forwardMenuMessages=*/false);
                 subclass.StartDiscoveryTimer(signature);
                 chosen = NativeMenuView::Show(model, owner, pt, &creationFailed);
             }
@@ -4685,11 +5177,11 @@ MenuOutcome ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWN
 
         if (creationFailed) {
             Wh_Log(L"Menu creation failed; using the native menu");
+            ShowNativeReplay(capture, owner, pt);
             if (needsDiscovery && !capture.discoveryDone) {
                 DiscoverIntoCache(capture, signature);
             }
-            g_warmup.SetMenuOpen(false);
-            return MenuOutcome::ShowCallerMenu;
+            break;
         }
 
         if (chosen) {
@@ -4725,8 +5217,7 @@ MenuOutcome ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWN
                        static_cast<int>(result));
 
                 if (result == InvokeResult::FallbackNative) {
-                    g_warmup.SetMenuOpen(false);
-                    return MenuOutcome::ShowCallerMenu;
+                    ShowNativeReplay(capture, owner, pt);
                 }
             }
             break;
@@ -4748,7 +5239,7 @@ MenuOutcome ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWN
     }
 
     g_warmup.SetMenuOpen(false);
-    return MenuOutcome::Handled;
+    return true;
 }
 
 BOOL WINAPI TrackPopupMenuEx_Hook(HMENU hMenu, UINT uFlags, int x, int y, HWND hWnd,
@@ -4764,27 +5255,16 @@ BOOL WINAPI TrackPopupMenuEx_Hook(HMENU hMenu, UINT uFlags, int x, int y, HWND h
     if (path == MenuPath::Ours && hasPending) {
         Wh_Log(L"Replacing context menu: kind=%d", static_cast<int>(kind));
         pending.owner = hWnd;
-        pending.callerMenu = hMenu;
-        const MenuOutcome outcome = ShowReplacementMenu(pending, kind, hWnd, POINT{x, y});
-        if (outcome == MenuOutcome::Handled) {
-            ReleaseCapture(pending);
-            return 0;
-        }
-        Wh_Log(L"Showing the caller's native menu");
-        if (!pending.populated || pending.populatedMenu != hMenu) {
-            ReplayInto(pending.obj, hMenu, pending.indexMenu, pending.idCmdFirst,
-                       pending.idCmdLast, pending.flags);
-        }
+        ShowReplacementMenu(pending, kind, hWnd, POINT{x, y});
         ReleaseCapture(pending);
-        return TrackPopupMenuEx_Original(hMenu, uFlags, x, y, hWnd, lptpm);
+        return 0;
     }
 
     if (path == MenuPath::NativeBypass && hasPending) {
         Wh_Log(L"Shift bypass: showing the native menu");
-        ReplayInto(pending.obj, hMenu, pending.indexMenu, pending.idCmdFirst,
-                   pending.idCmdLast, pending.flags);
+        ShowNativeReplay(pending, hWnd, POINT{x, y});
         ReleaseCapture(pending);
-        return TrackPopupMenuEx_Original(hMenu, uFlags, x, y, hWnd, lptpm);
+        return 0;
     }
 
     if (hasPending) {
@@ -4809,27 +5289,16 @@ BOOL WINAPI TrackPopupMenu_Hook(HMENU hMenu, UINT uFlags, int x, int y, int nRes
     if (path == MenuPath::Ours && hasPending) {
         Wh_Log(L"Replacing context menu: kind=%d", static_cast<int>(kind));
         pending.owner = hWnd;
-        pending.callerMenu = hMenu;
-        const MenuOutcome outcome = ShowReplacementMenu(pending, kind, hWnd, POINT{x, y});
-        if (outcome == MenuOutcome::Handled) {
-            ReleaseCapture(pending);
-            return 0;
-        }
-        Wh_Log(L"Showing the caller's native menu");
-        if (!pending.populated || pending.populatedMenu != hMenu) {
-            ReplayInto(pending.obj, hMenu, pending.indexMenu, pending.idCmdFirst,
-                       pending.idCmdLast, pending.flags);
-        }
+        ShowReplacementMenu(pending, kind, hWnd, POINT{x, y});
         ReleaseCapture(pending);
-        return TrackPopupMenu_Original(hMenu, uFlags, x, y, nReserved, hWnd, prcRect);
+        return 0;
     }
 
     if (path == MenuPath::NativeBypass && hasPending) {
         Wh_Log(L"Shift bypass: showing the native menu");
-        ReplayInto(pending.obj, hMenu, pending.indexMenu, pending.idCmdFirst,
-                   pending.idCmdLast, pending.flags);
+        ShowNativeReplay(pending, hWnd, POINT{x, y});
         ReleaseCapture(pending);
-        return TrackPopupMenu_Original(hMenu, uFlags, x, y, nReserved, hWnd, prcRect);
+        return 0;
     }
 
     if (hasPending) {

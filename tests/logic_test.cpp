@@ -640,9 +640,9 @@ int main() {
     }
     CHECK(cutAdopted);
 
-    // A cached submenu must not donate its empty descriptor to a matching core
-    // command ("New"): that cleared the verb and invoked offset 0, which
-    // dispatched whatever command happened to sit there.
+    // A cached submenu must not donate its empty descriptor to the core "New"
+    // submenu; the cached duplicate is dropped instead of clearing anything or
+    // invoking offset 0. New's children come from the ShellNew templates.
     {
         cmo::MenuModel newCore =
             cmo::BuildCoreModel(cmo::Scope::Desktop, {}, cmo::Shape::Single);
@@ -664,21 +664,16 @@ int main() {
         newCached.items.push_back(newSubmenu);
 
         cmo::MenuModel newMerged = cmo::MergeCoreWithCached(newCore, newCached);
-        bool foundNewCommand = false;
-        int newSubmenuCount = 0;
+        int newCount = 0;
         for (const cmo::MenuItem& item : newMerged.items) {
-            if (cmo::NormalizeMenuLabel(item.label) == L"New") {
-                if (item.kind == cmo::ItemKind::Submenu) {
-                    ++newSubmenuCount;
-                } else {
-                    foundNewCommand = true;
-                    CHECK(item.canonicalVerb == L"new");
-                    CHECK((item.flags & cmo::kModelHasOffset) == 0);
-                }
+            if (cmo::NormalizeMenuLabel(item.label) != L"New") {
+                continue;
             }
+            ++newCount;
+            CHECK(item.kind == cmo::ItemKind::Submenu);
+            CHECK((item.flags & cmo::kModelHasOffset) == 0);
         }
-        CHECK(foundNewCommand);
-        CHECK(newSubmenuCount == 0);
+        CHECK(newCount == 1);
     }
 
     // Native items carry a valid offset; core items look up the native item's
@@ -1693,6 +1688,177 @@ int main() {
             SystemParametersInfoW(SPI_SETMENUSHOWDELAY, systemDelay, nullptr, 0);
             cmo::g_settings.submenuDelayMs = previousDelay;
         }
+    }
+
+    // New submenu: ShellNew templates, unique names, and creation.
+    {
+        // Registry fixtures: one NullFile and one Data template.
+        HKEY key = nullptr;
+        const bool nullKeyOk =
+            RegCreateKeyExW(HKEY_CURRENT_USER,
+                            L"Software\\Classes\\.cmonull\\ShellNew", 0, nullptr, 0,
+                            KEY_WRITE, nullptr, &key, nullptr) == ERROR_SUCCESS;
+        if (nullKeyOk) {
+            const wchar_t empty[] = L"";
+            RegSetValueExW(key, L"NullFile", 0, REG_SZ,
+                           reinterpret_cast<const BYTE*>(empty), sizeof(empty));
+            RegCloseKey(key);
+        }
+        const BYTE dataBytes[] = {0x41, 0x42, 0x43};
+        const bool dataKeyOk =
+            RegCreateKeyExW(HKEY_CURRENT_USER,
+                            L"Software\\Classes\\.cmodata\\ShellNew", 0, nullptr, 0,
+                            KEY_WRITE, nullptr, &key, nullptr) == ERROR_SUCCESS;
+        if (dataKeyOk) {
+            RegSetValueExW(key, L"Data", 0, REG_BINARY, dataBytes,
+                           sizeof(dataBytes));
+            RegCloseKey(key);
+        }
+
+        cmo::ResetNewTemplatesForTesting();
+        cmo::EnsureNewTemplates();
+        CHECK(cmo::g_newTemplates.size() >= 2);
+        CHECK(cmo::g_newTemplates[0].kind == cmo::NewTemplate::Kind::Folder);
+        CHECK(cmo::g_newTemplates[1].kind == cmo::NewTemplate::Kind::Shortcut);
+        bool foundNull = false;
+        bool foundData = false;
+        for (const cmo::NewTemplate& tmpl : cmo::g_newTemplates) {
+            if (tmpl.extension == L".cmonull" &&
+                tmpl.kind == cmo::NewTemplate::Kind::NullFile) {
+                foundNull = true;
+            }
+            if (tmpl.extension == L".cmodata" &&
+                tmpl.kind == cmo::NewTemplate::Kind::Data) {
+                foundData = true;
+            }
+        }
+        CHECK(foundNull);
+        CHECK(foundData);
+
+        // The core background model exposes New as a submenu with children.
+        cmo::MenuModel background =
+            cmo::BuildCoreModel(cmo::Scope::Background, {}, cmo::Shape::Single);
+        const cmo::MenuItem* newMenu = nullptr;
+        for (const cmo::MenuItem& item : background.items) {
+            if (item.label == L"New") {
+                newMenu = &item;
+            }
+        }
+        CHECK(newMenu != nullptr);
+        CHECK(newMenu && newMenu->kind == cmo::ItemKind::Submenu);
+        CHECK(newMenu && !newMenu->children.empty());
+        bool hasFolderChild = false;
+        for (const cmo::MenuItem& child : newMenu ? newMenu->children
+                                                  : std::vector<cmo::MenuItem>{}) {
+            if (child.label == L"Folder" &&
+                child.action == cmo::ActionKind::NewItem) {
+                hasFolderChild = true;
+            }
+        }
+        CHECK(hasFolderChild);
+
+        if (nullKeyOk) {
+            RegDeleteTreeW(HKEY_CURRENT_USER, L"Software\\Classes\\.cmonull");
+        }
+        if (dataKeyOk) {
+            RegDeleteTreeW(HKEY_CURRENT_USER, L"Software\\Classes\\.cmodata");
+        }
+    }
+
+    // New items: unique naming and creation in a temporary directory.
+    {
+        wchar_t tempPath[MAX_PATH] = {};
+        GetTempPathW(MAX_PATH, tempPath);
+        const std::wstring dir = std::wstring(tempPath) + L"cmo-new-test";
+        RemoveDirectoryW((dir + L"\\New folder").c_str());
+        RemoveDirectoryW(dir.c_str());
+        CHECK(CreateDirectoryW(dir.c_str(), nullptr) != 0);
+
+        // Unique names: the first "New folder" exists, so (2) is chosen.
+        CHECK(CreateDirectoryW((dir + L"\\New folder").c_str(), nullptr) != 0);
+        CHECK(cmo::MakeUniquePath(dir, L"New folder", L"") ==
+              dir + L"\\New folder (2)");
+        CHECK(cmo::MakeUniquePath(dir, L"New CmoThing", L".cmt") ==
+              dir + L"\\New CmoThing.cmt");
+
+        cmo::NewTemplate folderTmpl{};
+        folderTmpl.kind = cmo::NewTemplate::Kind::Folder;
+        folderTmpl.displayName = L"Folder";
+        std::wstring created;
+        CHECK(cmo::CreateNewItemInFolder(folderTmpl, dir, created));
+        CHECK(!created.empty());
+        const DWORD folderAttrs = GetFileAttributesW(created.c_str());
+        CHECK(folderAttrs != INVALID_FILE_ATTRIBUTES &&
+              (folderAttrs & FILE_ATTRIBUTE_DIRECTORY) != 0);
+
+        cmo::NewTemplate nullTmpl{};
+        nullTmpl.kind = cmo::NewTemplate::Kind::NullFile;
+        nullTmpl.displayName = L"CmoThing";
+        nullTmpl.extension = L".cmt";
+        created.clear();
+        CHECK(cmo::CreateNewItemInFolder(nullTmpl, dir, created));
+        CHECK(created == dir + L"\\New CmoThing.cmt");
+        HANDLE file = CreateFileW(created.c_str(), GENERIC_READ, FILE_SHARE_READ,
+                                  nullptr, OPEN_EXISTING, 0, nullptr);
+        CHECK(file != INVALID_HANDLE_VALUE);
+        if (file != INVALID_HANDLE_VALUE) {
+            DWORD size = GetFileSize(file, nullptr);
+            CHECK(size == 0);
+            CloseHandle(file);
+        }
+
+        cmo::NewTemplate dataTmpl{};
+        dataTmpl.kind = cmo::NewTemplate::Kind::Data;
+        dataTmpl.displayName = L"CmoData";
+        dataTmpl.extension = L".cmd2";
+        dataTmpl.data = {0x41, 0x42, 0x43};
+        created.clear();
+        CHECK(cmo::CreateNewItemInFolder(dataTmpl, dir, created));
+        file = CreateFileW(created.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+                           OPEN_EXISTING, 0, nullptr);
+        CHECK(file != INVALID_HANDLE_VALUE);
+        if (file != INVALID_HANDLE_VALUE) {
+            BYTE readBack[8] = {};
+            DWORD read = 0;
+            CHECK(ReadFile(file, readBack, sizeof(readBack), &read, nullptr) != 0);
+            CHECK(read == 3 && readBack[0] == 0x41 && readBack[2] == 0x43);
+            CloseHandle(file);
+        }
+
+        const std::wstring source = dir + L"\\cmo-source.bin";
+        HANDLE sourceFile = CreateFileW(source.c_str(), GENERIC_WRITE, 0, nullptr,
+                                        CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        CHECK(sourceFile != INVALID_HANDLE_VALUE);
+        if (sourceFile != INVALID_HANDLE_VALUE) {
+            DWORD written = 0;
+            WriteFile(sourceFile, "template", 8, &written, nullptr);
+            CloseHandle(sourceFile);
+        }
+        cmo::NewTemplate fileTmpl{};
+        fileTmpl.kind = cmo::NewTemplate::Kind::FileName;
+        fileTmpl.displayName = L"CmoFile";
+        fileTmpl.extension = L".cmf";
+        fileTmpl.fileName = source;
+        created.clear();
+        CHECK(cmo::CreateNewItemInFolder(fileTmpl, dir, created));
+        file = CreateFileW(created.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+                           OPEN_EXISTING, 0, nullptr);
+        CHECK(file != INVALID_HANDLE_VALUE);
+        if (file != INVALID_HANDLE_VALUE) {
+            char readBack[16] = {};
+            DWORD read = 0;
+            CHECK(ReadFile(file, readBack, sizeof(readBack), &read, nullptr) != 0);
+            CHECK(read == 8 && memcmp(readBack, "template", 8) == 0);
+            CloseHandle(file);
+        }
+
+        DeleteFileW(source.c_str());
+        DeleteFileW((dir + L"\\New CmoThing.cmt").c_str());
+        DeleteFileW((dir + L"\\New CmoData.cmd2").c_str());
+        DeleteFileW((dir + L"\\New CmoFile.cmf").c_str());
+        RemoveDirectoryW((dir + L"\\New folder (2)").c_str());
+        RemoveDirectoryW((dir + L"\\New folder").c_str());
+        RemoveDirectoryW(dir.c_str());
     }
 
     if (g_failures == 0) {

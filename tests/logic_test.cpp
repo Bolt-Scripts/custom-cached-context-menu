@@ -2433,7 +2433,7 @@ int main() {
         CHECK(panel.items[1].rect.top == 32);
         CHECK(panel.items[2].rect.top == 39);
         CHECK(panel.items[2].textColor == 0x66FFFFFFu);
-        CHECK(panel.items[0].textRect.left == 6 + 22);
+        CHECK(panel.items[0].textRect.left == 6 + 14 + 3 + 16 + 6);
         CHECK(panel.items[0].gutterRect.left == 6);
         CHECK(panel.children.size() == 1);
         CHECK(panel.children[0].items.size() == 1);
@@ -3071,6 +3071,35 @@ int main() {
             }
         }
         CHECK(anyAlpha);
+    }
+
+    // v2.1 marker column geometry and style resolution.
+    {
+        cmo::MarkerStyle style = cmo::MarkerStyle::None;
+        CHECK(cmo::ParseMarkerStyle(L"dot", style) && style == cmo::MarkerStyle::Dot);
+        CHECK(cmo::ParseMarkerStyle(L"BAR", style) && style == cmo::MarkerStyle::Bar);
+        CHECK(!cmo::ParseMarkerStyle(L"zigzag", style));
+
+        cmo::LayoutMetrics metrics{};
+        metrics.itemHeight = 28;
+        metrics.separatorHeight = 7;
+        metrics.verticalPadding = 0;
+        metrics.markerWidth = 14;
+        metrics.iconSize = 16;
+        metrics.padding = 6;
+        metrics.marker = cmo::MarkerStyle::Dot;
+        cmo::MenuItem item{};
+        item.id = 1;
+        item.kind = cmo::ItemKind::Command;
+        item.action = cmo::ActionKind::ShellVerb;
+        item.label = L"Open";
+        item.flags = cmo::kModelChecked;
+        std::vector<cmo::MenuItem> items = {item};
+        cmo::LayoutPanel panel = cmo::BuildLayoutPanel(items, metrics);
+        CHECK(panel.items[0].markerRect.right > panel.items[0].markerRect.left);
+        CHECK(panel.items[0].iconRect.left >= panel.items[0].markerRect.right);
+        CHECK(panel.items[0].textRect.left ==
+              panel.items[0].iconRect.left + metrics.iconSize + metrics.padding);
     }
 
     if (g_failures == 0) {

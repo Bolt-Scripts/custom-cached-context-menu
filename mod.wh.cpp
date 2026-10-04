@@ -2997,7 +2997,8 @@ LayoutMetrics ResolveLayoutMetrics(const Appearance& appearance, uint32_t dpi,
     metrics.itemHeight = MulDiv(appearance.itemHeight, scale, 96);
     metrics.iconSize = MulDiv(appearance.iconSize, scale, 96);
     metrics.padding = MulDiv(appearance.padding, scale, 96);
-    metrics.gutterWidth = metrics.iconSize + metrics.padding;
+    metrics.gutterWidth =
+        metrics.markerWidth + metrics.padding / 2 + metrics.iconSize;
     metrics.separatorHeight = MulDiv(7, scale, 96);
     metrics.submenuArrowWidth = MulDiv(16, scale, 96);
     metrics.cornerRadius = MulDiv(appearance.cornerRadius, scale, 96);
@@ -3068,8 +3069,10 @@ struct LayoutItemResources {
 struct LayoutItem {
     RECT rect = {};
     RECT gutterRect = {};
+    RECT markerRect = {};
     RECT iconRect = {};
     RECT textRect = {};
+    int markerStyle = -1;
     ItemKind kind = ItemKind::Command;
     std::wstring label;
     std::wstring iconRef;
@@ -3138,7 +3141,10 @@ LayoutPanel BuildLayoutPanel(const std::vector<MenuItem>& items,
                              const LayoutMetrics& metrics,
                              TextMeasureFn measure = nullptr) {
     LayoutPanel panel;
-    const int textLeft = metrics.padding + metrics.gutterWidth;
+    const int markerLeft = metrics.padding;
+    const int iconLeft =
+        metrics.padding + metrics.markerWidth + metrics.padding / 2;
+    const int textLeft = iconLeft + metrics.iconSize + metrics.padding;
     const int textGap = metrics.padding;
 
     int y = metrics.verticalPadding;
@@ -3192,10 +3198,14 @@ LayoutPanel BuildLayoutPanel(const std::vector<MenuItem>& items,
         layout.rect = {0, offset, panel.size.cx, offset + height};
 
         if (item.kind != ItemKind::Separator) {
-            layout.gutterRect = {metrics.padding, offset,
-                                 metrics.padding + metrics.gutterWidth, offset + height};
-            const int iconLeft =
-                metrics.padding + (metrics.gutterWidth - metrics.iconSize) / 2;
+            layout.markerRect = {markerLeft, offset,
+                                 markerLeft + metrics.markerWidth, offset + height};
+            layout.markerStyle =
+                item.markerOverride >= 0
+                    ? item.markerOverride
+                    : static_cast<int>(metrics.marker);
+            layout.gutterRect = {metrics.padding, offset, textLeft - metrics.padding,
+                                 offset + height};
             layout.iconRect = {iconLeft, offset + (height - metrics.iconSize) / 2,
                                iconLeft + metrics.iconSize,
                                offset + (height + metrics.iconSize) / 2};
@@ -4438,6 +4448,101 @@ void DrawCheckmark(ID2D1DeviceContext* dc, const RECT& gutterRect,
     geometry->Release();
 }
 
+void DrawMarkerDot(ID2D1DeviceContext* dc, const RECT& markerRect,
+                   uint32_t color) {
+    ID2D1SolidColorBrush* brush = nullptr;
+    if (FAILED(dc->CreateSolidColorBrush(ColorFromArgb(color), &brush)) || !brush) {
+        return;
+    }
+    const float cx = (static_cast<float>(markerRect.left) +
+                      static_cast<float>(markerRect.right)) / 2.0f;
+    const float cy = (static_cast<float>(markerRect.top) +
+                      static_cast<float>(markerRect.bottom)) / 2.0f;
+    const float radius = std::max(
+        2.0f, (static_cast<float>(markerRect.right) -
+               static_cast<float>(markerRect.left)) * 0.18f);
+    const D2D1_ELLIPSE ellipse = {D2D1_POINT_2F{cx, cy}, radius, radius};
+    dc->FillEllipse(&ellipse, brush);
+    brush->Release();
+}
+
+void DrawMarkerBar(ID2D1DeviceContext* dc, const RECT& markerRect,
+                   uint32_t color) {
+    ID2D1SolidColorBrush* brush = nullptr;
+    if (FAILED(dc->CreateSolidColorBrush(ColorFromArgb(color), &brush)) || !brush) {
+        return;
+    }
+    const float width = std::max(
+        2.0f, (static_cast<float>(markerRect.right) -
+               static_cast<float>(markerRect.left)) * 0.2f);
+    const float cx = (static_cast<float>(markerRect.left) +
+                      static_cast<float>(markerRect.right)) / 2.0f;
+    const float cy = (static_cast<float>(markerRect.top) +
+                      static_cast<float>(markerRect.bottom)) / 2.0f;
+    const float half =
+        (static_cast<float>(markerRect.bottom) -
+         static_cast<float>(markerRect.top)) * 0.25f;
+    const D2D1_ROUNDED_RECT bar = {{cx - width / 2, cy - half, cx + width / 2,
+                                     cy + half},
+                                    width / 2, width / 2};
+    dc->FillRoundedRectangle(&bar, brush);
+    brush->Release();
+}
+
+// Per-corner rounded panel geometry.
+ID2D1PathGeometry* BuildPanelGeometry(ID2D1Factory* factory, float width,
+                                      float height, const CornerRadii& radii) {
+    if (!factory) {
+        return nullptr;
+    }
+    ID2D1PathGeometry* geometry = nullptr;
+    if (FAILED(factory->CreatePathGeometry(&geometry)) || !geometry) {
+        return nullptr;
+    }
+    ID2D1GeometrySink* sink = nullptr;
+    if (FAILED(geometry->Open(&sink)) || !sink) {
+        geometry->Release();
+        return nullptr;
+    }
+    const float tl = static_cast<float>(radii.topLeft);
+    const float tr = static_cast<float>(radii.topRight);
+    const float br = static_cast<float>(radii.bottomRight);
+    const float bl = static_cast<float>(radii.bottomLeft);
+    sink->BeginFigure(D2D1_POINT_2F{tl, 0.0f}, D2D1_FIGURE_BEGIN_FILLED);
+    sink->AddLine(D2D1_POINT_2F{width - tr, 0.0f});
+    if (tr > 0) {
+        const D2D1_ARC_SEGMENT arc = {D2D1_POINT_2F{width, tr}, {tr, tr}, 0.0f,
+                                      D2D1_SWEEP_DIRECTION_CLOCKWISE,
+                                      D2D1_ARC_SIZE_SMALL};
+        sink->AddArc(&arc);
+    }
+    sink->AddLine(D2D1_POINT_2F{width, height - br});
+    if (br > 0) {
+        const D2D1_ARC_SEGMENT arc = {D2D1_POINT_2F{width - br, height}, {br, br},
+                                      0.0f, D2D1_SWEEP_DIRECTION_CLOCKWISE,
+                                      D2D1_ARC_SIZE_SMALL};
+        sink->AddArc(&arc);
+    }
+    sink->AddLine(D2D1_POINT_2F{bl, height});
+    if (bl > 0) {
+        const D2D1_ARC_SEGMENT arc = {D2D1_POINT_2F{0.0f, height - bl}, {bl, bl},
+                                      0.0f, D2D1_SWEEP_DIRECTION_CLOCKWISE,
+                                      D2D1_ARC_SIZE_SMALL};
+        sink->AddArc(&arc);
+    }
+    sink->AddLine(D2D1_POINT_2F{0.0f, tl});
+    if (tl > 0) {
+        const D2D1_ARC_SEGMENT arc = {D2D1_POINT_2F{tl, 0.0f}, {tl, tl}, 0.0f,
+                                      D2D1_SWEEP_DIRECTION_CLOCKWISE,
+                                      D2D1_ARC_SIZE_SMALL};
+        sink->AddArc(&arc);
+    }
+    sink->EndFigure(D2D1_FIGURE_END_CLOSED);
+    sink->Close();
+    sink->Release();
+    return geometry;
+}
+
 void DrawSubmenuArrow(ID2D1DeviceContext* dc, const LayoutItem& item,
                       int panelWidth, const LayoutMetrics& metrics,
                       uint32_t color) {
@@ -4527,7 +4632,16 @@ void DrawPanel(ID2D1DeviceContext* dc, const LayoutPanel& panel,
         const int maskRadius = static_cast<int>(
             static_cast<float>(metrics.cornerRadius) * scaleX);
         std::vector<uint8_t> mask;
-        BuildRoundedRectMask(backdrop->width, backdrop->height, maskRadius, mask);
+        if (metrics.hasCornerRadii) {
+            BuildRoundedRectMaskRadii(
+                backdrop->width, backdrop->height,
+                static_cast<int>(metrics.cornerRadii.topLeft * scaleX),
+                static_cast<int>(metrics.cornerRadii.topRight * scaleX),
+                static_cast<int>(metrics.cornerRadii.bottomRight * scaleX),
+                static_cast<int>(metrics.cornerRadii.bottomLeft * scaleX), mask);
+        } else {
+            BuildRoundedRectMask(backdrop->width, backdrop->height, maskRadius, mask);
+        }
         std::vector<uint32_t> pixels = backdrop->pixels;
         for (size_t i = 0; i < pixels.size() && i < mask.size(); ++i) {
             const uint32_t alpha = (((pixels[i] >> 24) & 0xFF) * mask[i]) / 255;
@@ -4553,12 +4667,24 @@ void DrawPanel(ID2D1DeviceContext* dc, const LayoutPanel& panel,
         }
     }
 
+    ID2D1PathGeometry* panelGeometry = nullptr;
+    if (metrics.hasCornerRadii) {
+        panelGeometry = BuildPanelGeometry(g_renderDevice.D2DFactory(),
+                                           static_cast<float>(panel.size.cx),
+                                           static_cast<float>(panel.size.cy),
+                                           metrics.cornerRadii);
+    }
+
     if ((appearance.background >> 24) != 0) {
         ID2D1SolidColorBrush* brush = nullptr;
         if (SUCCEEDED(dc->CreateSolidColorBrush(ColorFromArgb(appearance.background),
                                                 &brush)) &&
             brush) {
-            dc->FillRoundedRectangle(&rounded, brush);
+            if (panelGeometry) {
+                dc->FillGeometry(panelGeometry, brush);
+            } else {
+                dc->FillRoundedRectangle(&rounded, brush);
+            }
             brush->Release();
         }
     }
@@ -4618,8 +4744,17 @@ void DrawPanel(ID2D1DeviceContext* dc, const LayoutPanel& panel,
             }
         }
 
-        if ((item.flags & kModelChecked) != 0) {
-            DrawCheckmark(dc, item.gutterRect, metrics.textColor);
+        if ((item.flags & kModelChecked) != 0 &&
+            item.markerStyle != static_cast<int>(MarkerStyle::None)) {
+            const MarkerStyle markerStyle =
+                static_cast<MarkerStyle>(item.markerStyle);
+            if (markerStyle == MarkerStyle::Dot) {
+                DrawMarkerDot(dc, item.markerRect, metrics.markerColor);
+            } else if (markerStyle == MarkerStyle::Bar) {
+                DrawMarkerBar(dc, item.markerRect, metrics.markerColor);
+            } else {
+                DrawCheckmark(dc, item.markerRect, metrics.markerColor);
+            }
         }
 
         if (item.resources && item.resources->icon) {
@@ -4655,10 +4790,18 @@ void DrawPanel(ID2D1DeviceContext* dc, const LayoutPanel& panel,
         if (SUCCEEDED(dc->CreateSolidColorBrush(ColorFromArgb(appearance.border),
                                                 &brush)) &&
             brush) {
-            dc->DrawRoundedRectangle(&rounded, brush,
-                                     static_cast<float>(metrics.borderWidth));
+            if (panelGeometry) {
+                dc->DrawGeometry(panelGeometry, brush,
+                                 static_cast<float>(metrics.borderWidth));
+            } else {
+                dc->DrawRoundedRectangle(&rounded, brush,
+                                         static_cast<float>(metrics.borderWidth));
+            }
             brush->Release();
         }
+    }
+    if (panelGeometry) {
+        panelGeometry->Release();
     }
 }
 

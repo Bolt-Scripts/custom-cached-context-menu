@@ -2,7 +2,7 @@
 // @id              context-menu-overhaul
 // @name            Context Menu Overhaul
 // @description     Replaces the Explorer context menu with an instantly-opening cached menu, then discovers and caches shell extension items asynchronously.
-// @version         0.3.7
+// @version         0.3.8
 // @include         explorer.exe
 // @architecture    x86-64
 // @compilerOptions -lole32 -lshlwapi -luuid -lcomctl32 -ladvapi32 -lgdi32 -luxtheme -lversion
@@ -552,7 +552,7 @@ MenuModel MergeCoreWithCached(const MenuModel& core, const MenuModel& cached) {
 namespace cmo {
 
 constexpr uint32_t kCacheMagic = 0x434F4D4F;  // "COMO"
-constexpr uint32_t kCacheVersion = 13;
+constexpr uint32_t kCacheVersion = 14;
 constexpr uint32_t kMaxCacheEntries = 1024;
 constexpr uint32_t kMaxModelItems = 4096;
 constexpr uint32_t kMaxMenuDepth = 16;
@@ -1428,6 +1428,50 @@ uint32_t MapMenuState(UINT state) {
     return flags;
 }
 
+// Bitmaps attached with SetMenuItemBitmaps cannot be read back from the
+// menu, so record them while the shell populates it. Thread-local because
+// population happens on the thread that owns the menu.
+thread_local std::unordered_map<uintptr_t, std::unordered_map<UINT, HBITMAP>>
+    g_recordedItemBitmaps;
+
+void ClearRecordedItemBitmaps() {
+    g_recordedItemBitmaps.clear();
+}
+
+HBITMAP LookupRecordedItemBitmap(HMENU menu, UINT id) {
+    auto menuIt = g_recordedItemBitmaps.find(reinterpret_cast<uintptr_t>(menu));
+    if (menuIt == g_recordedItemBitmaps.end()) {
+        return nullptr;
+    }
+    auto itemIt = menuIt->second.find(id);
+    return itemIt == menuIt->second.end() ? nullptr : itemIt->second;
+}
+
+using SetMenuItemBitmaps_t = decltype(&SetMenuItemBitmaps);
+inline SetMenuItemBitmaps_t SetMenuItemBitmaps_Original = nullptr;
+
+BOOL WINAPI SetMenuItemBitmaps_Hook(HMENU hMenu, UINT uPosition, UINT uFlags,
+                                    HBITMAP hBitmapUnchecked, HBITMAP hBitmapChecked) {
+    if (hMenu && (hBitmapUnchecked || hBitmapChecked)) {
+        UINT id = uPosition;
+        if ((uFlags & MF_BYPOSITION) != 0) {
+            id = GetMenuItemID(hMenu, uPosition);
+        }
+        if (id != static_cast<UINT>(-1)) {
+            // Bound the recording; menus are normally far smaller than this.
+            if (g_recordedItemBitmaps.size() > 64) {
+                g_recordedItemBitmaps.clear();
+            }
+            g_recordedItemBitmaps[reinterpret_cast<uintptr_t>(hMenu)][id] =
+                hBitmapUnchecked ? hBitmapUnchecked : hBitmapChecked;
+        }
+    }
+    return SetMenuItemBitmaps_Original
+               ? SetMenuItemBitmaps_Original(hMenu, uPosition, uFlags,
+                                             hBitmapUnchecked, hBitmapChecked)
+               : FALSE;
+}
+
 // HBMMENU_* sentinels are -1 or 1..13; real GDI bitmap handles are arbitrary
 // 32-bit values (sign-extended on 64-bit Windows) and must be captured.
 bool IsSentinelMenuBitmap(HBITMAP bitmap) {
@@ -1872,6 +1916,11 @@ void BuildItemsFromHMenu(HMENU menu, UINT idCmdFirst, IContextMenu* context,
         if (info.hbmpItem && !IsSentinelMenuBitmap(info.hbmpItem)) {
             CaptureBitmapPixels(info.hbmpItem, item.iconPixels);
         }
+        if (item.iconPixels.empty()) {
+            if (HBITMAP recorded = LookupRecordedItemBitmap(menu, info.wID)) {
+                CaptureBitmapPixels(recorded, item.iconPixels);
+            }
+        }
 
         if (info.hSubMenu) {
             item.kind = ItemKind::Submenu;
@@ -2147,6 +2196,7 @@ void DiscoverIntoCache(PendingCapture& capture, const ContextSignature& signatur
     MenuModel model = BuildModelFromHMenu(capture.populatedMenu, capture.idCmdFirst,
                                           signature, capture.obj);
     MergePreInitIcons(model.items, preInit.items);
+    ClearRecordedItemBitmaps();
 
     ApplyRegistryIcons(model.items, signature);
     CaptureOwnerDrawIcons(capture, model.items);
@@ -2822,6 +2872,9 @@ bool EnsureContextPopulated(PendingCapture& capture) {
     if (!menu) {
         return false;
     }
+    // Extensions may attach bitmaps with SetMenuItemBitmaps during population;
+    // start a fresh recording so lookups match this menu.
+    ClearRecordedItemBitmaps();
     ReplayInto(capture.obj, menu, capture.indexMenu, capture.idCmdFirst, capture.idCmdLast,
                capture.flags);
 
@@ -4016,8 +4069,10 @@ private:
         const std::vector<std::wstring> modulesBefore = SnapshotLoadedModules();
         HMENU offscreen = CreatePopupMenu();
         if (offscreen) {
+            ClearRecordedItemBitmaps();
             ReplayInto(menu, offscreen, 0, 1, 0x7FFF, CMF_NORMAL);
             MenuModel model = BuildModelFromHMenu(offscreen, 1, signature, menu);
+            ClearRecordedItemBitmaps();
             DestroyMenu(offscreen);
             if (!model.items.empty()) {
                 ApplyRegistryIcons(model.items, signature);
@@ -4565,6 +4620,14 @@ BOOL Wh_ModInit() {
                             (void**)&cmo::TrackPopupMenu_Original)) {
         Wh_Log(L"Failed to hook TrackPopupMenu");
         return FALSE;
+    }
+
+    // Record bitmaps extensions attach with SetMenuItemBitmaps; the API has
+    // no getter, and this is how the native menu gets their icons.
+    if (!Wh_SetFunctionHook((void*)SetMenuItemBitmaps,
+                            (void*)cmo::SetMenuItemBitmaps_Hook,
+                            (void**)&cmo::SetMenuItemBitmaps_Original)) {
+        Wh_Log(L"Failed to hook SetMenuItemBitmaps");
     }
 
     cmo::LoadSettings();

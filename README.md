@@ -50,12 +50,13 @@ untouched native menu, including extended verbs.
   replacement) is always used.
 - Icons: core actions (Cut/Copy/Rename/Delete/Properties/Open with/Paste/
   Refresh) use built-in icon-font glyphs; extension entries use the bitmap the
-  shell provides, an icon captured by asking the extension to draw the item
-  (owner-draw), the verb's registry `Icon` value (matched by verb or display
-  label), or — as a last resort — icon 0 from a handler DLL matched by key
-  name, file name, or version-info company/product name. Everything is
-  composited over the themed menu background; checked items keep the
-  checkmark gutter.
+  shell provides, a bitmap the extension attaches with `SetMenuItemBitmaps`
+  (recorded as it is set — the API has no getter), an icon captured by asking
+  the extension to draw the item (owner-draw), the verb's registry `Icon`
+  value (matched by verb or display label), or — as a last resort — icon 0
+  from a handler DLL matched by key name, file name, or version-info
+  company/product name. Everything is composited over the themed menu
+  background; checked items keep the checkmark gutter.
 - Warm-up models are provisional: they are shown instantly but never overwrite
   a live model, and are refreshed from the real context on first use.
 - On the first open of an uncached context, the menu shows the core commands

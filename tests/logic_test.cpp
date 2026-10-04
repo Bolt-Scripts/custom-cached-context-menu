@@ -922,6 +922,55 @@ int main() {
         ReleaseDC(nullptr, screen);
     }
 
+    // Icons: bitmaps attached with SetMenuItemBitmaps (no read-back API) are
+    // recorded while the menu is populated and captured during discovery.
+    {
+        BITMAPINFO recordInfo = {};
+        recordInfo.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        recordInfo.bmiHeader.biWidth = 16;
+        recordInfo.bmiHeader.biHeight = -16;
+        recordInfo.bmiHeader.biPlanes = 1;
+        recordInfo.bmiHeader.biBitCount = 32;
+        recordInfo.bmiHeader.biCompression = BI_RGB;
+
+        HDC screen = GetDC(nullptr);
+        void* bits = nullptr;
+        HBITMAP recorded =
+            CreateDIBSection(screen, &recordInfo, DIB_RGB_COLORS, &bits, nullptr, 0);
+        if (recorded && bits) {
+            uint8_t* pixelBytes = static_cast<uint8_t*>(bits);
+            for (int i = 0; i < 16 * 16; ++i) {
+                pixelBytes[i * 4] = 0x44;
+                pixelBytes[i * 4 + 1] = 0x55;
+                pixelBytes[i * 4 + 2] = 0x66;
+                pixelBytes[i * 4 + 3] = 0xFF;
+            }
+
+            cmo::ClearRecordedItemBitmaps();
+            cmo::SetMenuItemBitmaps_Original = &SetMenuItemBitmaps;
+            HMENU recordMenu = CreatePopupMenu();
+            AppendMenuW(recordMenu, MF_STRING, 21, L"Recorded");
+            cmo::SetMenuItemBitmaps_Hook(recordMenu, 0, MF_BYPOSITION, recorded,
+                                         nullptr);
+
+            cmo::MenuModel recordedModel = cmo::BuildModelFromHMenu(
+                recordMenu, 1,
+                cmo::ContextSignature{cmo::Scope::Files, L".x", cmo::Shape::Single,
+                                      cmo::Variant::Normal},
+                nullptr);
+            CHECK(!recordedModel.items.empty());
+            CHECK(recordedModel.items.front().iconPixels.size() == 16 * 16 * 4);
+            if (recordedModel.items.front().iconPixels.size() == 16 * 16 * 4) {
+                CHECK(recordedModel.items.front().iconPixels[0] == 0x44);
+                CHECK(recordedModel.items.front().iconPixels[3] == 0xFF);
+            }
+            cmo::ClearRecordedItemBitmaps();
+            DestroyMenu(recordMenu);
+            DeleteObject(recorded);
+        }
+        ReleaseDC(nullptr, screen);
+    }
+
     // Icons: core items keep their own glyph icons; captured native bitmaps
     // belong to extension items only.
     {

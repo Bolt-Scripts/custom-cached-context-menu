@@ -2,7 +2,7 @@
 // @id              context-menu-overhaul
 // @name            Context Menu Overhaul
 // @description     Replaces the Explorer context menu with an instantly-opening cached menu, then discovers and caches shell extension items asynchronously.
-// @version         0.3.21
+// @version         0.3.22
 // @include         explorer.exe
 // @architecture    x86-64
 // @compilerOptions -lole32 -lshlwapi -luuid -lcomctl32 -ladvapi32 -lgdi32 -luxtheme -lversion
@@ -276,6 +276,9 @@ enum class ActionKind : uint8_t {
     Fallback,
     Submenu,
     NewItem,
+    SortBy,
+    SortDirection,
+    GroupBy,
 };
 
 // Documented view operations, dispatched through IFolderView2 / IShellView.
@@ -318,6 +321,9 @@ struct MenuItem {
     std::wstring targetPath;
     // Index into the ShellNew template list for ActionKind::NewItem.
     uint32_t newIndex = 0;
+    // Sort/group field index into kShellPropertyKeys, and sort direction.
+    uint32_t sortIndex = 0;
+    bool sortAscending = true;
     // 16x16 BGRA icon captured from the shell's own menu bitmap.
     std::vector<uint8_t> iconPixels;
     std::vector<MenuItem> children;
@@ -1069,6 +1075,22 @@ void DumpSuspiciousItems(const std::vector<MenuItem>& items, int depth) {
     }
 }
 
+// Shell property keys used by the Sort by and Group by submenus (all in the
+// shell's System property set, defined here so no SDK propkey.h is needed).
+const PROPERTYKEY kShellPropertyKeys[] = {
+    {{0xB725F130, 0x47EF, 0x101A, {0xA5, 0xF1, 0x02, 0x60, 0x8C, 0x9E, 0xEB, 0xAC}},
+     10},  // Name
+    {{0xB725F130, 0x47EF, 0x101A, {0xA5, 0xF1, 0x02, 0x60, 0x8C, 0x9E, 0xEB, 0xAC}},
+     14},  // Date modified
+    {{0xB725F130, 0x47EF, 0x101A, {0xA5, 0xF1, 0x02, 0x60, 0x8C, 0x9E, 0xEB, 0xAC}},
+     4},  // Type
+    {{0xB725F130, 0x47EF, 0x101A, {0xA5, 0xF1, 0x02, 0x60, 0x8C, 0x9E, 0xEB, 0xAC}},
+     12},  // Size
+};
+const wchar_t* const kShellPropertyLabels[] = {L"Name", L"Date modified", L"Type",
+                                               L"Size"};
+constexpr uint32_t kShellPropertyKeyCount = ARRAYSIZE(kShellPropertyKeys);
+
 // Core model for a context. The common commands come first, cached extension
 // items are merged in later, and the native fallback stays last.
 MenuModel BuildCoreModel(Scope scope, const std::vector<std::wstring>& paths, Shape shape) {
@@ -1159,7 +1181,46 @@ MenuModel BuildCoreModel(Scope scope, const std::vector<std::wstring>& paths, Sh
                                                    ViewAction::ViewDetails, kModelNone,
                                                    L"@glyph:E9D5"));
 
-        addCommand(L"Sort by", L"sortby");
+        MenuItem& sortMenu = addSubmenu(L"Sort by");
+        sortMenu.iconRef = L"@glyph:E8CB";
+        for (uint32_t i = 0; i < kShellPropertyKeyCount; ++i) {
+            MenuItem sortItem{};
+            sortItem.id = nextId++;
+            sortItem.kind = ItemKind::Command;
+            sortItem.label = kShellPropertyLabels[i];
+            sortItem.action = ActionKind::SortBy;
+            sortItem.sortIndex = i;
+            sortItem.sortAscending = true;
+            sortMenu.children.push_back(std::move(sortItem));
+        }
+        {
+            MenuItem separator{};
+            separator.id = nextId++;
+            separator.kind = ItemKind::Separator;
+            sortMenu.children.push_back(std::move(separator));
+        }
+        for (bool ascending : {true, false}) {
+            MenuItem directionItem{};
+            directionItem.id = nextId++;
+            directionItem.kind = ItemKind::Command;
+            directionItem.label = ascending ? L"Ascending" : L"Descending";
+            directionItem.action = ActionKind::SortDirection;
+            directionItem.sortAscending = ascending;
+            sortMenu.children.push_back(std::move(directionItem));
+        }
+
+        MenuItem& groupMenu = addSubmenu(L"Group by");
+        groupMenu.iconRef = L"@glyph:E902";
+        for (uint32_t i = 0; i < kShellPropertyKeyCount; ++i) {
+            MenuItem groupItem{};
+            groupItem.id = nextId++;
+            groupItem.kind = ItemKind::Command;
+            groupItem.label = kShellPropertyLabels[i];
+            groupItem.action = ActionKind::GroupBy;
+            groupItem.sortIndex = i;
+            groupMenu.children.push_back(std::move(groupItem));
+        }
+
         addViewAction(L"Refresh", L"refresh", ViewAction::Refresh, kModelNone,
                       L"@glyph:E72C");
         addSeparator();
@@ -3639,6 +3700,69 @@ bool CreateShortcutForPaths(const std::vector<std::wstring>& paths) {
     return ok;
 }
 
+// The active view as IFolderView2, used for sorting and grouping.
+IFolderView2* GetFolderView2(HWND owner, ShellViewKind kind) {
+    IShellView* view = GetActiveShellView(owner, kind);
+    if (!view) {
+        return nullptr;
+    }
+    IFolderView2* folderView = nullptr;
+    view->QueryInterface(IID_IFolderView2, (void**)&folderView);
+    view->Release();
+    return folderView;
+}
+
+bool InvokeSortBy(const MenuItem& item, const InvocationContext& ctx) {
+    if (item.sortIndex >= kShellPropertyKeyCount) {
+        return false;
+    }
+    IFolderView2* view = GetFolderView2(ctx.owner, ctx.kind);
+    if (!view) {
+        return false;
+    }
+    SORTCOLUMN column = {};
+    column.propkey = kShellPropertyKeys[item.sortIndex];
+    column.direction = item.sortAscending ? 1 : -1;
+    const bool ok = SUCCEEDED(view->SetSortColumns(&column, 1));
+    view->Release();
+    return ok;
+}
+
+bool InvokeSortDirection(const MenuItem& item, const InvocationContext& ctx) {
+    IFolderView2* view = GetFolderView2(ctx.owner, ctx.kind);
+    if (!view) {
+        return false;
+    }
+
+    SORTCOLUMN column = {};
+    column.propkey = kShellPropertyKeys[0];  // default to Name
+    int count = 0;
+    if (SUCCEEDED(view->GetSortColumnCount(&count)) && count > 0) {
+        SORTCOLUMN current = {};
+        if (SUCCEEDED(view->GetSortColumns(&current, 1))) {
+            column.propkey = current.propkey;
+        }
+    }
+    column.direction = item.sortAscending ? 1 : -1;
+    const bool ok = SUCCEEDED(view->SetSortColumns(&column, 1));
+    view->Release();
+    return ok;
+}
+
+bool InvokeGroupBy(const MenuItem& item, const InvocationContext& ctx) {
+    if (item.sortIndex >= kShellPropertyKeyCount) {
+        return false;
+    }
+    IFolderView2* view = GetFolderView2(ctx.owner, ctx.kind);
+    if (!view) {
+        return false;
+    }
+    const bool ok =
+        SUCCEEDED(view->SetGroupBy(kShellPropertyKeys[item.sortIndex], TRUE));
+    view->Release();
+    return ok;
+}
+
 // Dispatches a documented view operation through IFolderView2 / IShellView.
 InvokeResult InvokeViewAction(const MenuItem& item, const InvocationContext& ctx) {
     IShellView* view = GetActiveShellView(ctx.owner, ctx.kind);
@@ -3920,6 +4044,15 @@ InvokeResult InvokeItem(const MenuItem& item, const InvocationContext& ctx,
         case ActionKind::NewItem:
             return CreateNewItemFromTemplate(item, ctx) ? InvokeResult::Handled
                                                         : InvokeResult::Failed;
+        case ActionKind::SortBy:
+            return InvokeSortBy(item, ctx) ? InvokeResult::Handled
+                                           : InvokeResult::Failed;
+        case ActionKind::SortDirection:
+            return InvokeSortDirection(item, ctx) ? InvokeResult::Handled
+                                                  : InvokeResult::Failed;
+        case ActionKind::GroupBy:
+            return InvokeGroupBy(item, ctx) ? InvokeResult::Handled
+                                            : InvokeResult::Failed;
         case ActionKind::ViewAction:
             return InvokeViewAction(item, ctx);
         case ActionKind::ShellVerb:
@@ -4684,10 +4817,13 @@ public:
         }
     }
 
-    // Runs discovery after the menu has been painted and is interactive.
+    // Runs discovery after the menu has been painted and is interactive. The
+    // delay must outlast menu construction (icon resolution included):
+    // population blocks the UI thread, and starting it before the first paint
+    // leaves the menu blank until the reopen.
     void StartDiscoveryTimer(const ContextSignature& signature) {
         discoverySignature_ = signature;
-        SetTimer(owner_, kDiscoveryTimerId, 150, nullptr);
+        SetTimer(owner_, kDiscoveryTimerId, 600, nullptr);
         timerSet_ = true;
     }
 

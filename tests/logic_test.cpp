@@ -526,6 +526,50 @@ int main() {
     CHECK(hasPasteItem);
     CHECK(hasNew);
 
+    // Sort by / Group by are real submenus backed by documented IFolderView2
+    // operations.
+    {
+        const cmo::MenuItem* sortBy = nullptr;
+        const cmo::MenuItem* groupBy = nullptr;
+        for (const cmo::MenuItem& item : backgroundModel.items) {
+            if (item.label == L"Sort by") sortBy = &item;
+            if (item.label == L"Group by") groupBy = &item;
+        }
+        CHECK(sortBy && sortBy->kind == cmo::ItemKind::Submenu);
+        CHECK(sortBy && sortBy->iconRef == L"@glyph:E8CB");
+        CHECK(sortBy && sortBy->children.size() == 7);
+        CHECK(groupBy && groupBy->kind == cmo::ItemKind::Submenu);
+        CHECK(groupBy && groupBy->iconRef == L"@glyph:E902");
+        CHECK(groupBy && groupBy->children.size() == 4);
+        bool hasSortName = false;
+        bool hasSortDescending = false;
+        bool hasGroupType = false;
+        if (sortBy) {
+            for (const cmo::MenuItem& child : sortBy->children) {
+                if (child.label == L"Name" &&
+                    child.action == cmo::ActionKind::SortBy && child.sortIndex == 0) {
+                    hasSortName = true;
+                }
+                if (child.label == L"Descending" &&
+                    child.action == cmo::ActionKind::SortDirection &&
+                    !child.sortAscending) {
+                    hasSortDescending = true;
+                }
+            }
+        }
+        if (groupBy) {
+            for (const cmo::MenuItem& child : groupBy->children) {
+                if (child.label == L"Type" &&
+                    child.action == cmo::ActionKind::GroupBy && child.sortIndex == 2) {
+                    hasGroupType = true;
+                }
+            }
+        }
+        CHECK(hasSortName);
+        CHECK(hasSortDescending);
+        CHECK(hasGroupType);
+    }
+
     cmo::MenuModel desktopModel =
         cmo::BuildCoreModel(cmo::Scope::Desktop, {}, cmo::Shape::Single);
     bool hasPersonalize = false;

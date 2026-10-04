@@ -80,8 +80,10 @@ untouched native menu, including extended verbs.
   **Debug logging**.
 - Core menu labels are English; cached extension labels come from the shell and
   are localized.
-- "Sort by" / "Paste shortcut" fall back to the untouched native menu on
-  builds where the shell object rejects those verbs. New is a real submenu
+- "Paste shortcut" falls back to the untouched native menu on builds where
+  the shell object rejects that verb. Sort by and Group by are real submenus
+  implemented with the documented `IFolderView2` sort/group APIs. New is a
+  real submenu
   built from the registry's ShellNew templates (Folder, Shortcut, and file
   types with the shell's own type icons), created directly without involving
   the shell's own New handler. The standard Windows types (Text Document,
@@ -94,6 +96,8 @@ untouched native menu, including extended verbs.
   `[suspicious dN] ...` so it can be reported.
 - Rename, Refresh, and the View modes use the documented `IFolderView2` /
   `IShellView` APIs; the old `FCIDM_*` view command IDs are not used.
+- Undo is not implemented: the shell does not expose its per-view undo stack
+  through documented interfaces.
 
 Menu models persist to disk (`menu-cache.bin` in the mod's storage directory)
 and are pre-warmed at Explorer start, so extension items survive restarts.

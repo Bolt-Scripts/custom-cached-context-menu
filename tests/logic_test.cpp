@@ -2141,6 +2141,47 @@ int main() {
         CHECK(!unknownErrors.empty() && unknownErrors[0].line == 2);
     }
 
+    // v2 predicates.
+    {
+        CHECK(cmo::GlobMatches(L"*Malwarebytes*", L"Scan with Malwarebytes"));
+        CHECK(cmo::GlobMatches(L"Open with", L"Open with"));
+        CHECK(!cmo::GlobMatches(L"Share", L"Sha&re"));  // glob is raw; label
+                                                        // normalization is the
+                                                        // predicate's job
+
+        cmo::MenuItem item{};
+        item.label = L"Add to &Favorites";
+        item.canonicalVerb = L"pintohomefile";
+        item.flags = cmo::kModelThirdParty;
+        cmo::ItemContext ctx{};
+        ctx.scope = cmo::Scope::Files;
+        ctx.shape = cmo::Shape::Single;
+        ctx.paths = {L"a.txt"};
+
+        cmo::PredicateExpr expr;
+        std::wstring error;
+        CHECK(cmo::ParsePredicateExpr(L"label:\"Add to Favorites\"", expr, error));
+        CHECK(cmo::PredicateExprMatches(expr, item, ctx));
+        CHECK(cmo::ParsePredicateExpr(L"ext:.txt", expr, error));
+        CHECK(cmo::PredicateExprMatches(expr, item, ctx));
+        CHECK(cmo::ParsePredicateExpr(L"ext:.png", expr, error));
+        CHECK(!cmo::PredicateExprMatches(expr, item, ctx));
+        CHECK(cmo::ParsePredicateExpr(L"thirdParty", expr, error));
+        CHECK(cmo::PredicateExprMatches(expr, item, ctx));
+        CHECK(cmo::ParsePredicateExpr(L"scope:files and multi", expr, error));
+        CHECK(!cmo::PredicateExprMatches(expr, item, ctx));
+        CHECK(cmo::ParsePredicateExpr(L"scope:files and verb:pintohomefile", expr, error));
+        CHECK(cmo::PredicateExprMatches(expr, item, ctx));
+        CHECK(!cmo::ParsePredicateExpr(L"bogus:1", expr, error));
+        CHECK(!error.empty());
+
+        // Label predicates normalize & accelerators and trailing ellipses.
+        cmo::MenuItem openWith{};
+        openWith.label = L"Open wit&h...";
+        CHECK(cmo::ParsePredicateExpr(L"label:\"Open with\"", expr, error));
+        CHECK(cmo::PredicateExprMatches(expr, openWith, ctx));
+    }
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

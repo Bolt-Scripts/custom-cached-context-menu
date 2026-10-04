@@ -1415,6 +1415,265 @@ bool ParseRulesConfig(const std::wstring& text, RulesConfig& out,
     return true;
 }
 
+// ===========================================================================
+// [CMO:RulesEngine] v2 predicates and rule matching.
+// ===========================================================================
+
+enum class PredicateField : uint8_t { Label, Verb, Ext, Scope, Multi, ThirdParty };
+
+struct Predicate {
+    PredicateField field = PredicateField::Label;
+    std::vector<std::wstring> values;
+};
+
+struct PredicateExpr {
+    std::vector<Predicate> all;
+};
+
+struct ItemContext {
+    Scope scope = Scope::Files;
+    Shape shape = Shape::Single;
+    std::vector<std::wstring> paths;
+};
+
+bool GlobMatches(const std::wstring& pattern, const std::wstring& text) {
+    size_t p = 0;
+    size_t t = 0;
+    size_t star = std::wstring::npos;
+    size_t mark = 0;
+    while (t < text.size()) {
+        if (p < pattern.size() && pattern[p] == L'*') {
+            star = p++;
+            mark = t;
+        } else if (p < pattern.size() &&
+                   towlower(pattern[p]) == towlower(text[t])) {
+            ++p;
+            ++t;
+        } else if (star != std::wstring::npos) {
+            p = star + 1;
+            t = ++mark;
+        } else {
+            return false;
+        }
+    }
+    while (p < pattern.size() && pattern[p] == L'*') {
+        ++p;
+    }
+    return p == pattern.size();
+}
+
+bool ScopeFromName(const std::wstring& name, Scope& scope) {
+    const std::wstring lower = ToLowerCopy(name);
+    if (lower == L"files") {
+        scope = Scope::Files;
+        return true;
+    }
+    if (lower == L"folders") {
+        scope = Scope::Folders;
+        return true;
+    }
+    if (lower == L"background") {
+        scope = Scope::Background;
+        return true;
+    }
+    if (lower == L"desktop") {
+        scope = Scope::Desktop;
+        return true;
+    }
+    if (lower == L"drive") {
+        scope = Scope::Drive;
+        return true;
+    }
+    return false;
+}
+
+bool ItemIsThirdParty(const MenuItem& item) {
+    return (item.flags & kModelThirdParty) != 0;
+}
+
+bool PredicateMatches(const Predicate& pred, const MenuItem& item,
+                      const ItemContext& ctx) {
+    switch (pred.field) {
+        case PredicateField::Label: {
+            const std::wstring label = NormalizeMenuLabel(item.label);
+            for (const std::wstring& value : pred.values) {
+                if (GlobMatches(value, label)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        case PredicateField::Verb:
+            for (const std::wstring& value : pred.values) {
+                if (_wcsicmp(value.c_str(), item.canonicalVerb.c_str()) == 0) {
+                    return true;
+                }
+            }
+            return false;
+        case PredicateField::Ext:
+            for (const std::wstring& path : ctx.paths) {
+                const size_t dot = path.find_last_of(L'.');
+                const size_t slash = path.find_last_of(L"\\/");
+                if (dot == std::wstring::npos ||
+                    (slash != std::wstring::npos && dot < slash)) {
+                    continue;
+                }
+                const std::wstring ext = path.substr(dot);
+                for (const std::wstring& value : pred.values) {
+                    if (_wcsicmp(ext.c_str(), value.c_str()) == 0) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        case PredicateField::Scope:
+            for (const std::wstring& value : pred.values) {
+                Scope scope = Scope::Other;
+                if (ScopeFromName(value, scope) && scope == ctx.scope) {
+                    return true;
+                }
+            }
+            return false;
+        case PredicateField::Multi:
+            return ctx.shape == Shape::Multi;
+        case PredicateField::ThirdParty:
+            return ItemIsThirdParty(item);
+    }
+    return false;
+}
+
+bool PredicateExprMatches(const PredicateExpr& expr, const MenuItem& item,
+                          const ItemContext& ctx) {
+    if (expr.all.empty()) {
+        return false;
+    }
+    for (const Predicate& pred : expr.all) {
+        if (!PredicateMatches(pred, item, ctx)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+std::vector<std::wstring> SplitPredicateAnd(const std::wstring& text) {
+    std::vector<std::wstring> parts;
+    std::wstring current;
+    bool inQuotes = false;
+    for (size_t i = 0; i < text.size(); ++i) {
+        const wchar_t c = text[i];
+        if (c == L'"') {
+            inQuotes = !inQuotes;
+        }
+        if (!inQuotes && i > 0 && i + 3 < text.size() &&
+            iswspace(text[i - 1]) &&
+            (c == L'a' || c == L'A') &&
+            (text[i + 1] == L'n' || text[i + 1] == L'N') &&
+            (text[i + 2] == L'd' || text[i + 2] == L'D') &&
+            iswspace(text[i + 3])) {
+            parts.push_back(current);
+            current.clear();
+            i += 2;
+            continue;
+        }
+        current += c;
+    }
+    parts.push_back(current);
+    return parts;
+}
+
+bool ParsePredicateExpr(const std::wstring& text, PredicateExpr& out,
+                        std::wstring& error) {
+    PredicateExpr expr;
+    for (const std::wstring& rawPart : SplitPredicateAnd(text)) {
+        const std::wstring part = TrimWhitespace(rawPart);
+        if (part.empty()) {
+            error = L"empty predicate";
+            return false;
+        }
+
+        Predicate pred;
+        const size_t colon = part.find(L':');
+        if (colon == std::wstring::npos) {
+            const std::wstring name = ToLowerCopy(part);
+            if (name == L"multi") {
+                pred.field = PredicateField::Multi;
+            } else if (name == L"thirdparty") {
+                pred.field = PredicateField::ThirdParty;
+            } else {
+                error = L"unknown predicate '" + part + L"'";
+                return false;
+            }
+            expr.all.push_back(std::move(pred));
+            continue;
+        }
+
+        const std::wstring fieldName =
+            ToLowerCopy(TrimWhitespace(part.substr(0, colon)));
+        if (fieldName == L"label") {
+            pred.field = PredicateField::Label;
+        } else if (fieldName == L"verb") {
+            pred.field = PredicateField::Verb;
+        } else if (fieldName == L"ext") {
+            pred.field = PredicateField::Ext;
+        } else if (fieldName == L"scope") {
+            pred.field = PredicateField::Scope;
+        } else {
+            error = L"unknown predicate field '" + fieldName + L"'";
+            return false;
+        }
+
+        std::vector<std::wstring> values;
+        std::wstring current;
+        bool inQuotes = false;
+        const std::wstring valuesText = part.substr(colon + 1);
+        for (size_t i = 0; i < valuesText.size(); ++i) {
+            const wchar_t c = valuesText[i];
+            if (c == L'"') {
+                inQuotes = !inQuotes;
+                continue;
+            }
+            if (c == L',' && !inQuotes) {
+                values.push_back(TrimWhitespace(current));
+                current.clear();
+                continue;
+            }
+            current += c;
+        }
+        values.push_back(TrimWhitespace(current));
+
+        for (std::wstring& value : values) {
+            if (value.empty()) {
+                error = L"empty value in '" + part + L"'";
+                return false;
+            }
+            if (pred.field == PredicateField::Scope) {
+                Scope scope = Scope::Other;
+                if (!ScopeFromName(value, scope)) {
+                    error = L"unknown scope '" + value + L"'";
+                    return false;
+                }
+                value = ToLowerCopy(value);
+            } else if (pred.field == PredicateField::Label) {
+                value = NormalizeMenuLabel(value);
+                if (value.empty()) {
+                    error = L"empty label in '" + part + L"'";
+                    return false;
+                }
+            }
+            pred.values.push_back(std::move(value));
+        }
+        expr.all.push_back(std::move(pred));
+    }
+
+    if (expr.all.empty()) {
+        error = L"empty predicate";
+        return false;
+    }
+    out = std::move(expr);
+    error.clear();
+    return true;
+}
+
 // Shell property keys used by the Sort by and Group by submenus (all in the
 // shell's System property set, defined here so no SDK propkey.h is needed).
 const PROPERTYKEY kShellPropertyKeys[] = {

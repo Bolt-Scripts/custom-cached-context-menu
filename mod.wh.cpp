@@ -48,6 +48,9 @@ Design document: `docs/superpowers/specs/2026-10-04-context-menu-overhaul-design
 // ==/WindhawkModSettings==
 
 #include <windows.h>
+#include <exdisp.h>
+#include <servprov.h>
+#include <shlguid.h>
 #include <shlobj.h>
 #include <shlwapi.h>
 #include <shobjidl.h>
@@ -55,8 +58,12 @@ Design document: `docs/superpowers/specs/2026-10-04-context-menu-overhaul-design
 #include <windhawk_utils.h>
 
 #include <cstdint>
+#include <cstring>
+#include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 // ===========================================================================
@@ -135,12 +142,191 @@ inline std::wstring MakeTypeKey(const std::vector<std::wstring>& paths) {
 }  // namespace cmo
 
 // ===========================================================================
-// [CMO:Model] Menu item / menu model definitions. (Task 4)
+// [CMO:Model] Menu item / menu model definitions.
 // ===========================================================================
+namespace cmo {
+
+enum class ItemKind : uint8_t { Command, Submenu, Separator };
+enum class ActionKind : uint8_t { ViewCommand, ShellVerb, Fallback, Submenu };
+
+enum ModelFlags : uint32_t {
+    kModelNone = 0,
+    kModelDefault = 1u << 0,
+    kModelChecked = 1u << 1,
+    kModelRadio = 1u << 2,
+    kModelDisabled = 1u << 3,
+    kModelOwnerDraw = 1u << 4,
+    kModelSeparator = 1u << 5,
+};
+
+// Native Explorer shell view commands, from the classic shlobj.h command set.
+constexpr UINT kViewCmdDelete = 0x7011;
+constexpr UINT kViewCmdProperties = 0x7013;
+constexpr UINT kViewCmdCut = 0x7018;
+constexpr UINT kViewCmdCopy = 0x7019;
+constexpr UINT kViewCmdPaste = 0x701A;
+constexpr UINT kViewCmdRename = 0x7050;
+constexpr UINT kViewCmdCreateLink = 0x7051;
+
+struct MenuItem {
+    uint32_t id = 0;
+    ItemKind kind = ItemKind::Command;
+    ActionKind action = ActionKind::ViewCommand;
+    std::wstring label;
+    std::wstring canonicalVerb;
+    UINT viewCommandId = 0;
+    uint32_t verbOffset = 0;
+    uint32_t flags = kModelNone;
+    std::wstring iconRef;
+    std::vector<MenuItem> children;
+};
+
+struct MenuModel {
+    ContextSignature sig;
+    std::vector<MenuItem> items;
+};
+
+void FlattenIdsInto(const std::vector<MenuItem>& items, std::vector<uint32_t>& out) {
+    for (const MenuItem& item : items) {
+        out.push_back(item.id);
+        FlattenIdsInto(item.children, out);
+    }
+}
+
+std::vector<uint32_t> FlattenIds(const MenuModel& model) {
+    std::vector<uint32_t> ids;
+    FlattenIdsInto(model.items, ids);
+    return ids;
+}
+
+const MenuItem* FindByIdIn(const std::vector<MenuItem>& items, uint32_t id) {
+    for (const MenuItem& item : items) {
+        if (item.id == id) {
+            return &item;
+        }
+        if (const MenuItem* found = FindByIdIn(item.children, id)) {
+            return found;
+        }
+    }
+    return nullptr;
+}
+
+const MenuItem* FindById(const MenuModel& model, uint32_t id) {
+    return FindByIdIn(model.items, id);
+}
+
+// Verb when the item has one, otherwise the offset to invoke.
+std::pair<std::wstring, uint32_t> ChooseInvokeDescriptor(const MenuItem& item) {
+    if (!item.canonicalVerb.empty()) {
+        return {item.canonicalVerb, 0};
+    }
+    return {L"", item.verbOffset};
+}
+
+// Core model for a file selection. The common commands come first, cached
+// extension items are merged in later, and the native fallback stays last.
+MenuModel BuildCoreFileModel(const std::vector<std::wstring>& paths, Shape shape) {
+    MenuModel model{};
+    model.sig = ContextSignature{Scope::Files, MakeTypeKey(paths), shape, Variant::Normal};
+
+    uint32_t nextId = 1;
+    auto addCommand = [&](std::wstring label, std::wstring verb,
+                          uint32_t flags = kModelNone) {
+        MenuItem item{};
+        item.id = nextId++;
+        item.kind = ItemKind::Command;
+        item.label = std::move(label);
+        item.canonicalVerb = std::move(verb);
+        item.action = ActionKind::ShellVerb;
+        item.flags = flags;
+        model.items.push_back(std::move(item));
+    };
+    auto addViewCommand = [&](std::wstring label, UINT commandId,
+                              uint32_t flags = kModelNone) {
+        MenuItem item{};
+        item.id = nextId++;
+        item.kind = ItemKind::Command;
+        item.label = std::move(label);
+        item.action = ActionKind::ViewCommand;
+        item.viewCommandId = commandId;
+        item.flags = flags;
+        model.items.push_back(std::move(item));
+    };
+    auto addSeparator = [&]() {
+        MenuItem item{};
+        item.id = nextId++;
+        item.kind = ItemKind::Separator;
+        model.items.push_back(std::move(item));
+    };
+    auto addSubmenu = [&](std::wstring label) {
+        MenuItem item{};
+        item.id = nextId++;
+        item.kind = ItemKind::Submenu;
+        item.action = ActionKind::Submenu;
+        item.label = std::move(label);
+        model.items.push_back(std::move(item));
+    };
+    auto addFallback = [&]() {
+        MenuItem item{};
+        item.id = nextId++;
+        item.kind = ItemKind::Command;
+        item.action = ActionKind::Fallback;
+        item.label = L"Show more options";
+        model.items.push_back(std::move(item));
+    };
+
+    const bool multi = shape == Shape::Multi;
+    const uint32_t multiDisabled = multi ? kModelDisabled : kModelNone;
+    const std::wstring openLabel =
+        multi ? (L"Open " + std::to_wstring(paths.size()) + L" items") : L"Open";
+
+    addCommand(openLabel, L"open", kModelDefault);
+    addCommand(L"Open with", L"openwith");
+    addSeparator();
+    addViewCommand(L"Cut", kViewCmdCut, multiDisabled);
+    addViewCommand(L"Copy", kViewCmdCopy, multiDisabled);
+    addViewCommand(L"Rename", kViewCmdRename, multiDisabled);
+    addCommand(L"Delete", L"delete");
+    addSeparator();
+    addViewCommand(L"Create shortcut", kViewCmdCreateLink, multiDisabled);
+    addSubmenu(L"Send to");
+    addCommand(L"Copy as path", L"copyaspath");
+    addSeparator();
+    addCommand(L"Properties", L"properties");
+    addSeparator();
+    addFallback();
+
+    return model;
+}
+
+}  // namespace cmo
 
 // ===========================================================================
-// [CMO:Cache] In-memory and persistent menu model cache. (Tasks 4/7)
+// [CMO:Cache] In-memory and persistent menu model cache.
 // ===========================================================================
+namespace cmo {
+
+class Cache {
+public:
+    const MenuModel* Find(const ContextSignature& signature) const {
+        auto it = models_.find(signature.Hash());
+        if (it == models_.end()) {
+            return nullptr;
+        }
+        return &it->second;
+    }
+
+    void Put(MenuModel model) {
+        models_[model.sig.Hash()] = std::move(model);
+    }
+
+private:
+    std::unordered_map<uint64_t, MenuModel> models_;
+};
+
+inline Cache g_cache;
+
+}  // namespace cmo
 
 // ===========================================================================
 // [CMO:Classify] Popup owner classification.
@@ -436,15 +622,356 @@ bool InstallPopulationHook() {
     return InstallSymbolHook();
 }
 
+// --- Selection context ------------------------------------------------------
+// Reads the current selection for the menu owner. Adapted from the
+// remove-context-menu-items mod by Armaninyow (MIT-licensed).
+
+IShellBrowser* GetShellBrowserForWindow(HWND hwnd) {
+    struct ShellWindowClass {
+        const wchar_t* name;
+        bool isFrame;
+    };
+    static const ShellWindowClass kClasses[] = {
+        {L"ShellTabWindowClass", false},
+        {L"CabinetWClass", true},
+        {L"ExploreWClass", true},
+    };
+
+    for (HWND window = hwnd; window; window = GetAncestor(window, GA_PARENT)) {
+        wchar_t className[256] = {};
+        GetClassNameW(window, className, ARRAYSIZE(className));
+        for (const ShellWindowClass& cls : kClasses) {
+            if (wcscmp(className, cls.name) != 0) {
+                continue;
+            }
+            LRESULT result =
+                SendMessageW(window, WM_USER + 7 /* CWM_GETISHELLBROWSER */, 0, 0);
+            IShellBrowser* browser = reinterpret_cast<IShellBrowser*>(result);
+            if (browser) {
+                return browser;
+            }
+            if (cls.isFrame) {
+                return nullptr;
+            }
+            break;
+        }
+    }
+    return nullptr;
+}
+
+IShellBrowser* GetDesktopShellBrowser() {
+    IShellWindows* shellWindows = nullptr;
+    if (FAILED(CoCreateInstance(CLSID_ShellWindows, nullptr, CLSCTX_ALL,
+                                IID_IShellWindows, (void**)&shellWindows)) ||
+        !shellWindows) {
+        return nullptr;
+    }
+
+    IShellBrowser* browser = nullptr;
+    VARIANT empty = {};
+    long hwnd = 0;
+    IDispatch* dispatch = nullptr;
+    if (SUCCEEDED(shellWindows->FindWindowSW(&empty, &empty, SWC_DESKTOP, &hwnd,
+                                             SWFO_NEEDDISPATCH, &dispatch)) &&
+        dispatch) {
+        IServiceProvider* provider = nullptr;
+        if (SUCCEEDED(dispatch->QueryInterface(IID_IServiceProvider,
+                                               (void**)&provider)) &&
+            provider) {
+            provider->QueryService(SID_STopLevelBrowser, IID_IShellBrowser,
+                                   (void**)&browser);
+            provider->Release();
+        }
+        dispatch->Release();
+    }
+
+    shellWindows->Release();
+    return browser;
+}
+
+std::vector<std::wstring> GetSelectedPathsFromShellBrowser(IShellBrowser* browser) {
+    std::vector<std::wstring> paths;
+    if (!browser) {
+        return paths;
+    }
+
+    IShellView* view = nullptr;
+    if (SUCCEEDED(browser->QueryActiveShellView(&view)) && view) {
+        IFolderView* folderView = nullptr;
+        if (SUCCEEDED(view->QueryInterface(IID_IFolderView, (void**)&folderView)) &&
+            folderView) {
+            IShellFolder* folder = nullptr;
+            if (SUCCEEDED(folderView->GetFolder(IID_IShellFolder, (void**)&folder)) &&
+                folder) {
+                IEnumIDList* enumIds = nullptr;
+                if (SUCCEEDED(folderView->Items(SVGIO_SELECTION, IID_IEnumIDList,
+                                                (void**)&enumIds)) &&
+                    enumIds) {
+                    LPITEMIDLIST pidl = nullptr;
+                    while (enumIds->Next(1, &pidl, nullptr) == S_OK) {
+                        STRRET strret = {};
+                        if (SUCCEEDED(folder->GetDisplayNameOf(pidl, SHGDN_FORPARSING,
+                                                               &strret))) {
+                            LPWSTR path = nullptr;
+                            if (SUCCEEDED(StrRetToStrW(&strret, pidl, &path)) && path) {
+                                if (path[0]) {
+                                    paths.emplace_back(path);
+                                }
+                                CoTaskMemFree(path);
+                            }
+                        }
+                        CoTaskMemFree(pidl);
+                    }
+                    enumIds->Release();
+                }
+                folder->Release();
+            }
+            folderView->Release();
+        }
+        view->Release();
+    }
+    return paths;
+}
+
+std::vector<std::wstring> GetSelectedPaths(HWND owner, ShellViewKind kind) {
+    if (kind == ShellViewKind::Desktop) {
+        IShellBrowser* browser = GetDesktopShellBrowser();
+        std::vector<std::wstring> paths = GetSelectedPathsFromShellBrowser(browser);
+        if (browser) {
+            browser->Release();
+        }
+        return paths;
+    }
+
+    if (kind == ShellViewKind::ShellDefView) {
+        IShellBrowser* browser = GetShellBrowserForWindow(owner);
+        if (!browser) {
+            return {};
+        }
+        // CWM_GETISHELLBROWSER returns a borrowed pointer; hold a reference
+        // for the duration of the lookup.
+        browser->AddRef();
+        std::vector<std::wstring> paths = GetSelectedPathsFromShellBrowser(browser);
+        browser->Release();
+        return paths;
+    }
+
+    return {};
+}
+
 }  // namespace cmo
 
 // ===========================================================================
-// [CMO:Invoker] Executing a chosen menu item. (Tasks 4/6)
+// [CMO:Invoker] Executing a chosen menu item.
 // ===========================================================================
+namespace cmo {
+
+enum class InvokeResult : uint8_t { Handled, FallbackNative, Failed };
+
+struct InvocationContext {
+    HWND owner = nullptr;
+    POINT pt = {};
+    std::vector<std::wstring> paths;
+    IContextMenu* liveContext = nullptr;
+    UINT idCmdFirst = 0;
+};
+
+HWND FindShellDefView(HWND owner) {
+    for (HWND window = owner; window; window = GetAncestor(window, GA_PARENT)) {
+        wchar_t className[128] = {};
+        if (!GetClassNameW(window, className, ARRAYSIZE(className))) {
+            break;
+        }
+        if (wcscmp(className, L"SHELLDLL_DefView") == 0) {
+            return window;
+        }
+    }
+    return nullptr;
+}
+
+bool InvokeContextVerb(IContextMenu* context, const std::wstring& verb, HWND owner) {
+    if (!context || verb.empty()) {
+        return false;
+    }
+    CMINVOKECOMMANDINFOEX info = {};
+    info.cbSize = sizeof(info);
+    info.fMask = CMIC_MASK_UNICODE;
+    info.hwnd = owner;
+    info.lpVerbW = verb.c_str();
+    info.nShow = SW_SHOWNORMAL;
+    return SUCCEEDED(context->InvokeCommand(reinterpret_cast<CMINVOKECOMMANDINFO*>(&info)));
+}
+
+bool CopyAsPath(const std::vector<std::wstring>& paths) {
+    std::wstring text;
+    for (const std::wstring& path : paths) {
+        if (!text.empty()) {
+            text += L"\r\n";
+        }
+        text += L'"';
+        text += path;
+        text += L'"';
+    }
+    if (text.empty()) {
+        return false;
+    }
+
+    if (!OpenClipboard(nullptr)) {
+        return false;
+    }
+    bool ok = false;
+    if (EmptyClipboard()) {
+        const size_t bytes = (text.size() + 1) * sizeof(wchar_t);
+        if (HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE, bytes)) {
+            if (void* data = GlobalLock(memory)) {
+                memcpy(data, text.c_str(), bytes);
+                GlobalUnlock(memory);
+                if (SetClipboardData(CF_UNICODETEXT, memory)) {
+                    ok = true;
+                } else {
+                    GlobalFree(memory);
+                }
+            } else {
+                GlobalFree(memory);
+            }
+        }
+    }
+    CloseClipboard();
+    return ok;
+}
+
+InvokeResult InvokeItem(const MenuItem& item, const InvocationContext& ctx) {
+    if (item.kind == ItemKind::Separator || (item.flags & kModelDisabled)) {
+        return InvokeResult::Handled;
+    }
+
+    switch (item.action) {
+        case ActionKind::Fallback:
+            return InvokeResult::FallbackNative;
+        case ActionKind::Submenu:
+            return InvokeResult::Handled;
+        case ActionKind::ViewCommand: {
+            HWND target = FindShellDefView(ctx.owner);
+            if (!target) {
+                target = ctx.owner;
+            }
+            PostMessageW(target, WM_COMMAND, MAKEWPARAM(item.viewCommandId, 0), 0);
+            return InvokeResult::Handled;
+        }
+        case ActionKind::ShellVerb:
+            if (item.canonicalVerb == L"copyaspath") {
+                return CopyAsPath(ctx.paths) ? InvokeResult::Handled
+                                             : InvokeResult::Failed;
+            }
+            return InvokeContextVerb(ctx.liveContext, item.canonicalVerb, ctx.owner)
+                       ? InvokeResult::Handled
+                       : InvokeResult::Failed;
+    }
+    return InvokeResult::Failed;
+}
+
+}  // namespace cmo
 
 // ===========================================================================
-// [CMO:View] Rendering abstraction, native implementation. (Task 4)
+// [CMO:View] Rendering abstraction and the native implementation.
 // ===========================================================================
+namespace cmo {
+
+using TrackPopupMenuEx_t = decltype(&TrackPopupMenuEx);
+inline TrackPopupMenuEx_t TrackPopupMenuEx_Original = nullptr;
+
+using TrackPopupMenu_t = decltype(&TrackPopupMenu);
+inline TrackPopupMenu_t TrackPopupMenu_Original = nullptr;
+
+class NativeMenuView {
+public:
+    static std::optional<uint32_t> Show(const MenuModel& model, HWND owner, POINT pt) {
+        HMENU menu = CreatePopupMenu();
+        if (!menu) {
+            return std::nullopt;
+        }
+        AppendItems(menu, model.items);
+
+        const UINT flags = TPM_RETURNCMD | TPM_NONOTIFY | TPM_LEFTALIGN | TPM_TOPALIGN;
+        int command = TrackPopupMenuEx_Original
+                          ? TrackPopupMenuEx_Original(menu, flags, pt.x, pt.y, owner, nullptr)
+                          : 0;
+        DestroyMenu(menu);
+
+        if (command == 0) {
+            return std::nullopt;
+        }
+        return static_cast<uint32_t>(command);
+    }
+
+private:
+    static void AppendItems(HMENU menu, const std::vector<MenuItem>& items) {
+        for (const MenuItem& item : items) {
+            if (item.kind == ItemKind::Separator) {
+                AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+                continue;
+            }
+
+            UINT flags = MF_STRING;
+            if (item.flags & kModelDisabled) {
+                flags |= MF_GRAYED;
+            }
+            if (item.flags & kModelChecked) {
+                flags |= MF_CHECKED;
+            }
+            if (item.flags & kModelDefault) {
+                flags |= MF_DEFAULT;
+            }
+
+            if (item.kind == ItemKind::Submenu) {
+                HMENU submenu = CreatePopupMenu();
+                if (!submenu) {
+                    continue;
+                }
+                AppendItems(submenu, item.children);
+                AppendMenuW(menu, flags | MF_POPUP,
+                            reinterpret_cast<UINT_PTR>(submenu), item.label.c_str());
+            } else {
+                AppendMenuW(menu, flags, item.id, item.label.c_str());
+            }
+        }
+    }
+};
+
+// Replays the real population into a fresh menu, shows it, and invokes the
+// selection through the live object. Used by the fallback item and the
+// Shift bypass.
+std::optional<uint32_t> ShowNativeReplay(const PendingCapture& capture, HWND owner,
+                                         POINT pt) {
+    HMENU menu = CreatePopupMenu();
+    if (!menu) {
+        return std::nullopt;
+    }
+    ReplayInto(capture.obj, menu, capture.indexMenu, capture.idCmdFirst, capture.idCmdLast,
+               capture.flags);
+
+    const UINT flags = TPM_RETURNCMD | TPM_NONOTIFY | TPM_LEFTALIGN | TPM_TOPALIGN;
+    int command = TrackPopupMenuEx_Original
+                      ? TrackPopupMenuEx_Original(menu, flags, pt.x, pt.y, owner, nullptr)
+                      : 0;
+    DestroyMenu(menu);
+
+    if (command == 0 || !capture.obj) {
+        return std::nullopt;
+    }
+
+    CMINVOKECOMMANDINFOEX info = {};
+    info.cbSize = sizeof(info);
+    info.fMask = CMIC_MASK_UNICODE;
+    info.hwnd = owner;
+    info.lpVerbW = MAKEINTRESOURCEW(static_cast<UINT>(command) - capture.idCmdFirst);
+    info.nShow = SW_SHOWNORMAL;
+    capture.obj->InvokeCommand(reinterpret_cast<CMINVOKECOMMANDINFO*>(&info));
+
+    return static_cast<uint32_t>(command);
+}
+
+}  // namespace cmo
 
 // ===========================================================================
 // [CMO:Warmup] Background cache warm-up. (Task 8)
@@ -459,27 +986,81 @@ bool InstallPopulationHook() {
 // ===========================================================================
 namespace cmo {
 
-using TrackPopupMenuEx_t = decltype(&TrackPopupMenuEx);
-inline TrackPopupMenuEx_t TrackPopupMenuEx_Original = nullptr;
+bool ShowReplacementMenu(const PendingCapture& capture, ShellViewKind kind, HWND owner,
+                         POINT pt) {
+    std::vector<std::wstring> paths = GetSelectedPaths(owner, kind);
+    Shape shape = paths.size() > 1 ? Shape::Multi : Shape::Single;
+    ContextSignature signature{Scope::Files, MakeTypeKey(paths), shape, Variant::Normal};
 
-using TrackPopupMenu_t = decltype(&TrackPopupMenu);
-inline TrackPopupMenu_t TrackPopupMenu_Original = nullptr;
+    const MenuModel* cached = g_cache.Find(signature);
+    MenuModel model = cached ? *cached : BuildCoreFileModel(paths, shape);
+
+    std::optional<uint32_t> selection = NativeMenuView::Show(model, owner, pt);
+    if (!selection) {
+        return true;
+    }
+
+    const MenuItem* item = FindById(model, *selection);
+    if (!item) {
+        return true;
+    }
+
+    InvocationContext ctx{};
+    ctx.owner = owner;
+    ctx.pt = pt;
+    ctx.paths = paths;
+    ctx.liveContext = capture.obj;
+    ctx.idCmdFirst = capture.idCmdFirst;
+
+    if (InvokeItem(*item, ctx) == InvokeResult::FallbackNative) {
+        ShowNativeReplay(capture, owner, pt);
+    }
+    return true;
+}
 
 BOOL WINAPI TrackPopupMenuEx_Hook(HMENU hMenu, UINT uFlags, int x, int y, HWND hWnd,
                                   LPTPMPARAMS lptpm) {
     ShellViewKind kind = ClassifyOwner(hWnd);
-    bool replayed = ConsumePendingAndReplay(hWnd, hMenu);
-    Wh_Log(L"TrackPopupMenuEx hwnd=%p kind=%d flags=%08X replayed=%d", hWnd,
-           static_cast<int>(kind), uFlags, replayed);
+    if (PendingCapture* pending = g_pending.Take()) {
+        if (IsReplaceableKind(kind)) {
+            Wh_Log(L"Replacing context menu: kind=%d", static_cast<int>(kind));
+            ShowReplacementMenu(*pending, kind, hWnd, POINT{x, y});
+            if (pending->obj) {
+                pending->obj->Release();
+            }
+            return 0;
+        }
+
+        Wh_Log(L"Passing through: kind=%d", static_cast<int>(kind));
+        ReplayInto(pending->obj, hMenu, pending->indexMenu, pending->idCmdFirst,
+                   pending->idCmdLast, pending->flags);
+        if (pending->obj) {
+            pending->obj->Release();
+        }
+    }
     return TrackPopupMenuEx_Original(hMenu, uFlags, x, y, hWnd, lptpm);
 }
 
 BOOL WINAPI TrackPopupMenu_Hook(HMENU hMenu, UINT uFlags, int x, int y, int nReserved,
                                 HWND hWnd, const RECT* prcRect) {
     ShellViewKind kind = ClassifyOwner(hWnd);
-    bool replayed = ConsumePendingAndReplay(hWnd, hMenu);
-    Wh_Log(L"TrackPopupMenu hwnd=%p kind=%d flags=%08X replayed=%d", hWnd,
-           static_cast<int>(kind), uFlags, replayed);
+    if (PendingCapture* pending = g_pending.Take()) {
+        if (IsReplaceableKind(kind)) {
+            Wh_Log(L"Replacing context menu: kind=%d", static_cast<int>(kind));
+            ShowReplacementMenu(*pending, kind, hWnd, POINT{x, y});
+            if (pending->obj) {
+                pending->obj->Release();
+            }
+            return 0;
+        }
+
+        Wh_Log(L"Passing through: kind=%d", static_cast<int>(kind));
+        ReplayInto(pending->obj, hMenu, pending->indexMenu, pending->idCmdFirst,
+                   pending->idCmdLast, pending->flags);
+        if (pending->obj) {
+            pending->obj->Release();
+        }
+    }
     return TrackPopupMenu_Original(hMenu, uFlags, x, y, nReserved, hWnd, prcRect);
 }
 

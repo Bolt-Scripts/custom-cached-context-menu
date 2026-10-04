@@ -83,6 +83,55 @@ int main() {
     queue.Clear();
     CHECK(queue.Take() == nullptr);
 
+    std::vector<std::wstring> onePath{L"a.txt"};
+    cmo::MenuModel single = cmo::BuildCoreFileModel(onePath, cmo::Shape::Single);
+    CHECK(!single.items.empty());
+    CHECK_EQ(single.items.front().label, std::wstring(L"Open"));
+    CHECK_EQ(single.items.back().label, std::wstring(L"Show more options"));
+    CHECK_EQ(single.sig.typeKey, std::wstring(L".txt"));
+
+    std::vector<std::wstring> threePaths{L"a.txt", L"b.txt", L"c.txt"};
+    cmo::MenuModel multi = cmo::BuildCoreFileModel(threePaths, cmo::Shape::Multi);
+    bool foundOpenItems = false;
+    bool cutDisabled = false;
+    for (const cmo::MenuItem& item : multi.items) {
+        if (item.label == L"Open 3 items") {
+            foundOpenItems = true;
+        }
+        if (item.label == L"Cut" && (item.flags & cmo::kModelDisabled)) {
+            cutDisabled = true;
+        }
+    }
+    CHECK(foundOpenItems);
+    CHECK(cutDisabled);
+
+    std::vector<uint32_t> ids = cmo::FlattenIds(single);
+    CHECK(ids.size() >= 10);
+    bool idsUnique = true;
+    for (size_t i = 0; i < ids.size(); ++i) {
+        for (size_t j = i + 1; j < ids.size(); ++j) {
+            if (ids[i] == ids[j]) {
+                idsUnique = false;
+            }
+        }
+    }
+    CHECK(idsUnique);
+    const cmo::MenuItem* firstItem = cmo::FindById(single, single.items.front().id);
+    CHECK(firstItem && firstItem->label == L"Open");
+
+    cmo::MenuItem verbItem{};
+    verbItem.canonicalVerb = L"open";
+    verbItem.verbOffset = 7;
+    auto verbDescriptor = cmo::ChooseInvokeDescriptor(verbItem);
+    CHECK_EQ(verbDescriptor.first, std::wstring(L"open"));
+    CHECK(verbDescriptor.second == 0);
+
+    cmo::MenuItem offsetItem{};
+    offsetItem.verbOffset = 7;
+    auto offsetDescriptor = cmo::ChooseInvokeDescriptor(offsetItem);
+    CHECK(offsetDescriptor.first.empty());
+    CHECK(offsetDescriptor.second == 7);
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

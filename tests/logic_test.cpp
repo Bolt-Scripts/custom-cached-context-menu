@@ -2866,6 +2866,41 @@ int main() {
                                      badErrors));
     }
 
+    // v2.1 per-item overrides: parse, glob, last wins, children.
+    {
+        cmo::RulesConfig config;
+        std::vector<cmo::ConfigParseError> errors;
+        CHECK(cmo::ParseRulesConfig(
+            L"[item \"TortoiseSVN*\"]\nicon = C:\\svn.ico,0\nlabel = SVN\n"
+            L"marker = bar\n"
+            L"[item \"TortoiseSVN commit\"]\nlabel = Commit\n",
+            config, errors));
+        CHECK(config.overrides.size() == 2);
+
+        cmo::MenuModel model{};
+        cmo::MenuItem item{};
+        item.id = 1;
+        item.kind = cmo::ItemKind::Command;
+        item.action = cmo::ActionKind::ShellVerb;
+        item.label = L"TortoiseSVN commit";
+        model.items.push_back(item);
+        cmo::MenuItem child{};
+        child.id = 2;
+        child.kind = cmo::ItemKind::Command;
+        child.action = cmo::ActionKind::ShellVerb;
+        child.label = L"TortoiseSVN log";
+        model.items.push_back(child);
+
+        cmo::ItemContext ctx{};
+        ctx.scope = cmo::Scope::Files;
+        cmo::ApplyItemOverrides(model.items, config, ctx);
+        CHECK(model.items[0].displayLabel == L"Commit");  // last match wins
+        CHECK(model.items[0].markerOverride ==
+              static_cast<int>(cmo::MarkerStyle::Bar));
+        CHECK(model.items[0].iconRef == L"C:\\svn.ico,0");
+        CHECK(model.items[1].displayLabel == L"SVN");
+    }
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

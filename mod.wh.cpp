@@ -349,6 +349,9 @@ struct MenuItem {
     uint32_t newIndex = 0;
     // Index into RulesConfig::commands for ActionKind::CustomCommand.
     uint32_t customCommandIndex = 0;
+    // Transient display overrides (not serialized): per-item label and marker.
+    std::wstring displayLabel;
+    int markerOverride = -1;
     // Sort/group field index into kShellPropertyKeys, and sort direction.
     uint32_t sortIndex = 0;
     bool sortAscending = true;
@@ -1213,6 +1216,16 @@ struct CustomSubmenu {
     PredicateExpr match;
 };
 
+struct ItemOverride {
+    PredicateExpr match;
+    std::wstring iconRef;
+    std::wstring label;
+    bool hasIcon = false;
+    bool hasLabel = false;
+    bool hasMarker = false;
+    MarkerStyle marker = MarkerStyle::Dot;
+};
+
 struct RulesConfig {
     Appearance appearance;
     Appearance lightAppearance;
@@ -1222,6 +1235,7 @@ struct RulesConfig {
     std::vector<Rule> rules;
     std::vector<CustomCommand> commands;
     std::vector<CustomSubmenu> submenus;
+    std::vector<ItemOverride> overrides;
     uint64_t revision = 0;
 };
 
@@ -1718,6 +1732,31 @@ bool ApplySubmenuValue(CustomSubmenu& submenu, const std::wstring& key,
     return false;
 }
 
+bool ApplyItemOverrideValue(ItemOverride& override, const std::wstring& key,
+                            const std::wstring& value) {
+    if (key == L"icon") {
+        override.iconRef = value;
+        override.hasIcon = true;
+        return true;
+    }
+    if (key == L"label") {
+        override.label = value;
+        override.hasLabel = true;
+        return true;
+    }
+    if (key == L"marker") {
+        if (!ParseMarkerStyle(value, override.marker)) {
+            return false;
+        }
+        override.hasMarker = true;
+        return true;
+    }
+    if (key.rfind(L"match.", 0) == 0) {
+        return AppendMatchValue(override.match, key.substr(6), value);
+    }
+    return false;
+}
+
 bool ApplyRuleLine(RulesConfig& config, const std::wstring& key,
                    const std::wstring& value, std::wstring& error) {
     RuleKind kind = RuleKind::Hide;
@@ -1767,6 +1806,7 @@ bool ParseRulesConfig(const std::wstring& text, RulesConfig& out,
         Rules,
         Command,
         Submenu,
+        Item,
         Ignored,
     };
     Section section = Section::None;
@@ -1774,6 +1814,7 @@ bool ParseRulesConfig(const std::wstring& text, RulesConfig& out,
     RulesConfig config;
     int currentCommand = -1;
     int currentSubmenu = -1;
+    int currentOverride = -1;
 
     std::vector<std::pair<std::wstring, std::wstring>> baseValues;
     std::vector<std::pair<std::wstring, std::wstring>> lightValues;
@@ -1810,6 +1851,7 @@ bool ParseRulesConfig(const std::wstring& text, RulesConfig& out,
             const std::wstring name = ToLowerCopy(rawName);
             currentCommand = -1;
             currentSubmenu = -1;
+            currentOverride = -1;
             if (name == L"appearance") {
                 section = Section::Appearance;
             } else if (name == L"appearance.light") {
@@ -1831,6 +1873,23 @@ bool ParseRulesConfig(const std::wstring& text, RulesConfig& out,
                     config.commands.back().label = label;
                     currentCommand = static_cast<int>(config.commands.size()) - 1;
                     section = Section::Command;
+                }
+            } else if (name.rfind(L"item ", 0) == 0) {
+                const std::wstring glob = ExtractQuoted(rawName.substr(5));
+                if (glob.empty()) {
+                    errors.push_back(
+                        {lineNumber, L"item section needs a quoted label glob"});
+                    section = Section::Ignored;
+                } else {
+                    ItemOverride override;
+                    Predicate predicate;
+                    predicate.field = PredicateField::Label;
+                    predicate.values.push_back(NormalizeMenuLabel(glob));
+                    override.match.all.push_back(std::move(predicate));
+                    config.overrides.push_back(std::move(override));
+                    currentOverride =
+                        static_cast<int>(config.overrides.size()) - 1;
+                    section = Section::Item;
                 }
             } else if (name.rfind(L"submenu ", 0) == 0) {
                 const std::wstring submenuName = ExtractQuoted(rawName.substr(8));
@@ -1896,6 +1955,13 @@ bool ParseRulesConfig(const std::wstring& text, RulesConfig& out,
                 !ApplySubmenuValue(config.submenus[currentSubmenu], key, value)) {
                 errors.push_back({lineNumber,
                                   L"invalid submenu value for '" + key + L"'"});
+            }
+        } else if (section == Section::Item) {
+            if (currentOverride < 0 ||
+                !ApplyItemOverrideValue(config.overrides[currentOverride], key,
+                                        value)) {
+                errors.push_back({lineNumber,
+                                  L"invalid item value for '" + key + L"'"});
             }
         } else if (section == Section::Ignored) {
             // Intentionally ignored.
@@ -2786,10 +2852,32 @@ private:
 
 inline ConfigStore g_configStore;
 
+void ApplyItemOverrides(std::vector<MenuItem>& items, const RulesConfig& config,
+                        const ItemContext& ctx) {
+    for (MenuItem& item : items) {
+        for (const ItemOverride& override : config.overrides) {
+            if (!PredicateExprMatches(override.match, item, ctx)) {
+                continue;
+            }
+            if (override.hasIcon) {
+                item.iconRef = override.iconRef;
+            }
+            if (override.hasLabel) {
+                item.displayLabel = override.label;
+            }
+            if (override.hasMarker) {
+                item.markerOverride = static_cast<int>(override.marker);
+            }
+        }
+        ApplyItemOverrides(item.children, config, ctx);
+    }
+}
+
 RulesApplication ApplyRulesConfigToModel(MenuModel& model,
                                          const RulesConfig& config,
                                          const ItemContext& ctx) {
     RulesApplication application = ApplyRulesToModel(model, config, ctx);
+    ApplyItemOverrides(model.items, config, ctx);
     InsertCustomItems(model, config, ctx);
     return application;
 }
@@ -2982,7 +3070,7 @@ LayoutPanel BuildLayoutPanel(const std::vector<MenuItem>& items,
     for (const MenuItem& item : items) {
         LayoutItem layout{};
         layout.kind = item.kind;
-        layout.label = item.label;
+        layout.label = item.displayLabel.empty() ? item.label : item.displayLabel;
         layout.iconRef = item.iconRef;
         layout.iconPixels = item.iconPixels;
         layout.flags = item.flags;

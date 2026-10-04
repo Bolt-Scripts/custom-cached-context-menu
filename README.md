@@ -51,15 +51,22 @@ untouched native menu, including extended verbs.
   extraction is implemented and ready for the custom renderer.
 - Core menu labels are English; cached extension labels come from the shell and
   are localized.
-- Per-handler DLL changes are revalidated on registry changes and with
-  **Clear cache**, not per-DLL timestamps yet.
 - "Sort by" / "New" / "Paste shortcut" fall back to the native menu on builds
   where the shell object rejects those verbs.
+- Rename, Refresh, and the View modes use the documented `IFolderView2` /
+  `IShellView` APIs; the old `FCIDM_*` view command IDs are not used.
+
+Menu models persist to disk (`menu-cache.bin` in the mod's storage directory)
+and are pre-warmed at Explorer start, so extension items survive restarts.
+Handler registration changes are detected by polling, which keeps the cache
+stable during normal shell activity.
 
 ## Reporting issues
 
 Enable **Debug logging**, reproduce the problem, and include the Windhawk log
-output (it contains open-path timings, cache hit/miss, and discovery logs).
+output. It records cache hit/miss, menu preparation time, population and
+discovery durations, the chosen item and invocation result, and fallback
+reasons.
 
 ## Development
 

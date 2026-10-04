@@ -2,7 +2,7 @@
 // @id              context-menu-overhaul
 // @name            Context Menu Overhaul
 // @description     Replaces the Explorer context menu with an instantly-opening cached menu, then discovers and caches shell extension items asynchronously.
-// @version         0.1
+// @version         0.2
 // @include         explorer.exe
 // @architecture    x86-64
 // @compilerOptions -lole32 -lshlwapi -luuid -lcomctl32 -ladvapi32 -lgdi32
@@ -55,6 +55,7 @@ Design document: `docs/superpowers/specs/2026-10-04-context-menu-overhaul-design
 #include <shlwapi.h>
 #include <shobjidl.h>
 
+#include <commctrl.h>
 #include <tlhelp32.h>
 #include <windhawk_utils.h>
 
@@ -178,7 +179,20 @@ inline std::wstring MakeTypeKey(const std::vector<std::wstring>& paths) {
 namespace cmo {
 
 enum class ItemKind : uint8_t { Command, Submenu, Separator };
-enum class ActionKind : uint8_t { ViewCommand, ShellVerb, Fallback, Submenu };
+enum class ActionKind : uint8_t { ViewAction, ShellVerb, Fallback, Submenu };
+
+// Documented view operations, dispatched through IFolderView2 / IShellView.
+// The old FCIDM_* view command IDs are not defined by the Windows SDK and
+// must not be guessed.
+enum class ViewAction : uint32_t {
+    None = 0,
+    Rename,
+    Refresh,
+    ViewLargeIcons,
+    ViewSmallIcons,
+    ViewList,
+    ViewDetails,
+};
 
 enum ModelFlags : uint32_t {
     kModelNone = 0,
@@ -191,27 +205,13 @@ enum ModelFlags : uint32_t {
     kModelExtension = 1u << 6,
 };
 
-// Native Explorer shell view commands, from the classic shlobj.h command set.
-constexpr UINT kViewCmdDelete = 0x7011;
-constexpr UINT kViewCmdProperties = 0x7013;
-constexpr UINT kViewCmdCut = 0x7018;
-constexpr UINT kViewCmdCopy = 0x7019;
-constexpr UINT kViewCmdPaste = 0x701A;
-constexpr UINT kViewCmdBigIcon = 0x7029;
-constexpr UINT kViewCmdSmallIcon = 0x702A;
-constexpr UINT kViewCmdList = 0x702B;
-constexpr UINT kViewCmdDetails = 0x702C;
-constexpr UINT kViewCmdRename = 0x7050;
-constexpr UINT kViewCmdCreateLink = 0x7051;
-constexpr UINT kViewCmdRefresh = 0x7100;
-
 struct MenuItem {
     uint32_t id = 0;
     ItemKind kind = ItemKind::Command;
-    ActionKind action = ActionKind::ViewCommand;
+    ActionKind action = ActionKind::ViewAction;
     std::wstring label;
     std::wstring canonicalVerb;
-    UINT viewCommandId = 0;
+    uint32_t viewAction = static_cast<uint32_t>(ViewAction::None);
     uint32_t verbOffset = 0;
     uint32_t flags = kModelNone;
     std::wstring iconRef;
@@ -290,15 +290,15 @@ MenuModel BuildCoreModel(Scope scope, const std::vector<std::wstring>& paths, Sh
         item.flags = flags;
         return item;
     };
-    auto makeViewCommand = [&](std::wstring label, std::wstring dedupVerb, UINT commandId,
-                               uint32_t flags) {
+    auto makeViewAction = [&](std::wstring label, std::wstring dedupVerb,
+                              ViewAction action, uint32_t flags) {
         MenuItem item{};
         item.id = nextId++;
         item.kind = ItemKind::Command;
         item.label = std::move(label);
         item.canonicalVerb = std::move(dedupVerb);
-        item.action = ActionKind::ViewCommand;
-        item.viewCommandId = commandId;
+        item.action = ActionKind::ViewAction;
+        item.viewAction = static_cast<uint32_t>(action);
         item.flags = flags;
         return item;
     };
@@ -306,10 +306,10 @@ MenuModel BuildCoreModel(Scope scope, const std::vector<std::wstring>& paths, Sh
                           uint32_t flags = kModelNone) {
         model.items.push_back(makeCommand(std::move(label), std::move(verb), flags));
     };
-    auto addViewCommand = [&](std::wstring label, std::wstring dedupVerb, UINT commandId,
-                              uint32_t flags = kModelNone) {
+    auto addViewAction = [&](std::wstring label, std::wstring dedupVerb,
+                             ViewAction action, uint32_t flags = kModelNone) {
         model.items.push_back(
-            makeViewCommand(std::move(label), std::move(dedupVerb), commandId, flags));
+            makeViewAction(std::move(label), std::move(dedupVerb), action, flags));
     };
     auto addSeparator = [&]() {
         MenuItem item{};
@@ -341,17 +341,17 @@ MenuModel BuildCoreModel(Scope scope, const std::vector<std::wstring>& paths, Sh
 
     if (scope == Scope::Background || scope == Scope::Desktop) {
         MenuItem& viewMenu = addSubmenu(L"View");
-        viewMenu.children.push_back(
-            makeViewCommand(L"Large icons", L"viewlarge", kViewCmdBigIcon, kModelNone));
-        viewMenu.children.push_back(
-            makeViewCommand(L"Small icons", L"viewsmall", kViewCmdSmallIcon, kModelNone));
-        viewMenu.children.push_back(
-            makeViewCommand(L"List", L"viewlist", kViewCmdList, kModelNone));
-        viewMenu.children.push_back(
-            makeViewCommand(L"Details", L"viewdetails", kViewCmdDetails, kModelNone));
+        viewMenu.children.push_back(makeViewAction(L"Large icons", L"viewlarge",
+                                                   ViewAction::ViewLargeIcons, kModelNone));
+        viewMenu.children.push_back(makeViewAction(L"Small icons", L"viewsmall",
+                                                   ViewAction::ViewSmallIcons, kModelNone));
+        viewMenu.children.push_back(makeViewAction(L"List", L"viewlist",
+                                                   ViewAction::ViewList, kModelNone));
+        viewMenu.children.push_back(makeViewAction(L"Details", L"viewdetails",
+                                                   ViewAction::ViewDetails, kModelNone));
 
         addCommand(L"Sort by", L"sortby");
-        addViewCommand(L"Refresh", L"refresh", kViewCmdRefresh);
+        addViewAction(L"Refresh", L"refresh", ViewAction::Refresh);
         addSeparator();
         addCommand(L"Paste", L"paste");
         addCommand(L"Paste shortcut", L"pastelink");
@@ -389,12 +389,12 @@ MenuModel BuildCoreModel(Scope scope, const std::vector<std::wstring>& paths, Sh
         addSeparator();
     }
 
-    addViewCommand(L"Cut", L"cut", kViewCmdCut);
-    addViewCommand(L"Copy", L"copy", kViewCmdCopy);
-    addViewCommand(L"Rename", L"rename", kViewCmdRename, multiDisabled);
+    addCommand(L"Cut", L"cut");
+    addCommand(L"Copy", L"copy");
+    addViewAction(L"Rename", L"rename", ViewAction::Rename, multiDisabled);
     addCommand(L"Delete", L"delete");
     addSeparator();
-    addViewCommand(L"Create shortcut", L"createshortcut", kViewCmdCreateLink, multiDisabled);
+    addCommand(L"Create shortcut", L"createshortcut", multiDisabled);
     addSubmenu(L"Send to");
     addCommand(L"Copy as path", L"copyaspath");
     addSeparator();
@@ -410,8 +410,9 @@ MenuModel BuildCoreFileModel(const std::vector<std::wstring>& paths, Shape shape
 }
 
 // Merges cached extension items into a freshly built core model: core items
-// keep their order, duplicates are dropped by label or canonical verb, cached
-// separators are skipped, and the fallback item stays last.
+// keep their order, native invocation descriptors are adopted for matching
+// items, duplicates are dropped, cached separators are skipped, and the
+// fallback item stays last.
 MenuModel MergeCoreWithCached(const MenuModel& core, const MenuModel& cached) {
     MenuModel result = core;
 
@@ -422,6 +423,13 @@ MenuModel MergeCoreWithCached(const MenuModel& core, const MenuModel& cached) {
         result.items.pop_back();
         hadFallback = true;
     }
+
+    auto matches = [](const MenuItem& left, const MenuItem& right) {
+        if (!left.label.empty() && left.label == right.label) {
+            return true;
+        }
+        return !left.canonicalVerb.empty() && left.canonicalVerb == right.canonicalVerb;
+    };
 
     std::unordered_set<std::wstring> coreLabels;
     std::unordered_set<std::wstring> coreVerbs;
@@ -439,6 +447,27 @@ MenuModel MergeCoreWithCached(const MenuModel& core, const MenuModel& cached) {
         if (item.kind == ItemKind::Separator) {
             continue;
         }
+
+        bool matchedCore = false;
+        for (MenuItem& coreItem : result.items) {
+            if (coreItem.action != ActionKind::ShellVerb || !matches(coreItem, item)) {
+                continue;
+            }
+            // Adopt the native descriptor: the shell knows how to invoke its
+            // own items, including offset-only ones.
+            if (!item.canonicalVerb.empty()) {
+                coreItem.canonicalVerb = item.canonicalVerb;
+            } else {
+                coreItem.canonicalVerb.clear();
+                coreItem.verbOffset = item.verbOffset;
+            }
+            matchedCore = true;
+            break;
+        }
+        if (matchedCore) {
+            continue;
+        }
+
         if ((!item.label.empty() && coreLabels.count(item.label)) ||
             (!item.canonicalVerb.empty() && coreVerbs.count(item.canonicalVerb))) {
             continue;
@@ -469,7 +498,7 @@ MenuModel MergeCoreWithCached(const MenuModel& core, const MenuModel& cached) {
 namespace cmo {
 
 constexpr uint32_t kCacheMagic = 0x434F4D4F;  // "COMO"
-constexpr uint32_t kCacheVersion = 3;
+constexpr uint32_t kCacheVersion = 4;
 constexpr uint32_t kMaxCacheEntries = 1024;
 constexpr uint32_t kMaxModelItems = 4096;
 constexpr uint32_t kMaxMenuDepth = 16;
@@ -512,7 +541,7 @@ void WriteItem(std::vector<uint8_t>& out, const MenuItem& item) {
     WriteU8(out, static_cast<uint8_t>(item.kind));
     WriteU8(out, static_cast<uint8_t>(item.action));
     WriteU32(out, item.flags);
-    WriteU32(out, static_cast<uint32_t>(item.viewCommandId));
+    WriteU32(out, static_cast<uint32_t>(item.viewAction));
     WriteU32(out, item.verbOffset);
     WriteString(out, item.label);
     WriteString(out, item.canonicalVerb);
@@ -651,10 +680,10 @@ public:
         }
         uint8_t kind = 0;
         uint8_t action = 0;
-        uint32_t viewCommandId = 0;
+        uint32_t viewAction = 0;
         uint32_t childCount = 0;
         if (!ReadU32(item.id) || !ReadU8(kind) || !ReadU8(action) ||
-            !ReadU32(item.flags) || !ReadU32(viewCommandId) ||
+            !ReadU32(item.flags) || !ReadU32(viewAction) ||
             !ReadU32(item.verbOffset) || !ReadString(item.label) ||
             !ReadString(item.canonicalVerb) || !ReadString(item.iconRef) ||
             !ReadString(item.targetPath) || !ReadU32(childCount)) {
@@ -662,7 +691,7 @@ public:
         }
         item.kind = static_cast<ItemKind>(kind);
         item.action = static_cast<ActionKind>(action);
-        item.viewCommandId = viewCommandId;
+        item.viewAction = viewAction;
         for (uint32_t i = 0; i < childCount; ++i) {
             MenuItem child{};
             if (!ReadItem(child, depth + 1)) {
@@ -1108,7 +1137,37 @@ struct PendingCapture {
     HWND owner = nullptr;
     ULONGLONG tick = 0;
     bool used = false;
+
+    // Populated once per open; reused for discovery and the native fallback.
+    HMENU populatedMenu = nullptr;
+    bool populated = false;
+    IContextMenu3* contextMenu3 = nullptr;
+    IContextMenu2* contextMenu2 = nullptr;
+    std::vector<std::wstring> handlerModules;
+    uint64_t sourceStamp = 0;
+    bool discoveryDone = false;
 };
+
+// Releases every resource a capture owns.
+void ReleaseCapture(PendingCapture& capture) {
+    if (capture.populatedMenu) {
+        DestroyMenu(capture.populatedMenu);
+        capture.populatedMenu = nullptr;
+    }
+    if (capture.contextMenu3) {
+        capture.contextMenu3->Release();
+        capture.contextMenu3 = nullptr;
+    }
+    if (capture.contextMenu2) {
+        capture.contextMenu2->Release();
+        capture.contextMenu2 = nullptr;
+    }
+    if (capture.obj) {
+        capture.obj->Release();
+        capture.obj = nullptr;
+    }
+    capture.populated = false;
+}
 
 class PendingQueue {
 public:
@@ -1131,8 +1190,8 @@ public:
     }
 
     void Clear() {
-        if (valid_ && capture_.obj) {
-            capture_.obj->Release();
+        if (valid_) {
+            ReleaseCapture(capture_);
         }
         valid_ = false;
         capture_ = {};
@@ -1164,8 +1223,8 @@ HRESULT STDMETHODCALLTYPE QueryContextMenu_Hook(IContextMenu* pThis, HMENU hmenu
     // A capture that never reached TrackPopupMenu* is stale; release it
     // before capturing the new one.
     PendingCapture previous{};
-    if (g_pending.Take(previous) && previous.obj) {
-        previous.obj->Release();
+    if (g_pending.Take(previous)) {
+        ReleaseCapture(previous);
     }
 
     PendingCapture capture{};
@@ -1206,9 +1265,7 @@ bool ConsumePendingAndReplay(HWND owner, HMENU hMenu) {
     }
     ReplayInto(capture.obj, hMenu, capture.indexMenu, capture.idCmdFirst,
                capture.idCmdLast, capture.flags);
-    if (capture.obj) {
-        capture.obj->Release();
-    }
+    ReleaseCapture(capture);
     Wh_Log(L"Replayed native population for owner=%p", owner);
     return true;
 }
@@ -1295,34 +1352,31 @@ MenuModel BuildModelFromHMenu(HMENU menu, UINT idCmdFirst,
     return model;
 }
 
-// Runs the real population offscreen and refreshes the cache. Always called
-// after the interactive menu has closed, on the same UI thread. Persistence
-// happens later on the invalidation thread.
+// Walks the retained populated menu into the cache. Always called after the
+// interactive menu has closed, on the same UI thread. Persistence happens
+// later on the invalidation thread.
 std::vector<std::wstring> SnapshotLoadedModules();
 std::vector<std::wstring> DiffModules(const std::vector<std::wstring>& before,
                                       const std::vector<std::wstring>& after);
+bool EnsureContextPopulated(PendingCapture& capture);
 
-void DiscoverIntoCache(IContextMenu* context, const PendingCapture& capture,
-                       const ContextSignature& signature) {
-    if (!context) {
+void DiscoverIntoCache(PendingCapture& capture, const ContextSignature& signature) {
+    if (capture.discoveryDone || !capture.obj) {
+        return;
+    }
+    if (!EnsureContextPopulated(capture)) {
         return;
     }
 
-    const std::vector<std::wstring> modulesBefore = SnapshotLoadedModules();
+    const ULONGLONG start = GetTickCount64();
+    MenuModel model = BuildModelFromHMenu(capture.populatedMenu, capture.idCmdFirst,
+                                          signature, capture.obj);
+    model.handlerModules = capture.handlerModules;
+    model.sourceStamp = capture.sourceStamp;
+    capture.discoveryDone = true;
 
-    HMENU menu = CreatePopupMenu();
-    if (!menu) {
-        return;
-    }
-    ReplayInto(context, menu, capture.indexMenu, capture.idCmdFirst, capture.idCmdLast,
-               capture.flags);
-    MenuModel model = BuildModelFromHMenu(menu, capture.idCmdFirst, signature, context);
-    DestroyMenu(menu);
-
-    model.handlerModules = DiffModules(modulesBefore, SnapshotLoadedModules());
-    model.sourceStamp = ComputeModuleStamp(model.handlerModules);
-
-    Wh_Log(L"Discovered %zu menu items", model.items.size());
+    Wh_Log(L"Discovered %zu menu items in %llu ms", model.items.size(),
+           static_cast<unsigned long long>(GetTickCount64() - start));
     g_cache.Put(std::move(model));
 }
 
@@ -1702,34 +1756,151 @@ struct InvocationContext {
     std::vector<std::wstring> paths;
     IContextMenu* liveContext = nullptr;
     UINT idCmdFirst = 0;
+    ShellViewKind kind = ShellViewKind::None;
     DWORD clipboardSequence = 0;
     bool clipboardHadData = false;
 };
 
-HWND FindShellDefView(HWND owner) {
-    for (HWND window = owner; window; window = GetAncestor(window, GA_PARENT)) {
-        wchar_t className[128] = {};
-        if (!GetClassNameW(window, className, ARRAYSIZE(className))) {
-            break;
-        }
-        if (wcscmp(className, L"SHELLDLL_DefView") == 0) {
-            return window;
-        }
+// Invokes a menu item through the live context object using its descriptor
+// (canonical verb or command offset).
+CMINVOKECOMMANDINFOEX BuildInvokeCommandInfo(const MenuItem& item,
+                                             const InvocationContext& ctx);
+
+// Maps a view action to its documented folder view mode.
+FOLDERVIEWMODE FolderViewModeFor(ViewAction action) {
+    switch (action) {
+        case ViewAction::ViewSmallIcons:
+            return FVM_SMALLICON;
+        case ViewAction::ViewList:
+            return FVM_LIST;
+        case ViewAction::ViewDetails:
+            return FVM_DETAILS;
+        default:
+            return FVM_ICON;
     }
-    return nullptr;
 }
 
-bool InvokeContextVerb(IContextMenu* context, const std::wstring& verb, HWND owner) {
-    if (!context || verb.empty()) {
+bool InvokeContextItem(IContextMenu* context, const MenuItem& item,
+                       const InvocationContext& ctx) {
+    if (!context) {
         return false;
     }
-    CMINVOKECOMMANDINFOEX info = {};
-    info.cbSize = sizeof(info);
-    info.fMask = CMIC_MASK_UNICODE;
-    info.hwnd = owner;
-    info.lpVerbW = verb.c_str();
-    info.nShow = SW_SHOWNORMAL;
+    CMINVOKECOMMANDINFOEX info = BuildInvokeCommandInfo(item, ctx);
     return SUCCEEDED(context->InvokeCommand(reinterpret_cast<CMINVOKECOMMANDINFO*>(&info)));
+}
+
+// Active shell view for the menu owner, or nullptr.
+IShellView* GetActiveShellView(HWND owner, ShellViewKind kind) {
+    IShellBrowser* browser = nullptr;
+    if (kind == ShellViewKind::Desktop) {
+        browser = GetDesktopShellBrowser();
+    } else if (kind == ShellViewKind::ShellDefView) {
+        browser = GetShellBrowserForWindow(owner);
+        if (browser) {
+            browser->AddRef();  // borrowed pointer from CWM_GETISHELLBROWSER
+        }
+    }
+    if (!browser) {
+        return nullptr;
+    }
+
+    IShellView* view = nullptr;
+    browser->QueryActiveShellView(&view);
+    browser->Release();
+    return view;
+}
+
+bool CreateShortcutForPaths(const std::vector<std::wstring>& paths) {
+    if (paths.empty()) {
+        return false;
+    }
+
+    bool ok = false;
+    for (const std::wstring& path : paths) {
+        std::wstring directory = path;
+        const size_t slash = directory.find_last_of(L"\\/");
+        if (slash != std::wstring::npos) {
+            directory.resize(slash);
+        } else {
+            directory.clear();
+        }
+        std::wstring name = path.substr(slash == std::wstring::npos ? 0 : slash + 1);
+        const size_t dot = name.find_last_of(L'.');
+        if (dot != std::wstring::npos && dot > 0) {
+            name.resize(dot);
+        }
+
+        std::wstring target;
+        if (!directory.empty()) {
+            target = directory + L"\\";
+        }
+        target += name + L" - Shortcut.lnk";
+
+        IShellLinkW* link = nullptr;
+        if (FAILED(CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER,
+                                    IID_IShellLinkW, (void**)&link)) ||
+            !link) {
+            continue;
+        }
+        link->SetPath(path.c_str());
+        if (!directory.empty()) {
+            link->SetWorkingDirectory(directory.c_str());
+        }
+
+        IPersistFile* file = nullptr;
+        if (SUCCEEDED(link->QueryInterface(IID_IPersistFile, (void**)&file)) && file) {
+            if (SUCCEEDED(file->Save(target.c_str(), TRUE))) {
+                ok = true;
+            }
+            file->Release();
+        }
+        link->Release();
+    }
+    return ok;
+}
+
+// Dispatches a documented view operation through IFolderView2 / IShellView.
+InvokeResult InvokeViewAction(const MenuItem& item, const InvocationContext& ctx) {
+    IShellView* view = GetActiveShellView(ctx.owner, ctx.kind);
+    if (!view) {
+        return InvokeResult::FallbackNative;
+    }
+
+    InvokeResult result = InvokeResult::FallbackNative;
+    const ViewAction action = static_cast<ViewAction>(item.viewAction);
+
+    if (action == ViewAction::Refresh) {
+        result = SUCCEEDED(view->Refresh()) ? InvokeResult::Handled
+                                            : InvokeResult::FallbackNative;
+    } else {
+        IFolderView2* folderView = nullptr;
+        if (SUCCEEDED(view->QueryInterface(IID_IFolderView2, (void**)&folderView)) &&
+            folderView) {
+            switch (action) {
+                case ViewAction::Rename:
+                    result = SUCCEEDED(folderView->DoRename())
+                                 ? InvokeResult::Handled
+                                 : InvokeResult::FallbackNative;
+                    break;
+                case ViewAction::ViewLargeIcons:
+                case ViewAction::ViewSmallIcons:
+                case ViewAction::ViewList:
+                case ViewAction::ViewDetails: {
+                    const FOLDERVIEWMODE mode = FolderViewModeFor(action);
+                    result = SUCCEEDED(folderView->SetViewModeAndIconSize(mode, -1))
+                                 ? InvokeResult::Handled
+                                 : InvokeResult::FallbackNative;
+                    break;
+                }
+                default:
+                    break;
+            }
+            folderView->Release();
+        }
+    }
+
+    view->Release();
+    return result;
 }
 
 bool CopyAsPath(const std::vector<std::wstring>& paths) {
@@ -1827,23 +1998,38 @@ CMINVOKECOMMANDINFOEX BuildInvokeCommandInfo(const MenuItem& item,
     return info;
 }
 
-// Runs the real population on the live object so its command offsets map to
-// handlers. Idempotent per open.
+// Runs the real population once per open on the live object, retaining the
+// populated menu for discovery and the native fallback. Idempotent.
 bool EnsureContextPopulated(PendingCapture& capture) {
-    if (capture.used) {
+    if (capture.populated) {
         return true;
     }
     if (!capture.obj) {
         return false;
     }
+
+    const std::vector<std::wstring> modulesBefore = SnapshotLoadedModules();
+    const ULONGLONG start = GetTickCount64();
+
     HMENU menu = CreatePopupMenu();
     if (!menu) {
         return false;
     }
     ReplayInto(capture.obj, menu, capture.indexMenu, capture.idCmdFirst, capture.idCmdLast,
                capture.flags);
-    DestroyMenu(menu);
+
+    capture.populatedMenu = menu;
+    capture.populated = true;
     capture.used = true;
+    capture.handlerModules = DiffModules(modulesBefore, SnapshotLoadedModules());
+    capture.sourceStamp = ComputeModuleStamp(capture.handlerModules);
+
+    capture.obj->QueryInterface(IID_IContextMenu3, (void**)&capture.contextMenu3);
+    capture.obj->QueryInterface(IID_IContextMenu2, (void**)&capture.contextMenu2);
+
+    Wh_Log(L"Population: %llu ms, %d items",
+           static_cast<unsigned long long>(GetTickCount64() - start),
+           GetMenuItemCount(menu));
     return true;
 }
 
@@ -1858,22 +2044,21 @@ InvokeResult InvokeExtensionItem(const MenuItem& item, const InvocationContext& 
         return InvokeResult::FallbackNative;
     }
 
-    CMINVOKECOMMANDINFOEX info = BuildInvokeCommandInfo(item, ctx);
-    HRESULT result =
-        ctx.liveContext->InvokeCommand(reinterpret_cast<CMINVOKECOMMANDINFO*>(&info));
-    if (FAILED(result) && !item.canonicalVerb.empty() && item.verbOffset != 0) {
-        // The verb failed; retry once by offset now that the object is
-        // populated.
-        MenuItem offsetItem = item;
-        offsetItem.canonicalVerb.clear();
-        CMINVOKECOMMANDINFOEX retry = BuildInvokeCommandInfo(offsetItem, ctx);
-        result = ctx.liveContext->InvokeCommand(reinterpret_cast<CMINVOKECOMMANDINFO*>(&retry));
+    if (InvokeContextItem(ctx.liveContext, item, ctx)) {
+        return InvokeResult::Handled;
     }
 
-    return SUCCEEDED(result) ? InvokeResult::Handled : InvokeResult::FallbackNative;
+    // The verb failed; retry once by offset now that the object is populated.
+    MenuItem offsetItem = item;
+    offsetItem.canonicalVerb.clear();
+    if (InvokeContextItem(ctx.liveContext, offsetItem, ctx)) {
+        return InvokeResult::Handled;
+    }
+    return InvokeResult::FallbackNative;
 }
 
-InvokeResult InvokeItem(const MenuItem& item, const InvocationContext& ctx) {
+InvokeResult InvokeItem(const MenuItem& item, const InvocationContext& ctx,
+                        PendingCapture& capture) {
     if (item.kind == ItemKind::Separator || (item.flags & kModelDisabled)) {
         return InvokeResult::Handled;
     }
@@ -1883,14 +2068,8 @@ InvokeResult InvokeItem(const MenuItem& item, const InvocationContext& ctx) {
             return InvokeResult::FallbackNative;
         case ActionKind::Submenu:
             return InvokeResult::Handled;
-        case ActionKind::ViewCommand: {
-            HWND target = FindShellDefView(ctx.owner);
-            if (!target) {
-                target = ctx.owner;
-            }
-            PostMessageW(target, WM_COMMAND, MAKEWPARAM(item.viewCommandId, 0), 0);
-            return InvokeResult::Handled;
-        }
+        case ActionKind::ViewAction:
+            return InvokeViewAction(item, ctx);
         case ActionKind::ShellVerb:
             if (item.canonicalVerb == L"copyaspath") {
                 return CopyAsPath(ctx.paths) ? InvokeResult::Handled
@@ -1900,6 +2079,10 @@ InvokeResult InvokeItem(const MenuItem& item, const InvocationContext& ctx) {
                 return InvokeSendTo(item.targetPath, ctx.paths)
                            ? InvokeResult::Handled
                            : InvokeResult::FallbackNative;
+            }
+            if (item.canonicalVerb == L"createshortcut") {
+                return CreateShortcutForPaths(ctx.paths) ? InvokeResult::Handled
+                                                         : InvokeResult::FallbackNative;
             }
             if (item.canonicalVerb == L"paste") {
                 const DWORD currentSequence = GetClipboardSequenceNumber();
@@ -1911,9 +2094,22 @@ InvokeResult InvokeItem(const MenuItem& item, const InvocationContext& ctx) {
                     return InvokeResult::Handled;
                 }
             }
-            return InvokeContextVerb(ctx.liveContext, item.canonicalVerb, ctx.owner)
-                       ? InvokeResult::Handled
-                       : InvokeResult::FallbackNative;
+            // The shell only knows its own commands once the object has been
+            // populated; standard verbs fail on an empty object.
+            if (!EnsureContextPopulated(capture)) {
+                return InvokeResult::FallbackNative;
+            }
+            if (InvokeContextItem(ctx.liveContext, item, ctx)) {
+                return InvokeResult::Handled;
+            }
+            if (!item.canonicalVerb.empty() && item.verbOffset != 0) {
+                MenuItem offsetItem = item;
+                offsetItem.canonicalVerb.clear();
+                if (InvokeContextItem(ctx.liveContext, offsetItem, ctx)) {
+                    return InvokeResult::Handled;
+                }
+            }
+            return InvokeResult::FallbackNative;
     }
     return InvokeResult::Failed;
 }
@@ -2000,24 +2196,111 @@ private:
     }
 };
 
-// Replays the real population into a fresh menu, shows it, and invokes the
-// selection through the live object. Used by the fallback item and the
-// Shift bypass.
-std::optional<uint32_t> ShowNativeReplay(const PendingCapture& capture, HWND owner,
-                                         POINT pt) {
-    HMENU menu = CreatePopupMenu();
-    if (!menu) {
+// Subclasses the menu owner while a menu is displayed. Optionally forwards
+// menu messages to the shell context object (required for dynamic submenus
+// and owner-draw items on the native menu), and optionally warms the cache
+// after a short delay while the menu is still open.
+constexpr UINT kDiscoveryTimerId = 0xC0DE;
+constexpr UINT_PTR kOwnerSubclassId = 0xC0DE;
+
+class OwnerSubclass {
+public:
+    OwnerSubclass(HWND owner, PendingCapture* capture, bool forwardMenuMessages)
+        : owner_(owner), capture_(capture), forward_(forwardMenuMessages) {
+        if (SetWindowSubclass(owner, &OwnerSubclass::Proc, kOwnerSubclassId,
+                              reinterpret_cast<DWORD_PTR>(this))) {
+            subclassed_ = true;
+        }
+    }
+
+    ~OwnerSubclass() {
+        StopDiscoveryTimer();
+        if (subclassed_) {
+            RemoveWindowSubclass(owner_, &OwnerSubclass::Proc, kOwnerSubclassId);
+        }
+    }
+
+    // Runs discovery after the menu has been painted and is interactive.
+    void StartDiscoveryTimer(const ContextSignature& signature) {
+        discoverySignature_ = signature;
+        SetTimer(owner_, kDiscoveryTimerId, 150, nullptr);
+        timerSet_ = true;
+    }
+
+    void StopDiscoveryTimer() {
+        if (timerSet_) {
+            KillTimer(owner_, kDiscoveryTimerId);
+            timerSet_ = false;
+        }
+    }
+
+private:
+    static LRESULT CALLBACK Proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
+                                 UINT_PTR idSubclass, DWORD_PTR refData) {
+        auto* self = reinterpret_cast<OwnerSubclass*>(refData);
+        return self->Handle(hwnd, msg, wParam, lParam, idSubclass);
+    }
+
+    LRESULT Handle(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
+                   UINT_PTR idSubclass) {
+        if (msg == WM_TIMER && wParam == kDiscoveryTimerId) {
+            StopDiscoveryTimer();
+            if (capture_ && !capture_->discoveryDone) {
+                DiscoverIntoCache(*capture_, discoverySignature_);
+            }
+            return 0;
+        }
+
+        if (forward_ && capture_) {
+            switch (msg) {
+                case WM_INITMENUPOPUP:
+                case WM_DRAWITEM:
+                case WM_MEASUREITEM:
+                case WM_MENUCHAR: {
+                    LRESULT result = 0;
+                    bool handled = false;
+                    if (capture_->contextMenu3) {
+                        handled = SUCCEEDED(capture_->contextMenu3->HandleMenuMsg2(
+                            msg, wParam, lParam, &result));
+                    } else if (capture_->contextMenu2) {
+                        handled = SUCCEEDED(capture_->contextMenu2->HandleMenuMsg(
+                            msg, wParam, lParam));
+                    }
+                    if (msg == WM_MENUCHAR && handled) {
+                        return result;
+                    }
+                    break;
+                }
+                default:
+                    break;
+            }
+        }
+
+        return DefSubclassProc(hwnd, msg, wParam, lParam);
+    }
+
+    HWND owner_ = nullptr;
+    PendingCapture* capture_ = nullptr;
+    bool forward_ = false;
+    bool subclassed_ = false;
+    bool timerSet_ = false;
+    ContextSignature discoverySignature_{};
+};
+
+// Shows the retained, really-populated native menu with menu-message
+// forwarding and invokes the selection through the live object. Used by the
+// fallback item and the Shift bypass.
+std::optional<uint32_t> ShowNativeReplay(PendingCapture& capture, HWND owner, POINT pt) {
+    if (!EnsureContextPopulated(capture) || !capture.populatedMenu ||
+        !TrackPopupMenuEx_Original) {
         return std::nullopt;
     }
-    ReplayInto(capture.obj, menu, capture.indexMenu, capture.idCmdFirst, capture.idCmdLast,
-               capture.flags);
+
+    OwnerSubclass subclass(owner, &capture, /*forwardMenuMessages=*/true);
 
     const UINT flags = TPM_RETURNCMD | TPM_NONOTIFY | TPM_LEFTALIGN | TPM_TOPALIGN;
-    int command = TrackPopupMenuEx_Original
-                      ? TrackPopupMenuEx_Original(menu, flags, pt.x, pt.y, owner, nullptr)
-                      : 0;
-    DestroyMenu(menu);
-
+    int command = TrackPopupMenuEx_Original(capture.populatedMenu, flags, pt.x, pt.y, owner,
+                                            nullptr);
     if (command == 0 || !capture.obj) {
         return std::nullopt;
     }
@@ -2028,7 +2311,11 @@ std::optional<uint32_t> ShowNativeReplay(const PendingCapture& capture, HWND own
     info.hwnd = owner;
     info.lpVerbW = MAKEINTRESOURCEW(static_cast<UINT>(command) - capture.idCmdFirst);
     info.nShow = SW_SHOWNORMAL;
-    capture.obj->InvokeCommand(reinterpret_cast<CMINVOKECOMMANDINFO*>(&info));
+    if (FAILED(capture.obj->InvokeCommand(
+            reinterpret_cast<CMINVOKECOMMANDINFO*>(&info)))) {
+        Wh_Log(L"Native menu invocation failed for offset %u",
+               static_cast<UINT>(command) - capture.idCmdFirst);
+    }
 
     return static_cast<uint32_t>(command);
 }
@@ -2339,6 +2626,10 @@ private:
         CreateDirectoryW(storagePath, nullptr);
         CreateDirectoryW(warmupDir.c_str(), nullptr);
 
+        // Rebuild the SendTo entries off the UI thread (also after handler
+        // registry invalidation).
+        RebuildSendToChildren();
+
         const bool comInitialized =
             SUCCEEDED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED));
 
@@ -2497,7 +2788,10 @@ private:
         return 0;
     }
 
-    void Run() {
+    // Fingerprints the watched handler keys using their last-write times and
+    // subkey stamps. Cheap registry reads; unlike change notifications, this
+    // cannot storm when unrelated shell activity touches these keys.
+    static uint64_t ComputeRegistryFingerprint() {
         static const wchar_t* kKeys[] = {
             L"*\\shellex\\ContextMenuHandlers",
             L"AllFilesystemObjects\\shellex\\ContextMenuHandlers",
@@ -2509,72 +2803,84 @@ private:
         };
         constexpr DWORD kKeyCount = ARRAYSIZE(kKeys);
 
-        HANDLE events[kKeyCount + 1] = {};
-        HKEY keyForEvent[kKeyCount + 1] = {};
-        HKEY keys[kKeyCount] = {};
-        events[0] = stopEvent_;
-        DWORD eventCount = 1;
-
+        uint64_t fingerprint = 1469598103934665603ULL;
         for (DWORD i = 0; i < kKeyCount; ++i) {
-            if (RegOpenKeyExW(HKEY_CLASSES_ROOT, kKeys[i], 0, KEY_NOTIFY, &keys[i]) !=
+            fingerprint = HashCombine(fingerprint, HashString(kKeys[i]));
+
+            HKEY key = nullptr;
+            if (RegOpenKeyExW(HKEY_CLASSES_ROOT, kKeys[i], 0, KEY_READ, &key) !=
                 ERROR_SUCCESS) {
-                keys[i] = nullptr;
+                fingerprint = HashCombine(fingerprint, 0);
                 continue;
             }
-            HANDLE event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
-            if (event &&
-                RegNotifyChangeKeyValue(keys[i], TRUE,
-                                        REG_NOTIFY_CHANGE_NAME | REG_NOTIFY_CHANGE_LAST_SET,
-                                        event, TRUE) == ERROR_SUCCESS) {
-                keyForEvent[eventCount] = keys[i];
-                events[eventCount++] = event;
-            } else if (event) {
-                CloseHandle(event);
+
+            DWORD subKeys = 0;
+            DWORD values = 0;
+            FILETIME lastWrite = {};
+            RegQueryInfoKeyW(key, nullptr, nullptr, nullptr, &subKeys, nullptr, nullptr,
+                             &values, nullptr, nullptr, nullptr, &lastWrite);
+            fingerprint = HashCombine(fingerprint, subKeys);
+            fingerprint = HashCombine(fingerprint, values);
+            fingerprint = HashCombine(
+                fingerprint,
+                (static_cast<uint64_t>(lastWrite.dwHighDateTime) << 32) |
+                    lastWrite.dwLowDateTime);
+
+            // A change inside a handler's own subkey does not update the
+            // parent's last-write time; stamp each subkey as well.
+            for (DWORD j = 0; j < subKeys; ++j) {
+                wchar_t name[256] = {};
+                DWORD nameLength = ARRAYSIZE(name);
+                FILETIME subLastWrite = {};
+                if (RegEnumKeyExW(key, j, name, &nameLength, nullptr, nullptr, nullptr,
+                                  &subLastWrite) != ERROR_SUCCESS) {
+                    continue;
+                }
+                fingerprint = HashCombine(fingerprint, HashString(name));
+                fingerprint = HashCombine(
+                    fingerprint,
+                    (static_cast<uint64_t>(subLastWrite.dwHighDateTime) << 32) |
+                        subLastWrite.dwLowDateTime);
             }
+            RegCloseKey(key);
         }
+        return fingerprint;
+    }
+
+    void InvalidateNow(const wchar_t* reason) {
+        ++generation_;
+        g_cache.Clear();
+        InvalidateSendToChildren();
+        // The warm-up thread rebuilds the SendTo entries and pre-built models.
+        g_warmup.Stop();
+        g_warmup.Start();
+        Wh_Log(L"%s; cache invalidated", reason);
+    }
+
+    void Run() {
+        uint64_t registryFingerprint = ComputeRegistryFingerprint();
 
         for (;;) {
-            // 5 s poll: debounced cache persistence. Hourly: handler-module
-            // stamp revalidation.
-            DWORD wait = WaitForMultipleObjects(eventCount, events, FALSE, 5000);
-            if (wait == WAIT_OBJECT_0) {
+            if (WaitForSingleObject(stopEvent_, 5000) == WAIT_OBJECT_0) {
                 break;
             }
-            if (wait == WAIT_TIMEOUT) {
-                if (GetTickCount64() >= nextRevalidationTick_) {
-                    nextRevalidationTick_ = GetTickCount64() + 3600000;
-                    if (g_cache.RevalidateStamps()) {
-                        Wh_Log(L"Handler modules changed; cache invalidated");
-                        g_warmup.Stop();
-                        g_warmup.Start();
-                    }
-                }
-                g_cache.MaybeSave(CacheFilePath());
-                continue;
-            }
-            if (wait > WAIT_OBJECT_0 && wait < WAIT_OBJECT_0 + eventCount) {
-                const DWORD index = wait - WAIT_OBJECT_0;
-                ++generation_;
-                g_cache.Clear();
-                InvalidateSendToChildren();
-                RebuildSendToChildren();
-                Wh_Log(L"Context menu handlers changed; cache invalidated");
-                if (keyForEvent[index]) {
-                    RegNotifyChangeKeyValue(
-                        keyForEvent[index], TRUE,
-                        REG_NOTIFY_CHANGE_NAME | REG_NOTIFY_CHANGE_LAST_SET, events[index],
-                        TRUE);
-                }
-            }
-        }
 
-        for (DWORD i = 1; i < eventCount; ++i) {
-            CloseHandle(events[i]);
-        }
-        for (DWORD i = 0; i < kKeyCount; ++i) {
-            if (keys[i]) {
-                RegCloseKey(keys[i]);
+            const uint64_t current = ComputeRegistryFingerprint();
+            if (current != registryFingerprint) {
+                registryFingerprint = current;
+                InvalidateNow(L"Context menu handlers changed");
             }
+
+            if (GetTickCount64() >= nextRevalidationTick_) {
+                nextRevalidationTick_ = GetTickCount64() + 3600000;
+                if (g_cache.RevalidateStamps()) {
+                    Wh_Log(L"Handler modules changed; cache invalidated");
+                    g_warmup.Stop();
+                    g_warmup.Start();
+                }
+            }
+
+            g_cache.MaybeSave(CacheFilePath());
         }
     }
 
@@ -2629,6 +2935,10 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
     ContextSignature signature{scope, typeKey, shape, Variant::Normal};
 
     std::optional<MenuModel> cached = g_cache.Find(signature);
+    Wh_Log(L"Cache %s: scope=%d key=%s shape=%d paths=%zu",
+           cached ? L"hit" : L"miss", static_cast<int>(scope), typeKey.c_str(),
+           static_cast<int>(shape), paths.size());
+
     MenuModel model =
         cached ? MergeCoreWithCached(BuildCoreModel(scope, paths, shape), *cached)
                : BuildCoreModel(scope, paths, shape);
@@ -2662,12 +2972,21 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
 
     g_warmup.SetMenuOpen(true);
     bool creationFailed = false;
-    std::optional<uint32_t> chosen =
-        NativeMenuView::Show(model, owner, pt, &creationFailed);
+    std::optional<uint32_t> chosen;
+    {
+        // The menu paints immediately; discovery runs from the timer while
+        // the menu is interactive, so closing stays instant.
+        OwnerSubclass subclass(owner, &capture, /*forwardMenuMessages=*/false);
+        subclass.StartDiscoveryTimer(signature);
+        chosen = NativeMenuView::Show(model, owner, pt, &creationFailed);
+    }
+
     if (creationFailed) {
         Wh_Log(L"Menu creation failed; using the native menu");
         ShowNativeReplay(capture, owner, pt);
-        DiscoverIntoCache(capture.obj, capture, signature);
+        if (!capture.discoveryDone) {
+            DiscoverIntoCache(capture, signature);
+        }
         g_warmup.SetMenuOpen(false);
         return true;
     }
@@ -2681,6 +3000,7 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
             ctx.paths = paths;
             ctx.liveContext = capture.obj;
             ctx.idCmdFirst = capture.idCmdFirst;
+            ctx.kind = kind;
             ctx.clipboardSequence = clipboardSequence;
             ctx.clipboardHadData = clipboardHadData;
 
@@ -2689,16 +3009,19 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
                 result = (model.flags & kModelOwnerDraw)
                              ? InvokeResult::FallbackNative
                              : InvokeExtensionItem(*item, ctx, capture);
-            } else if (item->action == ActionKind::ViewCommand) {
-                // View commands act on the view's current selection; never
-                // act on a different selection than the one captured.
+            } else if (item->action == ActionKind::ViewAction) {
+                // View actions act on the view's current selection; never act
+                // on a different selection than the one captured.
                 SelectionInfo current = GetSelection(owner, kind);
                 result = PathSetsEqual(current.paths, paths)
-                             ? InvokeItem(*item, ctx)
+                             ? InvokeItem(*item, ctx, capture)
                              : InvokeResult::FallbackNative;
             } else {
-                result = InvokeItem(*item, ctx);
+                result = InvokeItem(*item, ctx, capture);
             }
+
+            Wh_Log(L"Invoke '%s' -> %d", item->label.c_str(),
+                   static_cast<int>(result));
 
             if (result == InvokeResult::FallbackNative) {
                 ShowNativeReplay(capture, owner, pt);
@@ -2706,8 +3029,11 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
         }
     }
 
-    // Refresh the cache from the real population, off the interactive path.
-    DiscoverIntoCache(capture.obj, capture, signature);
+    // If the timer did not run while the menu was open (fast dismissal),
+    // warm the cache now.
+    if (!capture.discoveryDone) {
+        DiscoverIntoCache(capture, signature);
+    }
     g_warmup.SetMenuOpen(false);
     return true;
 }
@@ -2725,18 +3051,14 @@ BOOL WINAPI TrackPopupMenuEx_Hook(HMENU hMenu, UINT uFlags, int x, int y, HWND h
     if (path == MenuPath::Ours && hasPending) {
         Wh_Log(L"Replacing context menu: kind=%d", static_cast<int>(kind));
         ShowReplacementMenu(pending, kind, hWnd, POINT{x, y});
-        if (pending.obj) {
-            pending.obj->Release();
-        }
+        ReleaseCapture(pending);
         return 0;
     }
 
     if (path == MenuPath::NativeBypass && hasPending) {
         Wh_Log(L"Shift bypass: showing the native menu");
         ShowNativeReplay(pending, hWnd, POINT{x, y});
-        if (pending.obj) {
-            pending.obj->Release();
-        }
+        ReleaseCapture(pending);
         return 0;
     }
 
@@ -2744,9 +3066,7 @@ BOOL WINAPI TrackPopupMenuEx_Hook(HMENU hMenu, UINT uFlags, int x, int y, HWND h
         Wh_Log(L"Passing through: kind=%d", static_cast<int>(kind));
         ReplayInto(pending.obj, hMenu, pending.indexMenu, pending.idCmdFirst,
                    pending.idCmdLast, pending.flags);
-        if (pending.obj) {
-            pending.obj->Release();
-        }
+        ReleaseCapture(pending);
     }
     return TrackPopupMenuEx_Original(hMenu, uFlags, x, y, hWnd, lptpm);
 }
@@ -2764,18 +3084,14 @@ BOOL WINAPI TrackPopupMenu_Hook(HMENU hMenu, UINT uFlags, int x, int y, int nRes
     if (path == MenuPath::Ours && hasPending) {
         Wh_Log(L"Replacing context menu: kind=%d", static_cast<int>(kind));
         ShowReplacementMenu(pending, kind, hWnd, POINT{x, y});
-        if (pending.obj) {
-            pending.obj->Release();
-        }
+        ReleaseCapture(pending);
         return 0;
     }
 
     if (path == MenuPath::NativeBypass && hasPending) {
         Wh_Log(L"Shift bypass: showing the native menu");
         ShowNativeReplay(pending, hWnd, POINT{x, y});
-        if (pending.obj) {
-            pending.obj->Release();
-        }
+        ReleaseCapture(pending);
         return 0;
     }
 
@@ -2783,9 +3099,7 @@ BOOL WINAPI TrackPopupMenu_Hook(HMENU hMenu, UINT uFlags, int x, int y, int nRes
         Wh_Log(L"Passing through: kind=%d", static_cast<int>(kind));
         ReplayInto(pending.obj, hMenu, pending.indexMenu, pending.idCmdFirst,
                    pending.idCmdLast, pending.flags);
-        if (pending.obj) {
-            pending.obj->Release();
-        }
+        ReleaseCapture(pending);
     }
     return TrackPopupMenu_Original(hMenu, uFlags, x, y, nReserved, hWnd, prcRect);
 }

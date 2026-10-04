@@ -275,7 +275,7 @@ int main() {
     CHECK(restoredChild && restoredChild->verbOffset == 42);
 
     std::vector<uint8_t> badVersion = serialized;
-    badVersion[4] = 4;
+    badVersion[4] = 5;
     cmo::Cache rejectedCache;
     CHECK(!cmo::Cache::Deserialize(badVersion, rejectedCache));
 
@@ -502,6 +502,57 @@ int main() {
     cmo::Perf perf;
     perf.MarkOpenPathStart();
     CHECK(perf.OpenPathElapsedMs() == 0);
+
+    // Fix regression tests: documented view actions and native descriptor
+    // adoption.
+    CHECK(cmo::FolderViewModeFor(cmo::ViewAction::ViewLargeIcons) == FVM_ICON);
+    CHECK(cmo::FolderViewModeFor(cmo::ViewAction::ViewSmallIcons) == FVM_SMALLICON);
+    CHECK(cmo::FolderViewModeFor(cmo::ViewAction::ViewList) == FVM_LIST);
+    CHECK(cmo::FolderViewModeFor(cmo::ViewAction::ViewDetails) == FVM_DETAILS);
+    CHECK(cmo::FolderViewModeFor(cmo::ViewAction::Rename) == FVM_ICON);
+
+    bool renameIsViewAction = false;
+    bool cutIsVerb = false;
+    bool createShortcutIsVerb = false;
+    for (const cmo::MenuItem& item : single.items) {
+        if (item.label == L"Rename") {
+            renameIsViewAction =
+                item.action == cmo::ActionKind::ViewAction &&
+                item.viewAction == static_cast<uint32_t>(cmo::ViewAction::Rename);
+        }
+        if (item.label == L"Cut") {
+            cutIsVerb = item.action == cmo::ActionKind::ShellVerb &&
+                        item.canonicalVerb == L"cut";
+        }
+        if (item.label == L"Create shortcut") {
+            createShortcutIsVerb = item.action == cmo::ActionKind::ShellVerb &&
+                                   item.canonicalVerb == L"createshortcut";
+        }
+    }
+    CHECK(renameIsViewAction);
+    CHECK(cutIsVerb);
+    CHECK(createShortcutIsVerb);
+
+    // Native descriptors are adopted for matching core items, including
+    // offset-only ones.
+    cmo::MenuModel adoptionCore = cmo::BuildCoreFileModel(onePath, cmo::Shape::Single);
+    cmo::MenuModel adoptionCached{};
+    adoptionCached.sig = adoptionCore.sig;
+    cmo::MenuItem nativeCut{};
+    nativeCut.id = 15000;
+    nativeCut.kind = cmo::ItemKind::Command;
+    nativeCut.action = cmo::ActionKind::ShellVerb;
+    nativeCut.label = L"Cut";
+    nativeCut.verbOffset = 7;
+    adoptionCached.items.push_back(nativeCut);
+    cmo::MenuModel adopted = cmo::MergeCoreWithCached(adoptionCore, adoptionCached);
+    bool cutAdopted = false;
+    for (const cmo::MenuItem& item : adopted.items) {
+        if (item.label == L"Cut") {
+            cutAdopted = item.canonicalVerb.empty() && item.verbOffset == 7;
+        }
+    }
+    CHECK(cutAdopted);
 
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");

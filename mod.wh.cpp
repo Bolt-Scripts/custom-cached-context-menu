@@ -2,7 +2,7 @@
 // @id              context-menu-overhaul
 // @name            Context Menu Overhaul
 // @description     Replaces the Explorer context menu with an instantly-opening cached menu, then discovers and caches shell extension items asynchronously.
-// @version         0.3.15
+// @version         0.3.16
 // @include         explorer.exe
 // @architecture    x86-64
 // @compilerOptions -lole32 -lshlwapi -luuid -lcomctl32 -ladvapi32 -lgdi32 -luxtheme -lversion
@@ -1520,6 +1520,10 @@ struct PendingCapture {
     // Populated once per open; reused for discovery and the native fallback.
     HMENU populatedMenu = nullptr;
     bool populated = false;
+    // The menu the shell asked us to show; populated in place so the native
+    // fallback can return the shell's own menu with the shell's own IDs.
+    HMENU callerMenu = nullptr;
+    bool ownsPopulatedMenu = false;
     IContextMenu3* contextMenu3 = nullptr;
     IContextMenu2* contextMenu2 = nullptr;
     std::vector<std::wstring> handlerModules;
@@ -1531,10 +1535,11 @@ struct PendingCapture {
 
 // Releases every resource a capture owns.
 void ReleaseCapture(PendingCapture& capture) {
-    if (capture.populatedMenu) {
+    if (capture.populatedMenu && capture.ownsPopulatedMenu) {
         DestroyMenu(capture.populatedMenu);
-        capture.populatedMenu = nullptr;
     }
+    capture.populatedMenu = nullptr;
+    capture.ownsPopulatedMenu = false;
     if (capture.contextMenu3) {
         capture.contextMenu3->Release();
         capture.contextMenu3 = nullptr;
@@ -3181,9 +3186,17 @@ bool EnsureContextPopulated(PendingCapture& capture) {
     const std::vector<std::wstring> modulesBefore = SnapshotLoadedModules();
     const ULONGLONG start = GetTickCount64();
 
-    HMENU menu = CreatePopupMenu();
+    // Populate the menu the shell actually asked to show when there is one:
+    // the shell only recognizes dynamic submenus (New's templates) and view
+    // commands in its own menu, so the native fallback can hand it back
+    // untouched. Warm-up/offscreen captures get a private menu instead.
+    HMENU menu = capture.callerMenu;
     if (!menu) {
-        return false;
+        menu = CreatePopupMenu();
+        if (!menu) {
+            return false;
+        }
+        capture.ownsPopulatedMenu = true;
     }
     // Extensions may attach bitmaps with SetMenuItemBitmaps during population;
     // start a fresh recording so lookups match this menu.
@@ -4026,8 +4039,8 @@ constexpr UINT_PTR kOwnerSubclassId = 0xC0DE;
 
 class OwnerSubclass {
 public:
-    OwnerSubclass(HWND owner, PendingCapture* capture, bool forwardMenuMessages)
-        : owner_(owner), capture_(capture), forward_(forwardMenuMessages) {
+    OwnerSubclass(HWND owner, PendingCapture* capture)
+        : owner_(owner), capture_(capture) {
         if (SetWindowSubclass(owner, &OwnerSubclass::Proc, kOwnerSubclassId,
                               reinterpret_cast<DWORD_PTR>(this))) {
             subclassed_ = true;
@@ -4077,84 +4090,15 @@ private:
             return 0;
         }
 
-        if (forward_ && capture_) {
-            switch (msg) {
-                case WM_INITMENUPOPUP:
-                case WM_DRAWITEM:
-                case WM_MEASUREITEM:
-                case WM_MENUCHAR: {
-                    LRESULT result = 0;
-                    bool handled = false;
-                    if (capture_->contextMenu3) {
-                        handled = SUCCEEDED(capture_->contextMenu3->HandleMenuMsg2(
-                            msg, wParam, lParam, &result));
-                    } else if (capture_->contextMenu2) {
-                        handled = SUCCEEDED(capture_->contextMenu2->HandleMenuMsg(
-                            msg, wParam, lParam));
-                    }
-                    if (msg == WM_MENUCHAR && handled) {
-                        return result;
-                    }
-                    break;
-                }
-                default:
-                    break;
-            }
-        }
-
         return DefSubclassProc(hwnd, msg, wParam, lParam);
     }
 
     HWND owner_ = nullptr;
     PendingCapture* capture_ = nullptr;
-    bool forward_ = false;
     bool subclassed_ = false;
     bool timerSet_ = false;
     ContextSignature discoverySignature_{};
 };
-
-// Shows the retained, really-populated native menu with menu-message
-// forwarding and invokes the selection through the live object. Used by the
-// fallback item and the Shift bypass.
-std::optional<uint32_t> ShowNativeReplay(PendingCapture& capture, HWND owner, POINT pt) {
-    if (!EnsureContextPopulated(capture) || !capture.populatedMenu ||
-        !TrackPopupMenuEx_Original) {
-        return std::nullopt;
-    }
-
-    // Submenus are populated on WM_INITMENUPOPUP; initialize the retained menu
-    // before showing it or placeholders (such as the New submenu's) would be
-    // displayed and their invocation would fail.
-    if (!capture.menuInitialized) {
-        InitializeMenuRecursive(capture, capture.populatedMenu, 0);
-        capture.menuInitialized = true;
-    }
-
-    OwnerSubclass subclass(owner, &capture, /*forwardMenuMessages=*/true);
-
-    const UINT flags = TPM_RETURNCMD | TPM_NONOTIFY | TPM_LEFTALIGN | TPM_TOPALIGN;
-    MenuAnimationSuppressor animationSuppressor;
-    int command = TrackPopupMenuEx_Original(capture.populatedMenu, flags, pt.x, pt.y, owner,
-                                            nullptr);
-    if (command == 0 || !capture.obj) {
-        return std::nullopt;
-    }
-
-    CMINVOKECOMMANDINFOEX info = {};
-    info.cbSize = sizeof(info);
-    info.fMask = CMIC_MASK_UNICODE;
-    info.hwnd = owner;
-    const UINT offset = static_cast<UINT>(command) - capture.idCmdFirst;
-    info.lpVerb = MAKEINTRESOURCEA(offset);
-    info.lpVerbW = MAKEINTRESOURCEW(offset);
-    info.nShow = SW_SHOWNORMAL;
-    if (FAILED(capture.obj->InvokeCommand(
-            reinterpret_cast<CMINVOKECOMMANDINFO*>(&info)))) {
-        Wh_Log(L"Native menu invocation failed for offset %u", offset);
-    }
-
-    return static_cast<uint32_t>(command);
-}
 
 // Open-path timing, active only with debugLogging.
 class Perf {
@@ -4652,7 +4596,15 @@ MenuPath DecidePath(bool shiftHeld, ShellViewKind kind, bool hasPendingCapture,
     return MenuPath::Ours;
 }
 
-bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner, POINT pt) {
+// Result of building the replacement menu. `ShowCallerMenu` means the
+// untouched native menu should be replayed into the caller's own menu and
+// shown through the original call: the shell then populates dynamic submenus
+// (New's templates, view commands) and invokes the selection itself, which a
+// private retained menu cannot do faithfully.
+enum class MenuOutcome : uint8_t { Handled, ShowCallerMenu };
+
+MenuOutcome ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner,
+                                POINT pt) {
     g_perf.MarkOpenPathStart();
 
     SelectionInfo info = GetSelection(owner, kind);
@@ -4661,9 +4613,8 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
 
     if (!IsFilesystemContext(info.folderIsFilesystem, info.allItemsAreFilesystem)) {
         Wh_Log(L"Non-filesystem namespace: using the native menu");
-        ShowNativeReplay(capture, owner, pt);
         g_warmup.SetMenuOpen(false);
-        return true;
+        return MenuOutcome::ShowCallerMenu;
     }
 
     Scope scope = RefineScope(ScopeFromKind(kind, paths.empty()), info.allItemsAreFolders,
@@ -4698,8 +4649,8 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
 
         if (ShouldShowNativeReplay(model.flags)) {
             Wh_Log(L"Owner-draw context: using the native menu");
-            ShowNativeReplay(capture, owner, pt);
-            break;
+            g_warmup.SetMenuOpen(false);
+            return MenuOutcome::ShowCallerMenu;
         }
 
         for (MenuItem& item : model.items) {
@@ -4726,7 +4677,7 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
             if (!needsDiscovery) {
                 chosen = NativeMenuView::Show(model, owner, pt, &creationFailed);
             } else {
-                OwnerSubclass subclass(owner, &capture, /*forwardMenuMessages=*/false);
+                OwnerSubclass subclass(owner, &capture);
                 subclass.StartDiscoveryTimer(signature);
                 chosen = NativeMenuView::Show(model, owner, pt, &creationFailed);
             }
@@ -4734,11 +4685,11 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
 
         if (creationFailed) {
             Wh_Log(L"Menu creation failed; using the native menu");
-            ShowNativeReplay(capture, owner, pt);
             if (needsDiscovery && !capture.discoveryDone) {
                 DiscoverIntoCache(capture, signature);
             }
-            break;
+            g_warmup.SetMenuOpen(false);
+            return MenuOutcome::ShowCallerMenu;
         }
 
         if (chosen) {
@@ -4774,7 +4725,8 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
                        static_cast<int>(result));
 
                 if (result == InvokeResult::FallbackNative) {
-                    ShowNativeReplay(capture, owner, pt);
+                    g_warmup.SetMenuOpen(false);
+                    return MenuOutcome::ShowCallerMenu;
                 }
             }
             break;
@@ -4796,7 +4748,7 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
     }
 
     g_warmup.SetMenuOpen(false);
-    return true;
+    return MenuOutcome::Handled;
 }
 
 BOOL WINAPI TrackPopupMenuEx_Hook(HMENU hMenu, UINT uFlags, int x, int y, HWND hWnd,
@@ -4812,16 +4764,27 @@ BOOL WINAPI TrackPopupMenuEx_Hook(HMENU hMenu, UINT uFlags, int x, int y, HWND h
     if (path == MenuPath::Ours && hasPending) {
         Wh_Log(L"Replacing context menu: kind=%d", static_cast<int>(kind));
         pending.owner = hWnd;
-        ShowReplacementMenu(pending, kind, hWnd, POINT{x, y});
+        pending.callerMenu = hMenu;
+        const MenuOutcome outcome = ShowReplacementMenu(pending, kind, hWnd, POINT{x, y});
+        if (outcome == MenuOutcome::Handled) {
+            ReleaseCapture(pending);
+            return 0;
+        }
+        Wh_Log(L"Showing the caller's native menu");
+        if (!pending.populated || pending.populatedMenu != hMenu) {
+            ReplayInto(pending.obj, hMenu, pending.indexMenu, pending.idCmdFirst,
+                       pending.idCmdLast, pending.flags);
+        }
         ReleaseCapture(pending);
-        return 0;
+        return TrackPopupMenuEx_Original(hMenu, uFlags, x, y, hWnd, lptpm);
     }
 
     if (path == MenuPath::NativeBypass && hasPending) {
         Wh_Log(L"Shift bypass: showing the native menu");
-        ShowNativeReplay(pending, hWnd, POINT{x, y});
+        ReplayInto(pending.obj, hMenu, pending.indexMenu, pending.idCmdFirst,
+                   pending.idCmdLast, pending.flags);
         ReleaseCapture(pending);
-        return 0;
+        return TrackPopupMenuEx_Original(hMenu, uFlags, x, y, hWnd, lptpm);
     }
 
     if (hasPending) {
@@ -4846,16 +4809,27 @@ BOOL WINAPI TrackPopupMenu_Hook(HMENU hMenu, UINT uFlags, int x, int y, int nRes
     if (path == MenuPath::Ours && hasPending) {
         Wh_Log(L"Replacing context menu: kind=%d", static_cast<int>(kind));
         pending.owner = hWnd;
-        ShowReplacementMenu(pending, kind, hWnd, POINT{x, y});
+        pending.callerMenu = hMenu;
+        const MenuOutcome outcome = ShowReplacementMenu(pending, kind, hWnd, POINT{x, y});
+        if (outcome == MenuOutcome::Handled) {
+            ReleaseCapture(pending);
+            return 0;
+        }
+        Wh_Log(L"Showing the caller's native menu");
+        if (!pending.populated || pending.populatedMenu != hMenu) {
+            ReplayInto(pending.obj, hMenu, pending.indexMenu, pending.idCmdFirst,
+                       pending.idCmdLast, pending.flags);
+        }
         ReleaseCapture(pending);
-        return 0;
+        return TrackPopupMenu_Original(hMenu, uFlags, x, y, nReserved, hWnd, prcRect);
     }
 
     if (path == MenuPath::NativeBypass && hasPending) {
         Wh_Log(L"Shift bypass: showing the native menu");
-        ShowNativeReplay(pending, hWnd, POINT{x, y});
+        ReplayInto(pending.obj, hMenu, pending.indexMenu, pending.idCmdFirst,
+                   pending.idCmdLast, pending.flags);
         ReleaseCapture(pending);
-        return 0;
+        return TrackPopupMenu_Original(hMenu, uFlags, x, y, nReserved, hWnd, prcRect);
     }
 
     if (hasPending) {

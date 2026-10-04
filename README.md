@@ -79,9 +79,9 @@ untouched native menu, including extended verbs.
   **Debug logging**.
 - Core menu labels are English; cached extension labels come from the shell and
   are localized.
-- "Sort by" / "New" / "Paste shortcut" fall back to the native menu on builds
-  where the shell object rejects those verbs; the fallback menu is initialized
-  first, so its dynamic submenus (New's templates) are populated.
+- "Sort by" / "New" / "Paste shortcut" fall back to the untouched native
+  menu, shown from the shell's own menu handle, so dynamic submenus (New's
+  templates) and view commands behave exactly as they do without the mod.
 - Rare entries whose labels cannot be read from the shell (dynamic or
   owner-drawn items) are hidden rather than shown blank, and submenus left
   empty are removed with them; each hidden item is logged as

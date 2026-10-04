@@ -997,6 +997,73 @@ bool CopyAsPath(const std::vector<std::wstring>& paths) {
     return ok;
 }
 
+// Fills an invocation descriptor: canonical verb when available, otherwise
+// the cached command offset.
+CMINVOKECOMMANDINFOEX BuildInvokeCommandInfo(const MenuItem& item,
+                                             const InvocationContext& ctx) {
+    auto descriptor = ChooseInvokeDescriptor(item);
+
+    CMINVOKECOMMANDINFOEX info = {};
+    info.cbSize = sizeof(info);
+    info.fMask = CMIC_MASK_UNICODE;
+    info.hwnd = ctx.owner;
+    info.nShow = SW_SHOWNORMAL;
+    info.ptInvoke = ctx.pt;
+
+    if (!descriptor.first.empty()) {
+        info.lpVerbW = descriptor.first.c_str();
+    } else {
+        info.lpVerbW = MAKEINTRESOURCEW(descriptor.second);
+    }
+    return info;
+}
+
+// Runs the real population on the live object so its command offsets map to
+// handlers. Idempotent per open.
+bool EnsureContextPopulated(PendingCapture& capture) {
+    if (capture.used) {
+        return true;
+    }
+    if (!capture.obj) {
+        return false;
+    }
+    HMENU menu = CreatePopupMenu();
+    if (!menu) {
+        return false;
+    }
+    ReplayInto(capture.obj, menu, capture.indexMenu, capture.idCmdFirst, capture.idCmdLast,
+               capture.flags);
+    DestroyMenu(menu);
+    capture.used = true;
+    return true;
+}
+
+// Invokes a cached extension item through the live context object, falling
+// back to the native menu when the item is owner-draw or invocation fails.
+InvokeResult InvokeExtensionItem(const MenuItem& item, const InvocationContext& ctx,
+                                 PendingCapture& capture) {
+    if (item.flags & kModelOwnerDraw) {
+        return InvokeResult::FallbackNative;
+    }
+    if (!ctx.liveContext || !EnsureContextPopulated(capture)) {
+        return InvokeResult::FallbackNative;
+    }
+
+    CMINVOKECOMMANDINFOEX info = BuildInvokeCommandInfo(item, ctx);
+    HRESULT result =
+        ctx.liveContext->InvokeCommand(reinterpret_cast<CMINVOKECOMMANDINFO*>(&info));
+    if (FAILED(result) && !item.canonicalVerb.empty() && item.verbOffset != 0) {
+        // The verb failed; retry once by offset now that the object is
+        // populated.
+        MenuItem offsetItem = item;
+        offsetItem.canonicalVerb.clear();
+        CMINVOKECOMMANDINFOEX retry = BuildInvokeCommandInfo(offsetItem, ctx);
+        result = ctx.liveContext->InvokeCommand(reinterpret_cast<CMINVOKECOMMANDINFO*>(&retry));
+    }
+
+    return SUCCEEDED(result) ? InvokeResult::Handled : InvokeResult::FallbackNative;
+}
+
 InvokeResult InvokeItem(const MenuItem& item, const InvocationContext& ctx) {
     if (item.kind == ItemKind::Separator || (item.flags & kModelDisabled)) {
         return InvokeResult::Handled;
@@ -1016,11 +1083,6 @@ InvokeResult InvokeItem(const MenuItem& item, const InvocationContext& ctx) {
             return InvokeResult::Handled;
         }
         case ActionKind::ShellVerb:
-            if (item.flags & kModelExtension) {
-                // Extension invocation lands in the next task; use the native
-                // menu until then.
-                return InvokeResult::FallbackNative;
-            }
             if (item.canonicalVerb == L"copyaspath") {
                 return CopyAsPath(ctx.paths) ? InvokeResult::Handled
                                              : InvokeResult::Failed;
@@ -1148,8 +1210,7 @@ std::optional<uint32_t> ShowNativeReplay(const PendingCapture& capture, HWND own
 // ===========================================================================
 namespace cmo {
 
-bool ShowReplacementMenu(const PendingCapture& capture, ShellViewKind kind, HWND owner,
-                         POINT pt) {
+bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner, POINT pt) {
     std::vector<std::wstring> paths = GetSelectedPaths(owner, kind);
     Shape shape = paths.size() > 1 ? Shape::Multi : Shape::Single;
     ContextSignature signature{Scope::Files, MakeTypeKey(paths), shape, Variant::Normal};
@@ -1169,7 +1230,16 @@ bool ShowReplacementMenu(const PendingCapture& capture, ShellViewKind kind, HWND
             ctx.liveContext = capture.obj;
             ctx.idCmdFirst = capture.idCmdFirst;
 
-            if (InvokeItem(*item, ctx) == InvokeResult::FallbackNative) {
+            InvokeResult result = InvokeResult::Failed;
+            if (item->flags & kModelExtension) {
+                result = (model.flags & kModelOwnerDraw)
+                             ? InvokeResult::FallbackNative
+                             : InvokeExtensionItem(*item, ctx, capture);
+            } else {
+                result = InvokeItem(*item, ctx);
+            }
+
+            if (result == InvokeResult::FallbackNative) {
                 ShowNativeReplay(capture, owner, pt);
             }
         }

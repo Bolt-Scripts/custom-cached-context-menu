@@ -177,6 +177,37 @@ int main() {
     CHECK(separatorCount >= 3);
     CHECK_EQ(mergedModel.items.back().label, std::wstring(L"Show more options"));
 
+    cmo::MenuItem verbInvoke{};
+    verbInvoke.canonicalVerb = L"open";
+    verbInvoke.verbOffset = 3;
+    cmo::InvocationContext invokeCtx{};
+    invokeCtx.owner = nullptr;
+    invokeCtx.pt = POINT{10, 20};
+    CMINVOKECOMMANDINFOEX verbInfo = cmo::BuildInvokeCommandInfo(verbInvoke, invokeCtx);
+    CHECK(verbInfo.cbSize == sizeof(CMINVOKECOMMANDINFOEX));
+    CHECK((verbInfo.fMask & CMIC_MASK_UNICODE) != 0);
+    CHECK(verbInfo.lpVerbW != nullptr);
+    CHECK(wcscmp(verbInfo.lpVerbW, L"open") == 0);
+    CHECK(verbInfo.hwnd == invokeCtx.owner);
+    CHECK(verbInfo.ptInvoke.x == 10 && verbInfo.ptInvoke.y == 20);
+
+    cmo::MenuItem offsetInvoke{};
+    offsetInvoke.verbOffset = 7;
+    CMINVOKECOMMANDINFOEX offsetInfo = cmo::BuildInvokeCommandInfo(offsetInvoke, invokeCtx);
+    CHECK(reinterpret_cast<UINT_PTR>(offsetInfo.lpVerbW) == 7);
+
+    cmo::MenuItem ownerDrawItem{};
+    ownerDrawItem.flags = cmo::kModelOwnerDraw;
+    cmo::PendingCapture emptyCapture{};
+    CHECK(cmo::InvokeExtensionItem(ownerDrawItem, invokeCtx, emptyCapture) ==
+          cmo::InvokeResult::FallbackNative);
+
+    cmo::InvocationContext snapshotCtx{};
+    std::vector<std::wstring> sourcePaths{L"a.txt"};
+    snapshotCtx.paths = sourcePaths;
+    sourcePaths.push_back(L"b.txt");
+    CHECK(snapshotCtx.paths.size() == 1);
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

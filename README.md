@@ -51,10 +51,12 @@ untouched native menu, including extended verbs.
 - Icons: core actions (Cut/Copy/Rename/Delete/Properties/Open with/Paste/
   Refresh) use built-in icon-font glyphs; extension entries use the bitmap the
   shell provides, an icon captured by asking the extension to draw the item
-  (owner-draw), or the verb's registry `Icon` value (matched by verb or display
-  label). Everything is composited over the themed menu background, including
-  alpha-less bitmaps where black is the transparent color key; checked items
-  keep the checkmark gutter.
+  (owner-draw), the verb's registry `Icon` value (matched by verb or display
+  label), or — as a last resort — icon 0 from a matching handler DLL.
+  Everything is composited over the themed menu background; checked items keep
+  the checkmark gutter.
+- Warm-up models are provisional: they are shown instantly but never overwrite
+  a live model, and are refreshed from the real context on first use.
 - Core menu labels are English; cached extension labels come from the shell and
   are localized.
 - "Sort by" / "New" / "Paste shortcut" fall back to the native menu on builds

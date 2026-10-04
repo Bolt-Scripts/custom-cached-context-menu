@@ -2,7 +2,7 @@
 // @id              context-menu-overhaul
 // @name            Context Menu Overhaul
 // @description     Replaces the Explorer context menu with an instantly-opening cached menu, then discovers and caches shell extension items asynchronously.
-// @version         0.3.4
+// @version         0.3.5
 // @include         explorer.exe
 // @architecture    x86-64
 // @compilerOptions -lole32 -lshlwapi -luuid -lcomctl32 -ladvapi32 -lgdi32 -luxtheme
@@ -213,6 +213,7 @@ enum ModelFlags : uint32_t {
     kModelSeparator = 1u << 5,
     kModelExtension = 1u << 6,
     kModelHasOffset = 1u << 7,
+    kModelWarmup = 1u << 8,
 };
 
 struct MenuItem {
@@ -549,7 +550,7 @@ MenuModel MergeCoreWithCached(const MenuModel& core, const MenuModel& cached) {
 namespace cmo {
 
 constexpr uint32_t kCacheMagic = 0x434F4D4F;  // "COMO"
-constexpr uint32_t kCacheVersion = 10;
+constexpr uint32_t kCacheVersion = 11;
 constexpr uint32_t kMaxCacheEntries = 1024;
 constexpr uint32_t kMaxModelItems = 4096;
 constexpr uint32_t kMaxMenuDepth = 16;
@@ -824,6 +825,12 @@ public:
 
     void Put(MenuModel model) {
         std::lock_guard<std::mutex> lock(mutex_);
+        auto it = entries_.find(model.sig.Hash());
+        if (it != entries_.end() && (model.flags & kModelWarmup) &&
+            !(it->second.model.flags & kModelWarmup)) {
+            // A live model is authoritative; never let warm-up overwrite it.
+            return;
+        }
         PutLocked(std::move(model));
     }
 
@@ -1418,6 +1425,13 @@ uint32_t MapMenuState(UINT state) {
     return flags;
 }
 
+// HBMMENU_* sentinels are -1 or 1..13; real GDI bitmap handles are arbitrary
+// 32-bit values (sign-extended on 64-bit Windows) and must be captured.
+bool IsSentinelMenuBitmap(HBITMAP bitmap) {
+    const INT_PTR value = reinterpret_cast<INT_PTR>(bitmap);
+    return value == -1 || (value > 0 && value <= 13);
+}
+
 // Copies a shell menu bitmap into BGRA pixels (any bit depth, top-down).
 void CaptureBitmapPixels(HBITMAP bitmap, std::vector<uint8_t>& out) {
     out.clear();
@@ -1586,6 +1600,61 @@ std::wstring ResolveRegistryIconByLabel(const ContextSignature& signature,
     return L"";
 }
 
+// Last resort: find a ContextMenuHandlers key whose name appears in the item
+// label and extract icon 0 from the handler DLL.
+std::wstring ResolveHandlerDllIconByLabel(const ContextSignature& signature,
+                                          const std::wstring& label) {
+    if (label.empty()) {
+        return L"";
+    }
+
+    for (const std::wstring& base : ShellIconBases(signature)) {
+        const std::wstring handlersKey = base + L"\\shellex\\ContextMenuHandlers";
+        for (HKEY root : {HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE}) {
+            HKEY key = nullptr;
+            if (RegOpenKeyExW(root, (L"Software\\Classes\\" + handlersKey).c_str(), 0,
+                              KEY_READ, &key) != ERROR_SUCCESS) {
+                continue;
+            }
+
+            for (DWORD i = 0;; ++i) {
+                wchar_t name[256] = {};
+                DWORD nameLength = ARRAYSIZE(name);
+                if (RegEnumKeyExW(key, i, name, &nameLength, nullptr, nullptr, nullptr,
+                                  nullptr) != ERROR_SUCCESS) {
+                    break;
+                }
+                if (nameLength < 5 || StrStrIW(label.c_str(), name) == nullptr) {
+                    continue;
+                }
+
+                const std::wstring clsid =
+                    ReadClassesString(handlersKey + L"\\" + name, nullptr);
+                if (clsid.empty()) {
+                    continue;
+                }
+                const std::wstring dll = ReadClassesString(
+                    L"CLSID\\" + clsid + L"\\InprocServer32", nullptr);
+                if (dll.empty()) {
+                    continue;
+                }
+
+                wchar_t expanded[MAX_PATH] = {};
+                if (!ExpandEnvironmentStringsW(dll.c_str(), expanded,
+                                              ARRAYSIZE(expanded)) ||
+                    GetFileAttributesW(expanded) == INVALID_FILE_ATTRIBUTES) {
+                    continue;
+                }
+
+                RegCloseKey(key);
+                return std::wstring(expanded) + L",0";
+            }
+            RegCloseKey(key);
+        }
+    }
+    return L"";
+}
+
 // Fills in registry icons for static verbs that provide no menu bitmap.
 void ApplyRegistryIcons(std::vector<MenuItem>& items,
                         const ContextSignature& signature) {
@@ -1599,6 +1668,9 @@ void ApplyRegistryIcons(std::vector<MenuItem>& items,
         std::wstring icon = ResolveRegistryIcon(signature, item.canonicalVerb);
         if (icon.empty()) {
             icon = ResolveRegistryIconByLabel(signature, item.label);
+        }
+        if (icon.empty()) {
+            icon = ResolveHandlerDllIconByLabel(signature, item.label);
         }
         if (!icon.empty()) {
             item.iconRef = icon;
@@ -1639,7 +1711,7 @@ void BuildItemsFromHMenu(HMENU menu, UINT idCmdFirst, IContextMenu* context,
             item.label.assign(labelBuffer, static_cast<size_t>(labelLength));
         }
 
-        if (info.hbmpItem && reinterpret_cast<INT_PTR>(info.hbmpItem) <= 16) {
+        if (info.hbmpItem && IsSentinelMenuBitmap(info.hbmpItem)) {
             Wh_Log(L"Sentinel menu bitmap %lld for '%s'",
                    static_cast<long long>(reinterpret_cast<INT_PTR>(info.hbmpItem)),
                    item.label.c_str());
@@ -1651,9 +1723,8 @@ void BuildItemsFromHMenu(HMENU menu, UINT idCmdFirst, IContextMenu* context,
         }
 
         // Capture icons the shell itself provides, for commands and submenu
-        // parents alike. HBMMENU_* sentinels are small integers; real
-        // bitmaps are pointers.
-        if (info.hbmpItem && reinterpret_cast<INT_PTR>(info.hbmpItem) > 16) {
+        // parents alike.
+        if (info.hbmpItem && !IsSentinelMenuBitmap(info.hbmpItem)) {
             CaptureBitmapPixels(info.hbmpItem, item.iconPixels);
         }
 
@@ -1832,7 +1903,7 @@ bool CaptureOwnerDrawIcon(PendingCapture& capture, const MenuItem& item,
     if (item.flags & kModelDefault) {
         drawInfo.itemState |= ODS_DEFAULT;
     }
-    drawInfo.hwndItem = capture.owner;
+    drawInfo.hwndItem = reinterpret_cast<HWND>(capture.populatedMenu);
     drawInfo.hDC = memory;
     drawInfo.rcItem = rect;
 
@@ -3801,6 +3872,7 @@ private:
                 model.handlerModules =
                     DiffModules(modulesBefore, SnapshotLoadedModules());
                 model.sourceStamp = ComputeModuleStamp(model.handlerModules);
+                model.flags |= kModelWarmup;
                 g_cache.Put(std::move(model));
             }
         }
@@ -4020,9 +4092,11 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
     ContextSignature signature{scope, typeKey, shape, Variant::Normal};
 
     std::optional<MenuModel> cached = g_cache.Find(signature);
+    const bool needsDiscovery = !cached || (cached->flags & kModelWarmup);
     Wh_Log(L"Cache %s: scope=%d key=%s shape=%d paths=%zu",
-           cached ? L"hit" : L"miss", static_cast<int>(scope), typeKey.c_str(),
-           static_cast<int>(shape), paths.size());
+           cached ? (needsDiscovery ? L"warm" : L"hit") : L"miss",
+           static_cast<int>(scope), typeKey.c_str(), static_cast<int>(shape),
+           paths.size());
 
     MenuModel model =
         cached ? MergeCoreWithCached(BuildCoreModel(scope, paths, shape), *cached)
@@ -4065,7 +4139,7 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
         // the timer while the menu is interactive, so closing stays instant.
         // Cache hits skip population entirely; extension items populate
         // lazily if they are clicked.
-        if (cached) {
+        if (!needsDiscovery) {
             chosen = NativeMenuView::Show(model, owner, pt, &creationFailed);
         } else {
             OwnerSubclass subclass(owner, &capture, /*forwardMenuMessages=*/false);
@@ -4077,7 +4151,7 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
     if (creationFailed) {
         Wh_Log(L"Menu creation failed; using the native menu");
         ShowNativeReplay(capture, owner, pt);
-        if (!cached && !capture.discoveryDone) {
+        if (needsDiscovery && !capture.discoveryDone) {
             DiscoverIntoCache(capture, signature);
         }
         g_warmup.SetMenuOpen(false);
@@ -4123,8 +4197,9 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
     }
 
     // If the timer did not run while the menu was open (fast dismissal),
-    // warm the cache now. Cache hits never populate.
-    if (!cached && !capture.discoveryDone) {
+    // warm the cache now. Warm-up entries are refreshed from the real
+    // context on first use; live entries never populate again.
+    if (needsDiscovery && !capture.discoveryDone) {
         DiscoverIntoCache(capture, signature);
     }
     g_warmup.SetMenuOpen(false);

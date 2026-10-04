@@ -1104,6 +1104,74 @@ int main() {
         CHECK(post.front().iconPixels.size() == 24 * 24 * 4);
     }
 
+    // Warm-up models never overwrite live ones, and a warm-up entry can be
+    // replaced by a live one.
+    {
+        cmo::Cache warmCache;
+        cmo::MenuModel liveModel =
+            cmo::BuildCoreFileModel({L"a.txt"}, cmo::Shape::Single);
+        warmCache.Put(liveModel);
+        cmo::MenuModel warmModel =
+            cmo::BuildCoreFileModel({L"a.txt"}, cmo::Shape::Single);
+        warmModel.flags = cmo::kModelWarmup;
+        warmCache.Put(warmModel);
+        std::optional<cmo::MenuModel> kept = warmCache.Find(liveModel.sig);
+        CHECK(kept.has_value());
+        CHECK(kept && !(kept->flags & cmo::kModelWarmup));
+
+        cmo::Cache warmFirst;
+        warmFirst.Put(warmModel);
+        warmFirst.Put(liveModel);
+        std::optional<cmo::MenuModel> replaced = warmFirst.Find(liveModel.sig);
+        CHECK(replaced.has_value());
+        CHECK(replaced && !(replaced->flags & cmo::kModelWarmup));
+    }
+
+    // Handler DLL fallback resolves an icon for extension-added items whose
+    // label matches the handler key name.
+    {
+        const wchar_t* clsid = L"{11111111-2222-3333-4444-555555555555}";
+        HKEY handlerKey = nullptr;
+        if (RegCreateKeyExW(
+                HKEY_CURRENT_USER,
+                L"Software\\Classes\\*\\shellex\\ContextMenuHandlers\\CmoHandler", 0,
+                nullptr, 0, KEY_WRITE, nullptr, &handlerKey, nullptr) ==
+            ERROR_SUCCESS) {
+            RegSetValueExW(handlerKey, nullptr, 0, REG_SZ,
+                           reinterpret_cast<const BYTE*>(clsid),
+                           static_cast<DWORD>((wcslen(clsid) + 1) * sizeof(wchar_t)));
+            RegCloseKey(handlerKey);
+
+            HKEY dllKey = nullptr;
+            if (RegCreateKeyExW(
+                    HKEY_CURRENT_USER,
+                    L"Software\\Classes\\CLSID\\{11111111-2222-3333-4444-555555555555}\\InprocServer32",
+                    0, nullptr, 0, KEY_WRITE, nullptr, &dllKey, nullptr) ==
+                ERROR_SUCCESS) {
+                const wchar_t dllPath[] = L"%SystemRoot%\\System32\\shell32.dll";
+                RegSetValueExW(dllKey, nullptr, 0, REG_SZ,
+                               reinterpret_cast<const BYTE*>(dllPath),
+                               static_cast<DWORD>(sizeof(dllPath)));
+                RegCloseKey(dllKey);
+            }
+
+            cmo::ContextSignature handlerSig{cmo::Scope::Files, L".cmotest3",
+                                             cmo::Shape::Single,
+                                             cmo::Variant::Normal};
+            const std::wstring handlerIcon =
+                cmo::ResolveHandlerDllIconByLabel(handlerSig, L"Scan with CmoHandler");
+            CHECK(!handlerIcon.empty());
+            CHECK(handlerIcon.find(L",0") != std::wstring::npos);
+
+            RegDeleteTreeW(
+                HKEY_CURRENT_USER,
+                L"Software\\Classes\\*\\shellex\\ContextMenuHandlers\\CmoHandler");
+            RegDeleteTreeW(
+                HKEY_CURRENT_USER,
+                L"Software\\Classes\\CLSID\\{11111111-2222-3333-4444-555555555555}");
+        }
+    }
+
     // Instant menu open: while the suppressor is active the master menu
     // animation switch is off, and it is restored afterwards. Skipped when
     // the environment does not implement the SPI.

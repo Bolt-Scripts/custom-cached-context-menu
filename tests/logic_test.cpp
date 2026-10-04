@@ -1163,6 +1163,47 @@ int main() {
             CHECK(!handlerIcon.empty());
             CHECK(handlerIcon.find(L",0") != std::wstring::npos);
 
+            // Generic key name: match by the handler DLL name instead, with a
+            // quoted registered path.
+            HKEY genericKey = nullptr;
+            if (RegCreateKeyExW(
+                    HKEY_CURRENT_USER,
+                    L"Software\\Classes\\*\\shellex\\ContextMenuHandlers\\ZZNoMatch",
+                    0, nullptr, 0, KEY_WRITE, nullptr, &genericKey, nullptr) ==
+                ERROR_SUCCESS) {
+                const wchar_t clsid2[] = L"{22222222-3333-4444-5555-666666666666}";
+                RegSetValueExW(genericKey, nullptr, 0, REG_SZ,
+                               reinterpret_cast<const BYTE*>(clsid2),
+                               static_cast<DWORD>(sizeof(clsid2)));
+                RegCloseKey(genericKey);
+
+                HKEY dllKey2 = nullptr;
+                if (RegCreateKeyExW(
+                        HKEY_CURRENT_USER,
+                        L"Software\\Classes\\CLSID\\{22222222-3333-4444-5555-666666666666}\\InprocServer32",
+                        0, nullptr, 0, KEY_WRITE, nullptr, &dllKey2, nullptr) ==
+                    ERROR_SUCCESS) {
+                    const wchar_t quotedDll[] =
+                        L"\"%SystemRoot%\\System32\\shell32.dll\"";
+                    RegSetValueExW(dllKey2, nullptr, 0, REG_SZ,
+                                   reinterpret_cast<const BYTE*>(quotedDll),
+                                   static_cast<DWORD>(sizeof(quotedDll)));
+                    RegCloseKey(dllKey2);
+                }
+
+                const std::wstring dllIcon =
+                    cmo::ResolveHandlerDllIconByLabel(handlerSig, L"Scan with shell32");
+                CHECK(!dllIcon.empty());
+                CHECK(dllIcon.find(L",0") != std::wstring::npos);
+
+                RegDeleteTreeW(
+                    HKEY_CURRENT_USER,
+                    L"Software\\Classes\\*\\shellex\\ContextMenuHandlers\\ZZNoMatch");
+                RegDeleteTreeW(
+                    HKEY_CURRENT_USER,
+                    L"Software\\Classes\\CLSID\\{22222222-3333-4444-5555-666666666666}");
+            }
+
             RegDeleteTreeW(
                 HKEY_CURRENT_USER,
                 L"Software\\Classes\\*\\shellex\\ContextMenuHandlers\\CmoHandler");

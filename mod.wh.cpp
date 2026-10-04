@@ -2,7 +2,7 @@
 // @id              context-menu-overhaul
 // @name            Context Menu Overhaul
 // @description     Replaces the Explorer context menu with an instantly-opening cached menu, then discovers and caches shell extension items asynchronously.
-// @version         0.3.5
+// @version         0.3.6
 // @include         explorer.exe
 // @architecture    x86-64
 // @compilerOptions -lole32 -lshlwapi -luuid -lcomctl32 -ladvapi32 -lgdi32 -luxtheme
@@ -550,7 +550,7 @@ MenuModel MergeCoreWithCached(const MenuModel& core, const MenuModel& cached) {
 namespace cmo {
 
 constexpr uint32_t kCacheMagic = 0x434F4D4F;  // "COMO"
-constexpr uint32_t kCacheVersion = 11;
+constexpr uint32_t kCacheVersion = 12;
 constexpr uint32_t kMaxCacheEntries = 1024;
 constexpr uint32_t kMaxModelItems = 4096;
 constexpr uint32_t kMaxMenuDepth = 16;
@@ -1548,6 +1548,19 @@ std::wstring ResolveRegistryIcon(const ContextSignature& signature,
     return L"";
 }
 
+// Resolves strings like "@C:\path\file.dll,-123" to their display text.
+std::wstring ResolveIndirectString(const std::wstring& value) {
+    if (value.empty() || value[0] != L'@') {
+        return value;
+    }
+    wchar_t buffer[512] = {};
+    if (SUCCEEDED(SHLoadIndirectString(value.c_str(), buffer, ARRAYSIZE(buffer),
+                                       nullptr))) {
+        return buffer;
+    }
+    return value;
+}
+
 // Finds a shell verb key whose display text matches the item label, for
 // handlers whose key name differs from the canonical verb.
 std::wstring ResolveRegistryIconByLabel(const ContextSignature& signature,
@@ -1584,6 +1597,7 @@ std::wstring ResolveRegistryIconByLabel(const ContextSignature& signature,
             if (display.empty()) {
                 display = ReadClassesString(verbKey, nullptr);
             }
+            display = ResolveIndirectString(display);
             display.erase(std::remove(display.begin(), display.end(), L'&'),
                           display.end());
             if (!display.empty() &&
@@ -1600,8 +1614,8 @@ std::wstring ResolveRegistryIconByLabel(const ContextSignature& signature,
     return L"";
 }
 
-// Last resort: find a ContextMenuHandlers key whose name appears in the item
-// label and extract icon 0 from the handler DLL.
+// Last resort: find a ContextMenuHandlers key that matches the item label
+// (by key name or handler DLL name) and extract icon 0 from its DLL.
 std::wstring ResolveHandlerDllIconByLabel(const ContextSignature& signature,
                                           const std::wstring& label) {
     if (label.empty()) {
@@ -1624,25 +1638,42 @@ std::wstring ResolveHandlerDllIconByLabel(const ContextSignature& signature,
                                   nullptr) != ERROR_SUCCESS) {
                     break;
                 }
-                if (nameLength < 5 || StrStrIW(label.c_str(), name) == nullptr) {
-                    continue;
-                }
 
                 const std::wstring clsid =
                     ReadClassesString(handlersKey + L"\\" + name, nullptr);
                 if (clsid.empty()) {
                     continue;
                 }
-                const std::wstring dll = ReadClassesString(
+                std::wstring dll = ReadClassesString(
                     L"CLSID\\" + clsid + L"\\InprocServer32", nullptr);
                 if (dll.empty()) {
                     continue;
+                }
+                if (dll.size() >= 2 && dll.front() == L'"' && dll.back() == L'"') {
+                    dll = dll.substr(1, dll.size() - 2);
                 }
 
                 wchar_t expanded[MAX_PATH] = {};
                 if (!ExpandEnvironmentStringsW(dll.c_str(), expanded,
                                               ARRAYSIZE(expanded)) ||
                     GetFileAttributesW(expanded) == INVALID_FILE_ATTRIBUTES) {
+                    continue;
+                }
+
+                bool matches =
+                    nameLength >= 5 && StrStrIW(label.c_str(), name) != nullptr;
+                if (!matches) {
+                    // Some handlers are registered under a generic key name;
+                    // match the DLL file name instead.
+                    std::wstring stem = PathFindFileNameW(expanded);
+                    const size_t dot = stem.find_last_of(L'.');
+                    if (dot != std::wstring::npos) {
+                        stem.resize(dot);
+                    }
+                    matches = stem.size() >= 5 &&
+                              StrStrIW(label.c_str(), stem.c_str()) != nullptr;
+                }
+                if (!matches) {
                     continue;
                 }
 
@@ -1653,6 +1684,42 @@ std::wstring ResolveHandlerDllIconByLabel(const ContextSignature& signature,
         }
     }
     return L"";
+}
+
+// Logs the registered context menu handlers so an unresolved item can be
+// traced to its registration.
+void LogHandlerCandidates(const ContextSignature& signature,
+                          const std::wstring& label) {
+    for (const std::wstring& base : ShellIconBases(signature)) {
+        const std::wstring handlersKey = base + L"\\shellex\\ContextMenuHandlers";
+        for (HKEY root : {HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE}) {
+            HKEY key = nullptr;
+            if (RegOpenKeyExW(root, (L"Software\\Classes\\" + handlersKey).c_str(), 0,
+                              KEY_READ, &key) != ERROR_SUCCESS) {
+                continue;
+            }
+
+            std::wstring names;
+            for (DWORD i = 0; i < 12; ++i) {
+                wchar_t name[256] = {};
+                DWORD nameLength = ARRAYSIZE(name);
+                if (RegEnumKeyExW(key, i, name, &nameLength, nullptr, nullptr, nullptr,
+                                  nullptr) != ERROR_SUCCESS) {
+                    break;
+                }
+                if (!names.empty()) {
+                    names += L", ";
+                }
+                names += name;
+            }
+            RegCloseKey(key);
+
+            if (!names.empty()) {
+                Wh_Log(L"Handler candidates for '%s' (%s): %s", label.c_str(),
+                       base.c_str(), names.c_str());
+            }
+        }
+    }
 }
 
 // Fills in registry icons for static verbs that provide no menu bitmap.
@@ -1676,9 +1743,12 @@ void ApplyRegistryIcons(std::vector<MenuItem>& items,
             item.iconRef = icon;
             Wh_Log(L"Registry icon for '%s' (verb '%s'): %s", item.label.c_str(),
                    item.canonicalVerb.c_str(), icon.c_str());
-        } else if (g_settings.debugLogging) {
-            Wh_Log(L"No registry icon for '%s' (verb '%s')", item.label.c_str(),
-                   item.canonicalVerb.c_str());
+        } else {
+            LogHandlerCandidates(signature, item.label);
+            if (g_settings.debugLogging) {
+                Wh_Log(L"No registry icon for '%s' (verb '%s')", item.label.c_str(),
+                       item.canonicalVerb.c_str());
+            }
         }
     }
 }

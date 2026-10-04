@@ -2555,18 +2555,35 @@ struct InvocationDescriptor {
     bool hasOffset = false;
 };
 
+struct LayoutItemResources {
+    IDWriteTextLayout* text = nullptr;
+    ID2D1Bitmap* icon = nullptr;
+
+    ~LayoutItemResources() {
+        if (text) {
+            text->Release();
+        }
+        if (icon) {
+            icon->Release();
+        }
+    }
+};
+
 struct LayoutItem {
     RECT rect = {};
     RECT gutterRect = {};
     RECT iconRect = {};
     RECT textRect = {};
+    ItemKind kind = ItemKind::Command;
     std::wstring label;
     std::wstring iconRef;
+    std::vector<uint8_t> iconPixels;
     uint32_t flags = 0;
     uint32_t textColor = 0;
     uint32_t hoverTextColor = 0;
     int submenuIndex = -1;
     InvocationDescriptor invocation;
+    std::shared_ptr<LayoutItemResources> resources;
 };
 
 struct LayoutPanel {
@@ -2615,8 +2632,10 @@ LayoutPanel BuildLayoutPanel(const std::vector<MenuItem>& items,
     int offset = 0;
     for (const MenuItem& item : items) {
         LayoutItem layout{};
+        layout.kind = item.kind;
         layout.label = item.label;
         layout.iconRef = item.iconRef;
+        layout.iconPixels = item.iconPixels;
         layout.flags = item.flags;
         layout.textColor = (item.flags & kModelDisabled) ? metrics.disabledTextColor
                                                          : metrics.textColor;
@@ -3228,6 +3247,390 @@ private:
 };
 
 inline MenuWindowPool g_menuWindowPool;
+
+// ===========================================================================
+// [CMO:MenuWindow] Input state, content caches, and Direct2D drawing.
+// ===========================================================================
+
+struct MenuInputState {
+    int hoverIndex = -1;
+    int keyboardIndex = -1;
+    int scrollOffset = 0;
+    int openSubmenu = -1;
+};
+
+struct BackdropBitmap {
+    std::vector<uint32_t> pixels;
+    int width = 0;
+    int height = 0;
+};
+
+D2D1_COLOR_F ColorFromArgb(uint32_t argb) {
+    D2D1_COLOR_F color = {};
+    color.a = static_cast<float>((argb >> 24) & 0xFF) / 255.0f;
+    color.r = static_cast<float>((argb >> 16) & 0xFF) / 255.0f;
+    color.g = static_cast<float>((argb >> 8) & 0xFF) / 255.0f;
+    color.b = static_cast<float>(argb & 0xFF) / 255.0f;
+    return color;
+}
+
+// Defined after IconCache below (declaration order); content caches call it.
+HBITMAP GetIconBitmapForMenu(const std::wstring& iconRef,
+                             const std::vector<uint8_t>& iconPixels, int sizePx);
+
+class ContentCaches {
+public:
+    void SetDevice(ID2D1DeviceContext* dc, IDWriteFactory* dwrite) {
+        dc_ = dc;
+        dwrite_ = dwrite;
+    }
+
+    void Bind(LayoutPanel& panel, const LayoutMetrics& metrics,
+              ID2D1DeviceContext* dc) {
+        SetDevice(dc, g_renderDevice.DWriteFactory());
+        BindPanel(panel, metrics);
+    }
+
+    void Clear() {
+        for (auto& pair : text_) {
+            if (pair.second) {
+                pair.second->Release();
+            }
+        }
+        text_.clear();
+        for (auto& pair : icons_) {
+            if (pair.second) {
+                pair.second->Release();
+            }
+        }
+        icons_.clear();
+        dc_ = nullptr;
+    }
+
+    size_t TextCount() const { return text_.size(); }
+    size_t IconCount() const { return icons_.size(); }
+
+private:
+    void BindPanel(LayoutPanel& panel, const LayoutMetrics& metrics) {
+        for (LayoutItem& item : panel.items) {
+            if (item.kind == ItemKind::Separator) {
+                continue;
+            }
+            auto resources = std::make_shared<LayoutItemResources>();
+            resources->text = GetOrCreateText(item, metrics);
+            resources->icon = GetOrCreateIcon(item, metrics);
+            item.resources = std::move(resources);
+        }
+        for (LayoutPanel& child : panel.children) {
+            BindPanel(child, metrics);
+        }
+    }
+
+    IDWriteTextLayout* GetOrCreateText(const LayoutItem& item,
+                                       const LayoutMetrics& metrics) {
+        const int width = static_cast<int>(item.textRect.right - item.textRect.left);
+        if (width <= 0) {
+            return nullptr;
+        }
+        const std::wstring key =
+            item.label + L'\x1f' + metrics.fontFace + L'\x1f' +
+            std::to_wstring(static_cast<int>(metrics.fontSize * 4.0f)) + L'\x1f' +
+            std::to_wstring(width);
+        auto it = text_.find(key);
+        if (it != text_.end()) {
+            return it->second;
+        }
+        if (!dc_ || !dwrite_) {
+            return nullptr;
+        }
+
+        IDWriteTextFormat* format = nullptr;
+        if (FAILED(dwrite_->CreateTextFormat(
+                metrics.fontFace.c_str(), nullptr, DWRITE_FONT_WEIGHT_NORMAL,
+                DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, metrics.fontSize,
+                L"", &format)) ||
+            !format) {
+            return nullptr;
+        }
+
+        IDWriteTextLayout* layout = nullptr;
+        dwrite_->CreateTextLayout(item.label.c_str(),
+                                  static_cast<UINT32>(item.label.size()), format,
+                                  static_cast<float>(width),
+                                  static_cast<float>(metrics.itemHeight), &layout);
+        if (layout) {
+            layout->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
+            layout->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+            DWRITE_TRIMMING trimming = {DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0};
+            IDWriteInlineObject* ellipsis = nullptr;
+            dwrite_->CreateEllipsisTrimmingSign(format, &ellipsis);
+            if (ellipsis) {
+                layout->SetTrimming(&trimming, ellipsis);
+                ellipsis->Release();
+            }
+            text_[key] = layout;
+        }
+        format->Release();
+        return layout;
+    }
+
+    ID2D1Bitmap* GetOrCreateIcon(const LayoutItem& item,
+                                 const LayoutMetrics& metrics) {
+        if (item.iconRef.empty() && item.iconPixels.empty()) {
+            return nullptr;
+        }
+        std::wstring key =
+            item.iconRef + L'#' + std::to_wstring(metrics.iconSize);
+        if (!item.iconPixels.empty()) {
+            uint64_t hash = 1469598103934665603ull;
+            for (uint8_t byte : item.iconPixels) {
+                hash ^= byte;
+                hash *= 1099511628211ull;
+            }
+            key += L'#' + std::to_wstring(hash);
+        }
+        auto it = icons_.find(key);
+        if (it != icons_.end()) {
+            return it->second;
+        }
+        if (!dc_) {
+            return nullptr;
+        }
+        HBITMAP hbitmap = GetIconBitmapForMenu(item.iconRef, item.iconPixels,
+                                               metrics.iconSize);
+        if (!hbitmap) {
+            return nullptr;
+        }
+        ID2D1Bitmap* bitmap = BitmapFromHBITMAP(hbitmap);
+        if (bitmap) {
+            icons_[key] = bitmap;
+        }
+        return bitmap;
+    }
+
+    ID2D1Bitmap* BitmapFromHBITMAP(HBITMAP hbitmap) {
+        BITMAP bm = {};
+        if (!GetObjectW(hbitmap, sizeof(bm), &bm) || bm.bmBitsPixel != 32) {
+            return nullptr;
+        }
+        const int width = bm.bmWidth;
+        const int height = bm.bmHeight;
+        if (width <= 0 || height <= 0) {
+            return nullptr;
+        }
+        std::vector<uint32_t> pixels(static_cast<size_t>(width) *
+                                     static_cast<size_t>(height));
+        BITMAPINFO info = {};
+        info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+        info.bmiHeader.biWidth = width;
+        info.bmiHeader.biHeight = -height;
+        info.bmiHeader.biPlanes = 1;
+        info.bmiHeader.biBitCount = 32;
+        info.bmiHeader.biCompression = BI_RGB;
+        HDC screen = GetDC(nullptr);
+        const int lines = GetDIBits(screen, hbitmap, 0, static_cast<UINT>(height),
+                                    pixels.data(), &info, DIB_RGB_COLORS);
+        ReleaseDC(nullptr, screen);
+        if (lines == 0) {
+            return nullptr;
+        }
+
+        ID2D1Bitmap* bitmap = nullptr;
+        const D2D1_SIZE_U size = {static_cast<UINT32>(width),
+                                  static_cast<UINT32>(height)};
+        const D2D1_BITMAP_PROPERTIES props = {
+            {DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE}, 96.0f, 96.0f};
+        if (FAILED(dc_->CreateBitmap(size, pixels.data(),
+                                     static_cast<UINT32>(width * sizeof(uint32_t)),
+                                     props, &bitmap))) {
+            return nullptr;
+        }
+        return bitmap;
+    }
+
+    ID2D1DeviceContext* dc_ = nullptr;
+    IDWriteFactory* dwrite_ = nullptr;
+    std::unordered_map<std::wstring, IDWriteTextLayout*> text_;
+    std::unordered_map<std::wstring, ID2D1Bitmap*> icons_;
+};
+
+inline ContentCaches g_contentCaches;
+
+void DrawCheckmark(ID2D1DeviceContext* dc, const RECT& gutterRect,
+                   uint32_t color) {
+    ID2D1Factory* factory = g_renderDevice.D2DFactory();
+    if (!factory) {
+        return;
+    }
+    ID2D1PathGeometry* geometry = nullptr;
+    if (FAILED(factory->CreatePathGeometry(&geometry)) || !geometry) {
+        return;
+    }
+    ID2D1GeometrySink* sink = nullptr;
+    if (SUCCEEDED(geometry->Open(&sink)) && sink) {
+        const float left = static_cast<float>(gutterRect.left);
+        const float top = static_cast<float>(gutterRect.top);
+        const float width = static_cast<float>(gutterRect.right - gutterRect.left);
+        const float height = static_cast<float>(gutterRect.bottom - gutterRect.top);
+        sink->BeginFigure(
+            D2D1_POINT_2F{left + width * 0.22f, top + height * 0.52f},
+            D2D1_FIGURE_BEGIN_FILLED);
+        sink->AddLine(D2D1_POINT_2F{left + width * 0.42f, top + height * 0.72f});
+        sink->AddLine(D2D1_POINT_2F{left + width * 0.78f, top + height * 0.30f});
+        sink->EndFigure(D2D1_FIGURE_END_OPEN);
+        sink->Close();
+        sink->Release();
+
+        ID2D1SolidColorBrush* brush = nullptr;
+        if (SUCCEEDED(dc->CreateSolidColorBrush(ColorFromArgb(color), &brush)) &&
+            brush) {
+            dc->DrawGeometry(geometry, brush, 1.5f);
+            brush->Release();
+        }
+    }
+    geometry->Release();
+}
+
+void DrawSubmenuArrow(ID2D1DeviceContext* dc, const LayoutItem& item,
+                      int panelWidth, const LayoutMetrics& metrics,
+                      uint32_t color) {
+    ID2D1SolidColorBrush* brush = nullptr;
+    if (FAILED(dc->CreateSolidColorBrush(ColorFromArgb(color), &brush)) || !brush) {
+        return;
+    }
+    const float right = static_cast<float>(panelWidth - metrics.padding);
+    const float left = right - static_cast<float>(metrics.submenuArrowWidth) * 0.4f;
+    const float midY = (static_cast<float>(item.rect.top) +
+                        static_cast<float>(item.rect.bottom)) / 2.0f;
+    const float half = static_cast<float>(metrics.submenuArrowWidth) * 0.22f;
+    dc->DrawLine(D2D1_POINT_2F{left, midY - half}, D2D1_POINT_2F{right, midY},
+                 brush, 1.5f);
+    dc->DrawLine(D2D1_POINT_2F{right, midY}, D2D1_POINT_2F{left, midY + half},
+                 brush, 1.5f);
+    brush->Release();
+}
+
+void DrawPanel(ID2D1DeviceContext* dc, const LayoutPanel& panel,
+               const MenuInputState& state, const LayoutMetrics& metrics,
+               const Appearance& appearance, const BackdropBitmap* backdrop) {
+    if (!dc) {
+        return;
+    }
+
+    const D2D1_RECT_F rect = {0.0f, 0.0f, static_cast<float>(panel.size.cx),
+                              static_cast<float>(panel.size.cy)};
+    const float radius = static_cast<float>(appearance.cornerRadius);
+    const D2D1_ROUNDED_RECT rounded = {rect, radius, radius};
+
+    if (backdrop && backdrop->width > 0 && backdrop->height > 0 &&
+        !backdrop->pixels.empty()) {
+        ID2D1Bitmap* bitmap = nullptr;
+        const D2D1_SIZE_U size = {static_cast<UINT32>(backdrop->width),
+                                  static_cast<UINT32>(backdrop->height)};
+        const D2D1_BITMAP_PROPERTIES props = {
+            {DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE}, 96.0f, 96.0f};
+        if (SUCCEEDED(dc->CreateBitmap(
+                size, backdrop->pixels.data(),
+                static_cast<UINT32>(backdrop->width * sizeof(uint32_t)), props,
+                &bitmap)) &&
+            bitmap) {
+            dc->DrawBitmap(bitmap, rect, 1.0f, D2D1_INTERPOLATION_MODE_LINEAR);
+            bitmap->Release();
+        }
+    }
+
+    if ((appearance.background >> 24) != 0) {
+        ID2D1SolidColorBrush* brush = nullptr;
+        if (SUCCEEDED(dc->CreateSolidColorBrush(ColorFromArgb(appearance.background),
+                                                &brush)) &&
+            brush) {
+            dc->FillRoundedRectangle(&rounded, brush);
+            brush->Release();
+        }
+    }
+
+    for (size_t i = 0; i < panel.items.size(); ++i) {
+        const LayoutItem& item = panel.items[i];
+        const bool hovered = static_cast<int>(i) == state.hoverIndex ||
+                             static_cast<int>(i) == state.keyboardIndex;
+
+        if (item.kind == ItemKind::Separator) {
+            ID2D1SolidColorBrush* brush = nullptr;
+            if (SUCCEEDED(dc->CreateSolidColorBrush(ColorFromArgb(metrics.separator),
+                                                    &brush)) &&
+                brush) {
+                const float y = (static_cast<float>(item.rect.top) +
+                                 static_cast<float>(item.rect.bottom)) /
+                                2.0f;
+                const float inset =
+                    static_cast<float>(metrics.padding + metrics.gutterWidth / 2);
+                dc->DrawLine(D2D1_POINT_2F{inset, y},
+                             D2D1_POINT_2F{static_cast<float>(panel.size.cx) - inset, y},
+                             brush, 1.0f);
+                brush->Release();
+            }
+            continue;
+        }
+
+        if (hovered && (appearance.hoverBackground >> 24) != 0) {
+            ID2D1SolidColorBrush* brush = nullptr;
+            if (SUCCEEDED(dc->CreateSolidColorBrush(
+                    ColorFromArgb(appearance.hoverBackground), &brush)) &&
+                brush) {
+                const float inset = static_cast<float>(metrics.padding) / 2.0f;
+                const D2D1_RECT_F hoverRect = {
+                    static_cast<float>(item.rect.left) + inset,
+                    static_cast<float>(item.rect.top) + 1.0f,
+                    static_cast<float>(item.rect.right) - inset,
+                    static_cast<float>(item.rect.bottom) - 1.0f};
+                dc->FillRectangle(hoverRect, brush);
+                brush->Release();
+            }
+        }
+
+        if ((item.flags & kModelChecked) != 0) {
+            DrawCheckmark(dc, item.gutterRect, metrics.textColor);
+        }
+
+        if (item.resources && item.resources->icon) {
+            const D2D1_RECT_F iconRect = {
+                static_cast<float>(item.iconRect.left),
+                static_cast<float>(item.iconRect.top),
+                static_cast<float>(item.iconRect.right),
+                static_cast<float>(item.iconRect.bottom)};
+            dc->DrawBitmap(item.resources->icon, iconRect, 1.0f,
+                           D2D1_INTERPOLATION_MODE_LINEAR);
+        }
+
+        if (item.resources && item.resources->text) {
+            ID2D1SolidColorBrush* brush = nullptr;
+            const uint32_t color = hovered ? item.hoverTextColor : item.textColor;
+            if (SUCCEEDED(dc->CreateSolidColorBrush(ColorFromArgb(color), &brush)) &&
+                brush) {
+                dc->DrawTextLayout(
+                    D2D1_POINT_2F{static_cast<float>(item.textRect.left),
+                                  static_cast<float>(item.textRect.top)},
+                    item.resources->text, brush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
+                brush->Release();
+            }
+        }
+
+        if (item.kind == ItemKind::Submenu) {
+            DrawSubmenuArrow(dc, item, panel.size.cx, metrics, metrics.submenuArrow);
+        }
+    }
+
+    if (appearance.borderWidth > 0 && (appearance.border >> 24) != 0) {
+        ID2D1SolidColorBrush* brush = nullptr;
+        if (SUCCEEDED(dc->CreateSolidColorBrush(ColorFromArgb(appearance.border),
+                                                &brush)) &&
+            brush) {
+            dc->DrawRoundedRectangle(&rounded, brush,
+                                     static_cast<float>(appearance.borderWidth));
+            brush->Release();
+        }
+    }
+}
 
 // Shell property keys used by the Sort by and Group by submenus (all in the
 // shell's System property set, defined here so no SDK propkey.h is needed).
@@ -6777,13 +7180,19 @@ public:
     // bitmap is composited over the menu background so classic (alpha-less)
     // menu drawing shows it correctly.
     HBITMAP GetBitmap(const MenuItem& item, int sizePx) {
-        if (!item.iconPixels.empty()) {
-            return BitmapFromPixels(item.iconPixels, sizePx);
+        return GetBitmapFor(item.iconRef, item.iconPixels, sizePx);
+    }
+
+    // Custom-renderer entry point: no MenuItem required.
+    HBITMAP GetBitmapFor(const std::wstring& iconRef,
+                         const std::vector<uint8_t>& iconPixels, int sizePx) {
+        if (!iconPixels.empty()) {
+            return BitmapFromPixels(iconPixels, sizePx);
         }
-        if (item.iconRef.empty()) {
+        if (iconRef.empty()) {
             return nullptr;
         }
-        return BitmapFromRef(item.iconRef, sizePx);
+        return BitmapFromRef(iconRef, sizePx);
     }
 
     // The owner window whose theme determines the menu background color.
@@ -7186,6 +7595,11 @@ private:
 };
 
 inline IconCache g_iconCache;
+
+HBITMAP GetIconBitmapForMenu(const std::wstring& iconRef,
+                             const std::vector<uint8_t>& iconPixels, int sizePx) {
+    return g_iconCache.GetBitmapFor(iconRef, iconPixels, sizePx);
+}
 
 class NativeMenuView {
 public:

@@ -2521,6 +2521,15 @@ int main() {
         pool.DestroyAll();
     }
 
+    // v2 content caches: empty and clear.
+    {
+        cmo::ContentCaches caches;
+        CHECK(caches.TextCount() == 0);
+        CHECK(caches.IconCount() == 0);
+        caches.Clear();
+        CHECK(caches.TextCount() == 0);
+    }
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

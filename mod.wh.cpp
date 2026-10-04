@@ -2652,6 +2652,40 @@ LayoutPanel BuildLayoutPanel(const std::vector<MenuItem>& items,
     return panel;
 }
 
+POINT ClampPanelPosition(POINT anchor, SIZE panelSize, const RECT& workArea) {
+    int x = anchor.x;
+    int y = anchor.y;
+    if (x + panelSize.cx > workArea.right) {
+        x = anchor.x - panelSize.cx;
+    }
+    if (y + panelSize.cy > workArea.bottom) {
+        y = anchor.y - panelSize.cy;
+    }
+    const int left = static_cast<int>(workArea.left);
+    const int top = static_cast<int>(workArea.top);
+    x = std::clamp(x, left, std::max(left, static_cast<int>(workArea.right) - static_cast<int>(panelSize.cx)));
+    y = std::clamp(y, top, std::max(top, static_cast<int>(workArea.bottom) - static_cast<int>(panelSize.cy)));
+    return POINT{x, y};
+}
+
+POINT SubmenuPosition(const RECT& parentItemScreenRect, SIZE childSize,
+                      const RECT& workArea, int overlapPx) {
+    int x = parentItemScreenRect.right - overlapPx;
+    if (x + childSize.cx > workArea.right) {
+        x = parentItemScreenRect.left - childSize.cx;
+    }
+    const int left = static_cast<int>(workArea.left);
+    const int top = static_cast<int>(workArea.top);
+    x = std::clamp(x, left, std::max(left, static_cast<int>(workArea.right) - static_cast<int>(childSize.cx)));
+
+    int y = parentItemScreenRect.top;
+    if (y + childSize.cy > workArea.bottom) {
+        y = workArea.bottom - childSize.cy;
+    }
+    y = std::clamp(y, top, std::max(top, static_cast<int>(workArea.bottom) - static_cast<int>(childSize.cy)));
+    return POINT{x, y};
+}
+
 // Shell property keys used by the Sort by and Group by submenus (all in the
 // shell's System property set, defined here so no SDK propkey.h is needed).
 const PROPERTYKEY kShellPropertyKeys[] = {

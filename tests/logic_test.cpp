@@ -2441,6 +2441,26 @@ int main() {
         CHECK(panel.items[3].textRect.right <= panel.size.cx - 16);
     }
 
+    // v2 positioning: flip near edges, then clamp to the work area.
+    {
+        const RECT work = {0, 0, 1920, 1080};
+        POINT at = cmo::ClampPanelPosition(POINT{100, 100}, SIZE{300, 400}, work);
+        CHECK(at.x == 100 && at.y == 100);
+        at = cmo::ClampPanelPosition(POINT{1800, 1000}, SIZE{300, 400}, work);
+        CHECK(at.x == 1500);  // flipped left of the anchor
+        CHECK(at.y == 600);   // flipped above the anchor
+        at = cmo::ClampPanelPosition(POINT{-50, -50}, SIZE{300, 400}, work);
+        CHECK(at.x == 0 && at.y == 0);
+
+        const RECT parentItem = {100, 100, 300, 128};
+        POINT sub = cmo::SubmenuPosition(parentItem, SIZE{200, 300}, work, 4);
+        CHECK(sub.x == 296);
+        CHECK(sub.y == 100);
+        const RECT nearRight = {1700, 100, 1900, 128};
+        sub = cmo::SubmenuPosition(nearRight, SIZE{200, 300}, work, 4);
+        CHECK(sub.x == 1500);  // flipped to the parent's left
+    }
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

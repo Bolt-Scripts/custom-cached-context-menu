@@ -208,6 +208,84 @@ int main() {
     sourcePaths.push_back(L"b.txt");
     CHECK(snapshotCtx.paths.size() == 1);
 
+    // --- Task 7: persistence, LRU eviction, source stamps ---
+    cmo::Cache serializeCache;
+    cmo::MenuModel roundTrip = cmo::BuildCoreFileModel(onePath, cmo::Shape::Single);
+    cmo::MenuItem submenuItem{};
+    submenuItem.id = 500;
+    submenuItem.kind = cmo::ItemKind::Submenu;
+    submenuItem.action = cmo::ActionKind::Submenu;
+    submenuItem.label = L"WinRAR";
+    cmo::MenuItem submenuChild{};
+    submenuChild.id = 501;
+    submenuChild.kind = cmo::ItemKind::Command;
+    submenuChild.action = cmo::ActionKind::ShellVerb;
+    submenuChild.label = L"Extract Here";
+    submenuChild.canonicalVerb = L"WinRAR.ExtractHere";
+    submenuChild.verbOffset = 42;
+    submenuItem.children.push_back(submenuChild);
+    roundTrip.items.insert(roundTrip.items.end() - 1, submenuItem);
+    serializeCache.Put(roundTrip);
+
+    std::vector<uint8_t> serialized = serializeCache.Serialize();
+    CHECK(!serialized.empty());
+
+    cmo::Cache restoredCache;
+    CHECK(cmo::Cache::Deserialize(serialized, restoredCache));
+    const cmo::MenuModel* restoredModel = restoredCache.Find(roundTrip.sig);
+    CHECK(restoredModel != nullptr);
+    CHECK(restoredModel && restoredModel->items.size() == roundTrip.items.size());
+    CHECK(restoredModel && restoredModel->items.back().label == L"Show more options");
+    const cmo::MenuItem* restoredChild =
+        restoredModel ? cmo::FindById(*restoredModel, 501) : nullptr;
+    CHECK(restoredChild != nullptr);
+    CHECK(restoredChild && restoredChild->canonicalVerb == L"WinRAR.ExtractHere");
+    CHECK(restoredChild && restoredChild->verbOffset == 42);
+
+    std::vector<uint8_t> badVersion = serialized;
+    badVersion[4] = 2;
+    cmo::Cache rejectedCache;
+    CHECK(!cmo::Cache::Deserialize(badVersion, rejectedCache));
+
+    std::vector<uint8_t> truncatedData(serialized.begin(),
+                                       serialized.begin() + serialized.size() / 2);
+    CHECK(!cmo::Cache::Deserialize(truncatedData, rejectedCache));
+
+    std::vector<uint8_t> corruptData = serialized;
+    corruptData[10] ^= 0xFF;
+    CHECK(!cmo::Cache::Deserialize(corruptData, rejectedCache));
+
+    cmo::Cache lruCache;
+    lruCache.SetMaxEntries(2);
+    cmo::MenuModel lruA = cmo::BuildCoreFileModel({L"a.txt"}, cmo::Shape::Single);
+    cmo::MenuModel lruB = cmo::BuildCoreFileModel({L"b.png"}, cmo::Shape::Single);
+    cmo::MenuModel lruC = cmo::BuildCoreFileModel({L"c.pdf"}, cmo::Shape::Single);
+    lruCache.Put(lruA);
+    Sleep(20);
+    lruCache.Put(lruB);
+    Sleep(20);
+    CHECK(lruCache.Find(lruA.sig) != nullptr);
+    Sleep(20);
+    lruCache.Put(lruC);
+    CHECK(lruCache.Size() == 2);
+    CHECK(lruCache.Find(lruB.sig) == nullptr);
+    CHECK(lruCache.Find(lruA.sig) != nullptr);
+    CHECK(lruCache.Find(lruC.sig) != nullptr);
+
+    CreateDirectoryW(L"cmo-test-storage", nullptr);
+    std::wstring cachePath = L"cmo-test-storage\\cache-test.bin";
+    CHECK(serializeCache.Save(cachePath));
+    cmo::Cache diskCache;
+    CHECK(diskCache.Load(cachePath));
+    CHECK(diskCache.Find(roundTrip.sig) != nullptr);
+    DeleteFileW(cachePath.c_str());
+
+    cmo::SourceStamp stampA{1, 2};
+    cmo::SourceStamp stampB{1, 2};
+    cmo::SourceStamp stampC{1, 3};
+    CHECK(cmo::StampMatches(stampA, stampB));
+    CHECK(!cmo::StampMatches(stampA, stampC));
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

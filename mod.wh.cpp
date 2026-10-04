@@ -57,15 +57,42 @@ Design document: `docs/superpowers/specs/2026-10-04-context-menu-overhaul-design
 
 #include <windhawk_utils.h>
 
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
+
+// ===========================================================================
+// [CMO:Settings] User settings.
+// ===========================================================================
+namespace cmo {
+
+struct Settings {
+    bool enableShiftBypass = true;
+    bool showMoreOptionsItem = true;
+    int warmupDelaySeconds = 5;
+    bool clearCache = false;
+    bool debugLogging = false;
+};
+
+inline Settings g_settings;
+
+void LoadSettings() {
+    g_settings.enableShiftBypass = Wh_GetIntSetting(L"enableShiftBypass") != 0;
+    g_settings.showMoreOptionsItem = Wh_GetIntSetting(L"showMoreOptionsItem") != 0;
+    g_settings.warmupDelaySeconds = Wh_GetIntSetting(L"warmupDelaySeconds");
+    g_settings.clearCache = Wh_GetIntSetting(L"clearCache") != 0;
+    g_settings.debugLogging = Wh_GetIntSetting(L"debugLogging") != 0;
+}
+
+}  // namespace cmo
 
 // ===========================================================================
 // [CMO:Signature] Context signature: what identifies a cached menu model.
@@ -362,22 +389,352 @@ MenuModel MergeCoreWithCached(const MenuModel& core, const MenuModel& cached) {
 // ===========================================================================
 namespace cmo {
 
-class Cache {
-public:
-    const MenuModel* Find(const ContextSignature& signature) const {
-        auto it = models_.find(signature.Hash());
-        if (it == models_.end()) {
-            return nullptr;
+constexpr uint32_t kCacheMagic = 0x434F4D4F;  // "COMO"
+constexpr uint32_t kCacheVersion = 1;
+
+std::wstring CacheFilePath() {
+    wchar_t storagePath[MAX_PATH] = {};
+    if (!Wh_GetModStoragePath(storagePath, ARRAYSIZE(storagePath))) {
+        return L"";
+    }
+    return std::wstring(storagePath) + L"\\menu-cache.bin";
+}
+
+namespace {
+
+void WriteU8(std::vector<uint8_t>& out, uint8_t value) {
+    out.push_back(value);
+}
+
+void WriteU32(std::vector<uint8_t>& out, uint32_t value) {
+    out.push_back(static_cast<uint8_t>(value & 0xFF));
+    out.push_back(static_cast<uint8_t>((value >> 8) & 0xFF));
+    out.push_back(static_cast<uint8_t>((value >> 16) & 0xFF));
+    out.push_back(static_cast<uint8_t>((value >> 24) & 0xFF));
+}
+
+void WriteString(std::vector<uint8_t>& out, const std::wstring& text) {
+    WriteU32(out, static_cast<uint32_t>(text.size()));
+    const uint8_t* bytes = reinterpret_cast<const uint8_t*>(text.data());
+    out.insert(out.end(), bytes, bytes + text.size() * sizeof(wchar_t));
+}
+
+void WriteItem(std::vector<uint8_t>& out, const MenuItem& item) {
+    WriteU32(out, item.id);
+    WriteU8(out, static_cast<uint8_t>(item.kind));
+    WriteU8(out, static_cast<uint8_t>(item.action));
+    WriteU32(out, item.flags);
+    WriteU32(out, static_cast<uint32_t>(item.viewCommandId));
+    WriteU32(out, item.verbOffset);
+    WriteString(out, item.label);
+    WriteString(out, item.canonicalVerb);
+    WriteString(out, item.iconRef);
+    WriteU32(out, static_cast<uint32_t>(item.children.size()));
+    for (const MenuItem& child : item.children) {
+        WriteItem(out, child);
+    }
+}
+
+void WriteSignature(std::vector<uint8_t>& out, const ContextSignature& sig) {
+    WriteU8(out, static_cast<uint8_t>(sig.scope));
+    WriteString(out, sig.typeKey);
+    WriteU8(out, static_cast<uint8_t>(sig.shape));
+    WriteU8(out, static_cast<uint8_t>(sig.variant));
+}
+
+uint32_t ReadU32At(std::span<const uint8_t> data, size_t offset) {
+    return static_cast<uint32_t>(data[offset]) |
+           (static_cast<uint32_t>(data[offset + 1]) << 8) |
+           (static_cast<uint32_t>(data[offset + 2]) << 16) |
+           (static_cast<uint32_t>(data[offset + 3]) << 24);
+}
+
+uint32_t Crc32(std::span<const uint8_t> data) {
+    uint32_t crc = 0xFFFFFFFFu;
+    for (uint8_t byte : data) {
+        crc ^= byte;
+        for (int bit = 0; bit < 8; ++bit) {
+            crc = (crc >> 1) ^ (0xEDB88320u & (0u - (crc & 1u)));
         }
-        return &it->second;
+    }
+    return ~crc;
+}
+
+class Reader {
+public:
+    explicit Reader(std::span<const uint8_t> data) : data_(data) {}
+
+    bool ReadU8(uint8_t& value) {
+        if (pos_ + 1 > data_.size()) {
+            return false;
+        }
+        value = data_[pos_++];
+        return true;
     }
 
-    void Put(MenuModel model) {
-        models_[model.sig.Hash()] = std::move(model);
+    bool ReadU32(uint32_t& value) {
+        if (pos_ + 4 > data_.size()) {
+            return false;
+        }
+        value = ReadU32At(data_, pos_);
+        pos_ += 4;
+        return true;
+    }
+
+    bool ReadString(std::wstring& text) {
+        uint32_t length = 0;
+        if (!ReadU32(length)) {
+            return false;
+        }
+        const size_t bytes = static_cast<size_t>(length) * sizeof(wchar_t);
+        if (pos_ + bytes > data_.size()) {
+            return false;
+        }
+        text.assign(reinterpret_cast<const wchar_t*>(data_.data() + pos_), length);
+        pos_ += bytes;
+        return true;
+    }
+
+    bool ReadSignature(ContextSignature& sig) {
+        uint8_t scope = 0;
+        uint8_t shape = 0;
+        uint8_t variant = 0;
+        if (!ReadU8(scope) || !ReadString(sig.typeKey) || !ReadU8(shape) ||
+            !ReadU8(variant)) {
+            return false;
+        }
+        sig.scope = static_cast<Scope>(scope);
+        sig.shape = static_cast<Shape>(shape);
+        sig.variant = static_cast<Variant>(variant);
+        return true;
+    }
+
+    bool ReadItem(MenuItem& item) {
+        uint8_t kind = 0;
+        uint8_t action = 0;
+        uint32_t viewCommandId = 0;
+        uint32_t childCount = 0;
+        if (!ReadU32(item.id) || !ReadU8(kind) || !ReadU8(action) ||
+            !ReadU32(item.flags) || !ReadU32(viewCommandId) ||
+            !ReadU32(item.verbOffset) || !ReadString(item.label) ||
+            !ReadString(item.canonicalVerb) || !ReadString(item.iconRef) ||
+            !ReadU32(childCount)) {
+            return false;
+        }
+        item.kind = static_cast<ItemKind>(kind);
+        item.action = static_cast<ActionKind>(action);
+        item.viewCommandId = viewCommandId;
+        for (uint32_t i = 0; i < childCount; ++i) {
+            MenuItem child{};
+            if (!ReadItem(child)) {
+                return false;
+            }
+            item.children.push_back(std::move(child));
+        }
+        return true;
     }
 
 private:
-    std::unordered_map<uint64_t, MenuModel> models_;
+    std::span<const uint8_t> data_;
+    size_t pos_ = 0;
+};
+
+}  // namespace
+
+class Cache {
+public:
+    const MenuModel* Find(const ContextSignature& signature) {
+        auto it = entries_.find(signature.Hash());
+        if (it == entries_.end()) {
+            return nullptr;
+        }
+        it->second.lastUsed = GetTickCount64();
+        return &it->second.model;
+    }
+
+    void Put(MenuModel model) {
+        Entry entry{};
+        entry.model = std::move(model);
+        entry.lastUsed = GetTickCount64();
+        entries_[entry.model.sig.Hash()] = std::move(entry);
+        EvictIfNeeded();
+        dirty_ = true;
+    }
+
+    void Clear() {
+        entries_.clear();
+        dirty_ = true;
+    }
+
+    void SetMaxEntries(size_t maxEntries) {
+        maxEntries_ = maxEntries;
+        EvictIfNeeded();
+    }
+
+    size_t Size() const { return entries_.size(); }
+
+    std::vector<uint8_t> Serialize() const {
+        std::vector<uint8_t> out;
+        WriteU32(out, kCacheMagic);
+        WriteU32(out, kCacheVersion);
+        WriteU32(out, static_cast<uint32_t>(entries_.size()));
+        for (const auto& pair : entries_) {
+            const Entry& entry = pair.second;
+            WriteSignature(out, entry.model.sig);
+            WriteU32(out, entry.model.flags);
+            WriteU32(out, static_cast<uint32_t>(entry.model.items.size()));
+            for (const MenuItem& item : entry.model.items) {
+                WriteItem(out, item);
+            }
+        }
+        WriteU32(out, Crc32(out));
+        return out;
+    }
+
+    static bool Deserialize(std::span<const uint8_t> data, Cache& out) {
+        if (data.size() < 12) {
+            return false;
+        }
+        if (ReadU32At(data, 0) != kCacheMagic) {
+            return false;
+        }
+        if (ReadU32At(data, 4) != kCacheVersion) {
+            return false;
+        }
+
+        const size_t payloadSize = data.size() - 4;
+        if (ReadU32At(data, payloadSize) != Crc32(data.subspan(0, payloadSize))) {
+            return false;
+        }
+
+        Reader reader(data.subspan(0, payloadSize));
+        uint32_t magic = 0;
+        uint32_t version = 0;
+        uint32_t entryCount = 0;
+        if (!reader.ReadU32(magic) || !reader.ReadU32(version) ||
+            !reader.ReadU32(entryCount)) {
+            return false;
+        }
+
+        Cache result;
+        for (uint32_t i = 0; i < entryCount; ++i) {
+            ContextSignature sig{};
+            uint32_t modelFlags = 0;
+            uint32_t itemCount = 0;
+            if (!reader.ReadSignature(sig) || !reader.ReadU32(modelFlags) ||
+                !reader.ReadU32(itemCount)) {
+                return false;
+            }
+            MenuModel model{};
+            model.sig = sig;
+            model.flags = modelFlags;
+            for (uint32_t j = 0; j < itemCount; ++j) {
+                MenuItem item{};
+                if (!reader.ReadItem(item)) {
+                    return false;
+                }
+                model.items.push_back(std::move(item));
+            }
+            result.Put(std::move(model));
+        }
+
+        out = std::move(result);
+        return true;
+    }
+
+    bool Load(const std::wstring& path) {
+        HANDLE file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+                                  OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (file == INVALID_HANDLE_VALUE) {
+            return false;
+        }
+
+        LARGE_INTEGER size = {};
+        if (!GetFileSizeEx(file, &size) || size.QuadPart <= 0 ||
+            size.QuadPart > 16 * 1024 * 1024) {
+            CloseHandle(file);
+            return false;
+        }
+
+        std::vector<uint8_t> data(static_cast<size_t>(size.QuadPart));
+        DWORD read = 0;
+        BOOL ok = ReadFile(file, data.data(), static_cast<DWORD>(data.size()), &read,
+                           nullptr);
+        CloseHandle(file);
+        if (!ok || read != data.size()) {
+            return false;
+        }
+
+        Cache loaded;
+        if (!Deserialize(data, loaded)) {
+            return false;
+        }
+        *this = std::move(loaded);
+        return true;
+    }
+
+    bool Save(const std::wstring& path) {
+        std::vector<uint8_t> data = Serialize();
+        const std::wstring tempPath = path + L".tmp";
+
+        HANDLE file = CreateFileW(tempPath.c_str(), GENERIC_WRITE, 0, nullptr,
+                                  CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (file == INVALID_HANDLE_VALUE) {
+            return false;
+        }
+
+        DWORD written = 0;
+        BOOL ok = WriteFile(file, data.data(), static_cast<DWORD>(data.size()), &written,
+                            nullptr);
+        CloseHandle(file);
+        if (!ok || written != data.size()) {
+            DeleteFileW(tempPath.c_str());
+            return false;
+        }
+
+        if (!MoveFileExW(tempPath.c_str(), path.c_str(),
+                         MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+            DeleteFileW(tempPath.c_str());
+            return false;
+        }
+
+        dirty_ = false;
+        lastSaveTick_ = GetTickCount64();
+        return true;
+    }
+
+    bool MaybeSave(const std::wstring& path) {
+        if (!dirty_) {
+            return true;
+        }
+        if (GetTickCount64() - lastSaveTick_ < 5000) {
+            return true;
+        }
+        return Save(path);
+    }
+
+private:
+    struct Entry {
+        MenuModel model;
+        uint64_t lastUsed = 0;
+    };
+
+    void EvictIfNeeded() {
+        while (entries_.size() > maxEntries_ && !entries_.empty()) {
+            auto oldest = entries_.begin();
+            for (auto it = entries_.begin(); it != entries_.end(); ++it) {
+                if (it->second.lastUsed < oldest->second.lastUsed) {
+                    oldest = it;
+                }
+            }
+            entries_.erase(oldest);
+        }
+    }
+
+    std::unordered_map<uint64_t, Entry> entries_;
+    size_t maxEntries_ = 256;
+    bool dirty_ = false;
+    uint64_t lastSaveTick_ = 0;
 };
 
 inline Cache g_cache;
@@ -667,6 +1024,7 @@ void DiscoverIntoCache(IContextMenu* context, const PendingCapture& capture,
     DestroyMenu(menu);
     Wh_Log(L"Discovered %zu menu items", model.items.size());
     g_cache.Put(std::move(model));
+    g_cache.MaybeSave(CacheFilePath());
 }
 
 // Creates a throwaway default context menu to read the shared vtable of
@@ -1202,8 +1560,134 @@ std::optional<uint32_t> ShowNativeReplay(const PendingCapture& capture, HWND own
 // ===========================================================================
 
 // ===========================================================================
-// [CMO:Invalidation] Cache invalidation. (Task 7)
+// [CMO:Invalidation] Cache invalidation on handler registration changes.
 // ===========================================================================
+namespace cmo {
+
+struct SourceStamp {
+    uint64_t registryStamp = 0;
+    uint64_t dllStamp = 0;
+};
+
+bool StampMatches(const SourceStamp& cached, const SourceStamp& current) {
+    return cached.registryStamp == current.registryStamp &&
+           cached.dllStamp == current.dllStamp;
+}
+
+class Invalidation {
+public:
+    void Start(HWND notifyWnd = nullptr) {
+        (void)notifyWnd;
+        if (thread_) {
+            return;
+        }
+        stopEvent_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        if (!stopEvent_) {
+            return;
+        }
+        thread_ = CreateThread(nullptr, 0, &Invalidation::ThreadProc, this, 0, nullptr);
+        if (!thread_) {
+            CloseHandle(stopEvent_);
+            stopEvent_ = nullptr;
+        }
+    }
+
+    void Stop() {
+        if (stopEvent_) {
+            SetEvent(stopEvent_);
+        }
+        if (thread_) {
+            WaitForSingleObject(thread_, 5000);
+            CloseHandle(thread_);
+            thread_ = nullptr;
+        }
+        if (stopEvent_) {
+            CloseHandle(stopEvent_);
+            stopEvent_ = nullptr;
+        }
+    }
+
+    uint64_t Generation() const { return generation_.load(); }
+
+private:
+    static DWORD WINAPI ThreadProc(LPVOID param) {
+        static_cast<Invalidation*>(param)->Run();
+        return 0;
+    }
+
+    void Run() {
+        static const wchar_t* kKeys[] = {
+            L"*\\shellex\\ContextMenuHandlers",
+            L"AllFilesystemObjects\\shellex\\ContextMenuHandlers",
+            L"Directory\\shellex\\ContextMenuHandlers",
+            L"Directory\\Background\\shellex\\ContextMenuHandlers",
+            L"Folder\\shellex\\ContextMenuHandlers",
+            L"Drive\\shellex\\ContextMenuHandlers",
+            L"DesktopBackground\\shellex\\ContextMenuHandlers",
+        };
+        constexpr DWORD kKeyCount = ARRAYSIZE(kKeys);
+
+        HANDLE events[kKeyCount + 1] = {};
+        HKEY keyForEvent[kKeyCount + 1] = {};
+        HKEY keys[kKeyCount] = {};
+        events[0] = stopEvent_;
+        DWORD eventCount = 1;
+
+        for (DWORD i = 0; i < kKeyCount; ++i) {
+            if (RegOpenKeyExW(HKEY_CLASSES_ROOT, kKeys[i], 0, KEY_NOTIFY, &keys[i]) !=
+                ERROR_SUCCESS) {
+                keys[i] = nullptr;
+                continue;
+            }
+            HANDLE event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+            if (event &&
+                RegNotifyChangeKeyValue(keys[i], TRUE,
+                                        REG_NOTIFY_CHANGE_NAME | REG_NOTIFY_CHANGE_LAST_SET,
+                                        event, TRUE) == ERROR_SUCCESS) {
+                keyForEvent[eventCount] = keys[i];
+                events[eventCount++] = event;
+            } else if (event) {
+                CloseHandle(event);
+            }
+        }
+
+        for (;;) {
+            DWORD wait = WaitForMultipleObjects(eventCount, events, FALSE, INFINITE);
+            if (wait == WAIT_OBJECT_0) {
+                break;
+            }
+            if (wait > WAIT_OBJECT_0 && wait < WAIT_OBJECT_0 + eventCount) {
+                const DWORD index = wait - WAIT_OBJECT_0;
+                ++generation_;
+                g_cache.Clear();
+                Wh_Log(L"Context menu handlers changed; cache invalidated");
+                if (keyForEvent[index]) {
+                    RegNotifyChangeKeyValue(
+                        keyForEvent[index], TRUE,
+                        REG_NOTIFY_CHANGE_NAME | REG_NOTIFY_CHANGE_LAST_SET, events[index],
+                        TRUE);
+                }
+            }
+        }
+
+        for (DWORD i = 1; i < eventCount; ++i) {
+            CloseHandle(events[i]);
+        }
+        for (DWORD i = 0; i < kKeyCount; ++i) {
+            if (keys[i]) {
+                RegCloseKey(keys[i]);
+            }
+        }
+    }
+
+    HANDLE thread_ = nullptr;
+    HANDLE stopEvent_ = nullptr;
+    std::atomic<uint64_t> generation_{0};
+};
+
+inline Invalidation g_invalidation;
+
+}  // namespace cmo
 
 // ===========================================================================
 // [CMO:Hooks] Hook functions and interception state.
@@ -1427,6 +1911,17 @@ BOOL Wh_ModInit() {
     }
 
     cmo::InstallWin11Suppression();
+    cmo::LoadSettings();
+
+    const std::wstring cachePath = cmo::CacheFilePath();
+    if (!cachePath.empty()) {
+        if (cmo::g_settings.clearCache) {
+            DeleteFileW(cachePath.c_str());
+        } else if (cmo::g_cache.Load(cachePath)) {
+            Wh_Log(L"Loaded menu cache");
+        }
+    }
+    cmo::g_invalidation.Start();
 
     if (cmo::InstallPopulationHook()) {
         Wh_Log(L"Population hook installed");
@@ -1448,8 +1943,23 @@ void Wh_ModAfterInit() {
 
 void Wh_ModUninit() {
     Wh_Log(L"Context Menu Overhaul uninit");
+    cmo::g_invalidation.Stop();
+
+    const std::wstring cachePath = cmo::CacheFilePath();
+    if (!cachePath.empty()) {
+        cmo::g_cache.Save(cachePath);
+    }
 }
 
 void Wh_ModSettingsChanged() {
     Wh_Log(L"Context Menu Overhaul settings changed");
+    cmo::LoadSettings();
+
+    if (cmo::g_settings.clearCache) {
+        cmo::g_cache.Clear();
+        const std::wstring cachePath = cmo::CacheFilePath();
+        if (!cachePath.empty()) {
+            DeleteFileW(cachePath.c_str());
+        }
+    }
 }

@@ -2580,6 +2580,34 @@ int main() {
         CHECK(state.scrollOffset >= 0);
     }
 
+    // v2 invocation descriptor round-trip.
+    {
+        cmo::MenuModel model = cmo::BuildCoreFileModel({L"a.txt"}, cmo::Shape::Single);
+        cmo::MenuItem copy{};
+        copy.id = 500;
+        copy.kind = cmo::ItemKind::Command;
+        copy.action = cmo::ActionKind::ShellVerb;
+        copy.label = L"WinRAR";
+        copy.canonicalVerb = L"WinRAR.ExtractHere";
+        copy.verbOffset = 42;
+        copy.flags = cmo::kModelHasOffset | cmo::kModelExtension;
+        model.items.insert(model.items.end() - 1, copy);
+        cmo::LayoutMetrics metrics{};
+        cmo::LayoutPanel panel = cmo::BuildLayoutPanel(model.items, metrics);
+        const cmo::LayoutItem* copyItem = nullptr;
+        for (const cmo::LayoutItem& item : panel.items) {
+            if (item.invocation.id == 500) {
+                copyItem = &item;
+            }
+        }
+        CHECK(copyItem != nullptr);
+        cmo::MenuItem resolved{};
+        CHECK(cmo::BuildMenuItemForInvocation(model, copyItem->invocation, resolved));
+        CHECK(resolved.label == L"WinRAR");
+        CHECK(resolved.verbOffset == 42);
+        CHECK((resolved.flags & cmo::kModelExtension) != 0);
+    }
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

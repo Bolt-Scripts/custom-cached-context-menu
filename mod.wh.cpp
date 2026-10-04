@@ -29,6 +29,9 @@ Design document: `docs/superpowers/specs/2026-10-04-context-menu-overhaul-design
 - enableShiftBypass: true
   $name: Shift bypass
   $description: Hold Shift while right-clicking to show the untouched native menu.
+- menuMode: 0
+  $name: Menu mode
+  $description: 0 shows the custom-rendered menu (falls back automatically on repeated failures); 1 keeps the classic owner-drawn menu.
 - showMoreOptionsItem: true
   $name: Show classic menu item
   $description: Add a "Show classic menu" entry at the bottom of the replacement menu.
@@ -111,6 +114,7 @@ namespace cmo {
 
 struct Settings {
     bool enableShiftBypass = true;
+    int menuMode = 0;
     bool showMoreOptionsItem = true;
     int submenuDelayMs = 150;
     int warmupDelaySeconds = 5;
@@ -178,6 +182,7 @@ std::vector<std::wstring> ParseAdvancedItems(const std::wstring& text) {
 
 void LoadSettings() {
     g_settings.enableShiftBypass = Wh_GetIntSetting(L"enableShiftBypass") != 0;
+    g_settings.menuMode = Wh_GetIntSetting(L"menuMode");
     g_settings.showMoreOptionsItem = Wh_GetIntSetting(L"showMoreOptionsItem") != 0;
     g_settings.submenuDelayMs = Wh_GetIntSetting(L"submenuDelayMs");
     g_settings.warmupDelaySeconds = Wh_GetIntSetting(L"warmupDelaySeconds");
@@ -3815,6 +3820,517 @@ int MenuStateItemAt(const LayoutPanel& panel, const MenuInputState& state,
         }
     }
     return -1;
+}
+
+// ===========================================================================
+// [CMO:MenuWindow] Custom menu session: window wiring and invocation.
+// ===========================================================================
+
+const GUID kIidIDXGISurface = {
+    0xcafcb56c, 0x6ac3, 0x4889, {0xbf, 0x47, 0x9e, 0x23, 0xbb, 0xd2, 0x60, 0xec}};
+
+// Defined later in [CMO:Theme]; declared here for ShowCustomMenu.
+bool IsDarkThemeActive();
+
+uint32_t DpiForWindow(HWND window) {
+    if (window) {
+        HMODULE user32 = GetModuleHandleW(L"user32.dll");
+        if (user32) {
+            using GetDpiForWindow_t = UINT(WINAPI*)(HWND);
+            auto getDpiForWindow = reinterpret_cast<GetDpiForWindow_t>(
+                GetProcAddress(user32, "GetDpiForWindow"));
+            if (getDpiForWindow) {
+                const UINT dpi = getDpiForWindow(window);
+                if (dpi >= 48) {
+                    return dpi;
+                }
+            }
+        }
+    }
+    return 96;
+}
+
+RECT WorkAreaForPoint(POINT pt) {
+    RECT workArea = {0, 0, GetSystemMetrics(SM_CXSCREEN),
+                     GetSystemMetrics(SM_CYSCREEN)};
+    MONITORINFO info = {};
+    info.cbSize = sizeof(info);
+    const HMONITOR monitor = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+    if (monitor && GetMonitorInfoW(monitor, &info)) {
+        workArea = info.rcWork;
+    }
+    return workArea;
+}
+
+struct CustomMenuResult {
+    std::optional<uint32_t> chosenItemId;
+    bool handled = false;
+    bool failed = false;
+};
+
+bool FindMenuItemById(const std::vector<MenuItem>& items, uint32_t id,
+                      MenuItem& out) {
+    for (const MenuItem& item : items) {
+        if (item.id == id) {
+            out = item;
+            return true;
+        }
+        if (FindMenuItemById(item.children, id, out)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool BuildMenuItemForInvocation(const MenuModel& model,
+                                const InvocationDescriptor& descriptor,
+                                MenuItem& out) {
+    if (FindMenuItemById(model.items, descriptor.id, out)) {
+        out.id = descriptor.id;
+        out.action = descriptor.action;
+        out.customCommandIndex = descriptor.customCommandIndex;
+        out.verbOffset = descriptor.verbOffset;
+        if (descriptor.hasOffset) {
+            out.flags |= kModelHasOffset;
+        }
+        return true;
+    }
+
+    MenuItem item{};
+    item.id = descriptor.id;
+    item.kind = ItemKind::Command;
+    item.action = descriptor.action;
+    item.viewAction = descriptor.viewAction;
+    item.verbOffset = descriptor.verbOffset;
+    item.sortIndex = descriptor.sortIndex;
+    item.customCommandIndex = descriptor.customCommandIndex;
+    item.newIndex = descriptor.newIndex;
+    item.canonicalVerb = descriptor.canonicalVerb;
+    item.targetPath = descriptor.targetPath;
+    if (descriptor.hasOffset) {
+        item.flags |= kModelHasOffset;
+    }
+    out = std::move(item);
+    return true;
+}
+
+struct MenuSession {
+    CustomMenuResult result;
+    std::shared_ptr<const RulesConfig> config;
+    const MenuModel* model = nullptr;
+    std::vector<MenuWindow*> windows;
+    std::vector<MenuInputState> states;
+    int active = 0;
+    int maxHeight = 0;
+    int submenuDelayMs = 150;
+    int hoverCandidate = -1;
+    bool submenuTimerActive = false;
+    bool done = false;
+    LayoutMetrics metrics;
+    Appearance appearance;
+};
+
+inline MenuSession* g_menuSession = nullptr;
+
+void RenderMenuWindow(MenuWindow* window, const LayoutPanel& panel,
+                      const MenuInputState& state, const LayoutMetrics& metrics,
+                      const Appearance& appearance,
+                      const BackdropBitmap* backdrop) {
+    if (!window || !window->SwapChain() || !g_renderDevice.D2DDevice()) {
+        return;
+    }
+    IDXGISurface* surface = nullptr;
+    if (FAILED(window->SwapChain()->GetBuffer(
+            0, kIidIDXGISurface, reinterpret_cast<void**>(&surface))) ||
+        !surface) {
+        return;
+    }
+    ID2D1DeviceContext* dc = nullptr;
+    if (FAILED(g_renderDevice.D2DDevice()->CreateDeviceContext(
+            D2D1_DEVICE_CONTEXT_OPTIONS_NONE, &dc)) ||
+        !dc) {
+        surface->Release();
+        return;
+    }
+    const D2D1_BITMAP_PROPERTIES1 props = {
+        {DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED}, 96.0f, 96.0f,
+        D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW};
+    ID2D1Bitmap1* target = nullptr;
+    if (SUCCEEDED(dc->CreateBitmapFromDxgiSurface(surface, &props, &target)) &&
+        target) {
+        dc->SetTarget(target);
+        dc->BeginDraw();
+        dc->Clear(nullptr);
+        DrawPanel(dc, panel, state, metrics, appearance, backdrop);
+        dc->EndDraw();
+        target->Release();
+    }
+    dc->Release();
+    surface->Release();
+    window->Present();
+}
+
+void RepaintMenuWindow(MenuSession* session, int index) {
+    if (!session || index < 0 ||
+        index >= static_cast<int>(session->windows.size())) {
+        return;
+    }
+    MenuWindow* window = session->windows[index];
+    if (!window || !window->Panel()) {
+        return;
+    }
+    RenderMenuWindow(window, *window->Panel(), session->states[index],
+                     session->metrics, session->appearance, nullptr);
+}
+
+void CloseSubmenusBelow(MenuSession* session, int index) {
+    while (static_cast<int>(session->windows.size()) > index + 1) {
+        MenuWindow* window = session->windows.back();
+        session->windows.pop_back();
+        session->states.pop_back();
+        g_menuWindowPool.Release(window);
+    }
+    session->active = index;
+    if (index >= 0 && index < static_cast<int>(session->states.size())) {
+        session->states[index].openSubmenu = -1;
+    }
+}
+
+void OpenSubmenu(MenuSession* session, int index, int itemIndex) {
+    if (!session || index < 0 ||
+        index >= static_cast<int>(session->windows.size())) {
+        return;
+    }
+    const LayoutPanel* parent = session->windows[index]->Panel();
+    if (!parent || itemIndex < 0 ||
+        itemIndex >= static_cast<int>(parent->items.size())) {
+        return;
+    }
+    const LayoutItem& item = parent->items[itemIndex];
+    if (item.kind != ItemKind::Submenu || item.submenuIndex < 0 ||
+        item.submenuIndex >= static_cast<int>(parent->children.size())) {
+        return;
+    }
+
+    CloseSubmenusBelow(session, index);
+    const LayoutPanel& childPanel = parent->children[item.submenuIndex];
+
+    MenuWindow* child = g_menuWindowPool.Acquire();
+    if (!child ||
+        !child->Create(session->windows[index]->Handle(), &childPanel, false)) {
+        if (child) {
+            g_menuWindowPool.Release(child);
+        }
+        return;
+    }
+
+    POINT topLeft = {item.rect.left, item.rect.top};
+    ClientToScreen(session->windows[index]->Handle(), &topLeft);
+    const RECT itemScreen = {topLeft.x, topLeft.y,
+                             topLeft.x + (item.rect.right - item.rect.left),
+                             topLeft.y + (item.rect.bottom - item.rect.top)};
+    const RECT workArea = WorkAreaForPoint(topLeft);
+    child->Move(SubmenuPosition(itemScreen, childPanel.size, workArea, 4));
+
+    session->windows.push_back(child);
+    session->states.push_back(MenuInputState{});
+    session->active = static_cast<int>(session->windows.size()) - 1;
+    session->states[index].openSubmenu = item.submenuIndex;
+    session->states[index].hoverIndex = itemIndex;
+
+    RepaintMenuWindow(session, index);
+    RenderMenuWindow(child, childPanel, session->states.back(), session->metrics,
+                     session->appearance, nullptr);
+    child->Show();
+    SetFocus(child->Handle());
+}
+
+constexpr UINT_PTR kMenuSubmenuTimerId = 1;
+
+LRESULT CustomMenuWindowProc(MenuWindow* window, HWND hwnd, UINT msg,
+                             WPARAM wParam, LPARAM lParam) {
+    MenuSession* session = g_menuSession;
+    if (!session) {
+        return DefWindowProcW(hwnd, msg, wParam, lParam);
+    }
+
+    int index = -1;
+    for (size_t i = 0; i < session->windows.size(); ++i) {
+        if (session->windows[i] == window) {
+            index = static_cast<int>(i);
+            break;
+        }
+    }
+    if (index < 0 || !window->Panel()) {
+        return DefWindowProcW(hwnd, msg, wParam, lParam);
+    }
+    const LayoutPanel& panel = *window->Panel();
+    MenuInputState& state = session->states[index];
+    const POINT clientPoint = {static_cast<short>(LOWORD(lParam)),
+                               static_cast<short>(HIWORD(lParam))};
+
+    switch (msg) {
+        case WM_MOUSEMOVE: {
+            session->active = index;
+            CloseSubmenusBelow(session, index);
+
+            TRACKMOUSEEVENT track = {};
+            track.cbSize = sizeof(track);
+            track.dwFlags = TME_LEAVE;
+            track.hwndTrack = hwnd;
+            TrackMouseEvent(&track);
+
+            const int hit = MenuStateItemAt(panel, state, clientPoint);
+            if (hit != state.hoverIndex) {
+                MenuStateMouseMove(state, panel, hit);
+                RepaintMenuWindow(session, index);
+            }
+
+            const bool isSubmenu =
+                hit >= 0 && panel.items[hit].kind == ItemKind::Submenu;
+            if (isSubmenu && !session->submenuTimerActive) {
+                session->hoverCandidate = hit;
+                session->submenuTimerActive = true;
+                SetTimer(hwnd, kMenuSubmenuTimerId,
+                         static_cast<UINT>(session->submenuDelayMs <= 0
+                                               ? 1
+                                               : session->submenuDelayMs),
+                         nullptr);
+            } else if (!isSubmenu && session->submenuTimerActive) {
+                KillTimer(hwnd, kMenuSubmenuTimerId);
+                session->submenuTimerActive = false;
+                session->hoverCandidate = -1;
+            }
+            return 0;
+        }
+        case WM_MOUSELEAVE: {
+            if (index == session->active) {
+                MenuStateMouseLeave(state);
+                RepaintMenuWindow(session, index);
+            }
+            return 0;
+        }
+        case WM_TIMER: {
+            if (wParam == kMenuSubmenuTimerId) {
+                session->submenuTimerActive = false;
+                KillTimer(hwnd, kMenuSubmenuTimerId);
+                if (index == session->active && session->hoverCandidate >= 0) {
+                    OpenSubmenu(session, index, session->hoverCandidate);
+                }
+            }
+            return 0;
+        }
+        case WM_LBUTTONUP: {
+            const int hit = MenuStateItemAt(panel, state, clientPoint);
+            if (hit >= 0) {
+                const LayoutItem& item = panel.items[hit];
+                if (item.kind == ItemKind::Submenu) {
+                    OpenSubmenu(session, index, hit);
+                } else {
+                    session->result.chosenItemId = item.invocation.id;
+                    session->done = true;
+                }
+            }
+            return 0;
+        }
+        case WM_MOUSEWHEEL: {
+            const int delta = static_cast<short>(HIWORD(wParam));
+            MenuStateWheel(state, panel, delta, session->maxHeight);
+            RepaintMenuWindow(session, index);
+            return 0;
+        }
+        case WM_KEYDOWN: {
+            if (index != session->active) {
+                return 0;
+            }
+            switch (wParam) {
+                case VK_ESCAPE: {
+                    if (index > 0) {
+                        CloseSubmenusBelow(session, index - 1);
+                    } else {
+                        session->done = true;
+                    }
+                    return 0;
+                }
+                case VK_LEFT: {
+                    if (index > 0) {
+                        CloseSubmenusBelow(session, index - 1);
+                    } else {
+                        MenuStateKey(state, panel, MenuInputEvent::KeyLeft);
+                    }
+                    return 0;
+                }
+                case VK_RIGHT: {
+                    const int activeIndex =
+                        state.hoverIndex >= 0 ? state.hoverIndex : state.keyboardIndex;
+                    if (activeIndex >= 0 &&
+                        activeIndex < static_cast<int>(panel.items.size()) &&
+                        panel.items[activeIndex].kind == ItemKind::Submenu) {
+                        OpenSubmenu(session, index, activeIndex);
+                    }
+                    return 0;
+                }
+                case VK_RETURN: {
+                    const LayoutItem* activeItem =
+                        MenuStateActiveItem(panel, state);
+                    if (activeItem) {
+                        const int activeIndex = static_cast<int>(
+                            activeItem - &panel.items[0]);
+                        if (activeItem->kind == ItemKind::Submenu) {
+                            OpenSubmenu(session, index, activeIndex);
+                        } else {
+                            session->result.chosenItemId =
+                                activeItem->invocation.id;
+                            session->done = true;
+                        }
+                    }
+                    return 0;
+                }
+                default:
+                    break;
+            }
+
+            MenuInputEvent event;
+            switch (wParam) {
+                case VK_UP:
+                    event = MenuInputEvent::KeyUp;
+                    break;
+                case VK_DOWN:
+                    event = MenuInputEvent::KeyDown;
+                    break;
+                case VK_HOME:
+                    event = MenuInputEvent::KeyHome;
+                    break;
+                case VK_END:
+                    event = MenuInputEvent::KeyEnd;
+                    break;
+                default:
+                    return 0;
+            }
+            MenuStateKey(state, panel, event);
+            RepaintMenuWindow(session, index);
+            return 0;
+        }
+        case WM_ACTIVATE: {
+            if (LOWORD(wParam) == WA_INACTIVE && index == 0) {
+                const HWND newActive = reinterpret_cast<HWND>(lParam);
+                bool ours = false;
+                for (MenuWindow* menuWindow : session->windows) {
+                    if (menuWindow->Handle() == newActive) {
+                        ours = true;
+                        break;
+                    }
+                }
+                if (!ours) {
+                    session->done = true;
+                }
+            }
+            return 0;
+        }
+        case WM_ACTIVATEAPP: {
+            if (!wParam) {
+                session->done = true;
+            }
+            return 0;
+        }
+        default:
+            break;
+    }
+    return DefWindowProcW(hwnd, msg, wParam, lParam);
+}
+
+CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
+                                HWND owner, POINT pt) {
+    CustomMenuResult result;
+
+    if (!g_renderDevice.IsReady() && !g_renderDevice.Initialize()) {
+        result.failed = true;
+        return result;
+    }
+
+    std::shared_ptr<const RulesConfig> config = g_configStore.Snapshot();
+    const RulesConfig emptyConfig;
+    const RulesConfig& effective = config ? *config : emptyConfig;
+    const Appearance appearance = ResolveAppearance(effective, key.darkTheme);
+    const LayoutMetrics metrics =
+        ResolveLayoutMetrics(appearance, key.dpi, key.darkTheme);
+
+    std::shared_ptr<const LayoutPanel> panel = g_layoutCache.Find(key);
+    if (!panel) {
+        auto built =
+            std::make_shared<LayoutPanel>(BuildLayoutPanel(model.items, metrics));
+        ID2D1DeviceContext* bindDc = nullptr;
+        if (SUCCEEDED(g_renderDevice.D2DDevice()->CreateDeviceContext(
+                D2D1_DEVICE_CONTEXT_OPTIONS_NONE, &bindDc)) &&
+            bindDc) {
+            g_contentCaches.Bind(*built, metrics, bindDc);
+            bindDc->Release();
+        }
+        g_layoutCache.Put(key, built);
+        panel = built;
+    }
+    if (!panel) {
+        result.failed = true;
+        return result;
+    }
+
+    MenuWindow* root = g_menuWindowPool.Acquire();
+    if (!root || !root->Create(owner, panel.get(), true)) {
+        if (root) {
+            g_menuWindowPool.Release(root);
+        }
+        result.failed = true;
+        return result;
+    }
+
+    const RECT workArea = WorkAreaForPoint(pt);
+
+    MenuSession session;
+    session.config = config;
+    session.model = &model;
+    session.metrics = metrics;
+    session.appearance = appearance;
+    session.submenuDelayMs = g_settings.submenuDelayMs;
+    session.maxHeight = workArea.bottom - workArea.top;
+    session.windows.push_back(root);
+    session.states.push_back(MenuInputState{});
+
+    g_menuSession = &session;
+    g_menuWindowMessageHook = &CustomMenuWindowProc;
+
+    root->Move(ClampPanelPosition(pt, panel->size, workArea));
+    RenderMenuWindow(root, *panel, session.states[0], metrics, appearance, nullptr);
+    root->Show();
+    SetForegroundWindow(root->Handle());
+    SetFocus(root->Handle());
+
+    MSG msg = {};
+    while (!session.done) {
+        const BOOL got = GetMessageW(&msg, nullptr, 0, 0);
+        if (got <= 0) {
+            if (got == 0) {
+                PostQuitMessage(static_cast<int>(msg.wParam));
+            }
+            break;
+        }
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
+    }
+
+    if (session.submenuTimerActive) {
+        KillTimer(root->Handle(), kMenuSubmenuTimerId);
+        session.submenuTimerActive = false;
+    }
+    for (size_t i = session.windows.size(); i > 1; --i) {
+        g_menuWindowPool.Release(session.windows[i - 1]);
+    }
+    g_menuWindowPool.Release(root);
+    g_menuWindowMessageHook = nullptr;
+    g_menuSession = nullptr;
+
+    result = session.result;
+    result.handled = true;
+    return result;
 }
 
 // Shell property keys used by the Sort by and Group by submenus (all in the
@@ -8654,8 +9170,32 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
                static_cast<unsigned long long>(g_perf.OpenPathElapsedMs()));
 
         bool creationFailed = false;
-        std::optional<uint32_t> chosen =
-            NativeMenuView::Show(model, owner, pt, &creationFailed);
+        std::optional<uint32_t> chosen;
+        bool customShown = false;
+        const MenuMode mode = ResolveMenuMode(
+            g_settings.menuMode, g_modeController.ConsecutiveFailures());
+        if (mode == MenuMode::Custom) {
+            LayoutKey layoutKey{};
+            layoutKey.sig = signature;
+            layoutKey.rulesRevision = rules ? rules->revision : 0;
+            layoutKey.appearanceRevision = rules ? rules->revision : 0;
+            layoutKey.dpi = DpiForWindow(owner);
+            layoutKey.darkTheme = IsDarkThemeActive();
+
+            const CustomMenuResult custom =
+                ShowCustomMenu(model, layoutKey, owner, pt);
+            if (custom.failed) {
+                Wh_Log(L"Custom menu failed; using the HMENU path");
+                g_modeController.RecordFailure();
+            } else {
+                g_modeController.RecordSuccess();
+                customShown = true;
+                chosen = custom.chosenItemId;
+            }
+        }
+        if (!customShown) {
+            chosen = NativeMenuView::Show(model, owner, pt, &creationFailed);
+        }
 
         if (creationFailed) {
             Wh_Log(L"Menu creation failed; using the native menu");

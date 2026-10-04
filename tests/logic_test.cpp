@@ -2182,6 +2182,74 @@ int main() {
         CHECK(cmo::PredicateExprMatches(expr, openWith, ctx));
     }
 
+    // v2 rules: hide, keep, move, precedence, fallback protection.
+    {
+        cmo::RulesConfig config;
+        std::wstring error;
+        cmo::Rule hideRule{};
+        hideRule.kind = cmo::RuleKind::Hide;
+        CHECK(cmo::ParsePredicateExpr(L"label:\"Cast to Device\"", hideRule.match,
+                                      error));
+        config.rules.push_back(hideRule);
+        cmo::Rule keepRule{};
+        keepRule.kind = cmo::RuleKind::Keep;
+        CHECK(cmo::ParsePredicateExpr(L"label:Share", keepRule.match, error));
+        config.rules.push_back(keepRule);
+        cmo::Rule moveRule{};
+        moveRule.kind = cmo::RuleKind::Move;
+        moveRule.destination = L"More options";
+        CHECK(cmo::ParsePredicateExpr(L"thirdParty", moveRule.match, error));
+        config.rules.push_back(moveRule);
+
+        cmo::MenuModel model{};
+        model.sig = cmo::ContextSignature{cmo::Scope::Files, L".txt", cmo::Shape::Single,
+                                          cmo::Variant::Normal};
+        auto make = [](uint32_t id, const wchar_t* label, uint32_t flags) {
+            cmo::MenuItem item{};
+            item.id = id;
+            item.kind = cmo::ItemKind::Command;
+            item.action = cmo::ActionKind::ShellVerb;
+            item.label = label;
+            item.flags = flags;
+            return item;
+        };
+        model.items.push_back(make(1, L"Cast to Device", 0));
+        model.items.push_back(make(2, L"Share", cmo::kModelThirdParty));
+        model.items.push_back(make(3, L"WinRAR", cmo::kModelThirdParty));
+        cmo::MenuItem fallback = make(4, L"Show classic menu", 0);
+        fallback.action = cmo::ActionKind::Fallback;
+        model.items.push_back(fallback);
+
+        cmo::ItemContext ctx{};
+        ctx.scope = cmo::Scope::Files;
+        cmo::RulesApplication applied = cmo::ApplyRulesToModel(model, config, ctx);
+        CHECK(applied.hasMoveRules);
+        CHECK(model.items.size() == 3);  // Share, More options, fallback
+        const cmo::MenuItem* more = nullptr;
+        for (const cmo::MenuItem& item : model.items) {
+            if (item.label == L"More options") more = &item;
+        }
+        CHECK(more != nullptr && more->kind == cmo::ItemKind::Submenu);
+        CHECK(more && more->children.size() == 1);
+        CHECK(more && more->children[0].label == L"WinRAR");
+        CHECK(model.items.back().action == cmo::ActionKind::Fallback);
+
+        // Hiding everything must keep the fallback.
+        cmo::RulesConfig hideAll;
+        cmo::Rule hideAllRule{};
+        hideAllRule.kind = cmo::RuleKind::Hide;
+        CHECK(cmo::ParsePredicateExpr(L"label:\"*\"", hideAllRule.match, error));
+        hideAll.rules.push_back(hideAllRule);
+        cmo::MenuModel emptyModel{};
+        emptyModel.items.push_back(make(1, L"Open", 0));
+        cmo::MenuItem fb = make(2, L"Show classic menu", 0);
+        fb.action = cmo::ActionKind::Fallback;
+        emptyModel.items.push_back(fb);
+        cmo::ApplyRulesToModel(emptyModel, hideAll, ctx);
+        CHECK(emptyModel.items.size() == 1);
+        CHECK(emptyModel.items.back().action == cmo::ActionKind::Fallback);
+    }
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

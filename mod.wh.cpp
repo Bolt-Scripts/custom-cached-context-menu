@@ -1119,12 +1119,32 @@ struct ConfigParseError {
     std::wstring message;
 };
 
+enum class PredicateField : uint8_t { Label, Verb, Ext, Scope, Multi, ThirdParty };
+
+struct Predicate {
+    PredicateField field = PredicateField::Label;
+    std::vector<std::wstring> values;
+};
+
+struct PredicateExpr {
+    std::vector<Predicate> all;
+};
+
+enum class RuleKind : uint8_t { Hide, Keep, Move };
+
+struct Rule {
+    RuleKind kind = RuleKind::Hide;
+    PredicateExpr match;
+    std::wstring destination;
+};
+
 struct RulesConfig {
     Appearance appearance;
     Appearance lightAppearance;
     Appearance darkAppearance;
     bool hasLightAppearance = false;
     bool hasDarkAppearance = false;
+    std::vector<Rule> rules;
     uint64_t revision = 0;
 };
 
@@ -1419,17 +1439,6 @@ bool ParseRulesConfig(const std::wstring& text, RulesConfig& out,
 // [CMO:RulesEngine] v2 predicates and rule matching.
 // ===========================================================================
 
-enum class PredicateField : uint8_t { Label, Verb, Ext, Scope, Multi, ThirdParty };
-
-struct Predicate {
-    PredicateField field = PredicateField::Label;
-    std::vector<std::wstring> values;
-};
-
-struct PredicateExpr {
-    std::vector<Predicate> all;
-};
-
 struct ItemContext {
     Scope scope = Scope::Files;
     Shape shape = Shape::Single;
@@ -1672,6 +1681,122 @@ bool ParsePredicateExpr(const std::wstring& text, PredicateExpr& out,
     out = std::move(expr);
     error.clear();
     return true;
+}
+
+struct RulesApplication {
+    bool hasMoveRules = false;
+};
+
+void HideMatchingItems(std::vector<MenuItem>& items, const PredicateExpr& match,
+                       const ItemContext& ctx) {
+    std::erase_if(items, [&](const MenuItem& item) {
+        return item.action != ActionKind::Fallback &&
+               PredicateExprMatches(match, item, ctx);
+    });
+    for (MenuItem& item : items) {
+        if (item.kind == ItemKind::Submenu) {
+            HideMatchingItems(item.children, match, ctx);
+        }
+    }
+}
+
+void CollectProtectedIds(const std::vector<MenuItem>& items,
+                         const PredicateExpr& match, const ItemContext& ctx,
+                         std::unordered_set<uint32_t>& out) {
+    for (const MenuItem& item : items) {
+        if (PredicateExprMatches(match, item, ctx)) {
+            out.insert(item.id);
+        }
+        CollectProtectedIds(item.children, match, ctx, out);
+    }
+}
+
+RulesApplication ApplyRulesToModel(MenuModel& model, const RulesConfig& config,
+                                   const ItemContext& ctx) {
+    RulesApplication application;
+    for (const Rule& rule : config.rules) {
+        if (rule.kind == RuleKind::Move) {
+            application.hasMoveRules = true;
+            break;
+        }
+    }
+
+    for (const Rule& rule : config.rules) {
+        if (rule.kind == RuleKind::Hide) {
+            HideMatchingItems(model.items, rule.match, ctx);
+        }
+    }
+
+    std::unordered_set<uint32_t> protectedIds;
+    for (const Rule& rule : config.rules) {
+        if (rule.kind == RuleKind::Keep) {
+            CollectProtectedIds(model.items, rule.match, ctx, protectedIds);
+        }
+    }
+
+    std::vector<std::wstring> destinations;
+    std::unordered_map<std::wstring, std::vector<MenuItem>> movedByDestination;
+    for (const Rule& rule : config.rules) {
+        if (rule.kind != RuleKind::Move) {
+            continue;
+        }
+        for (size_t i = 0; i < model.items.size();) {
+            MenuItem& item = model.items[i];
+            if (item.action != ActionKind::Fallback &&
+                protectedIds.count(item.id) == 0 &&
+                PredicateExprMatches(rule.match, item, ctx)) {
+                std::vector<MenuItem>& bucket = movedByDestination[rule.destination];
+                if (bucket.empty()) {
+                    destinations.push_back(rule.destination);
+                }
+                bucket.push_back(std::move(item));
+                model.items.erase(model.items.begin() +
+                                  static_cast<std::ptrdiff_t>(i));
+                continue;
+            }
+            ++i;
+        }
+    }
+
+    for (const std::wstring& destination : destinations) {
+        auto bucket = movedByDestination.find(destination);
+        if (bucket == movedByDestination.end() || bucket->second.empty()) {
+            continue;
+        }
+
+        MenuItem* existing = nullptr;
+        for (MenuItem& item : model.items) {
+            if (item.kind == ItemKind::Submenu && item.label == destination) {
+                existing = &item;
+                break;
+            }
+        }
+        if (existing) {
+            for (MenuItem& child : bucket->second) {
+                existing->children.push_back(std::move(child));
+            }
+            continue;
+        }
+
+        MenuItem submenu{};
+        submenu.id = 0xF100 + static_cast<uint32_t>(destinations.size());
+        submenu.kind = ItemKind::Submenu;
+        submenu.action = ActionKind::Submenu;
+        submenu.label = destination;
+        submenu.children = std::move(bucket->second);
+
+        auto insertAt = model.items.end();
+        for (auto it = model.items.begin(); it != model.items.end(); ++it) {
+            if (it->action == ActionKind::Fallback) {
+                insertAt = it;
+                break;
+            }
+        }
+        model.items.insert(insertAt, std::move(submenu));
+    }
+
+    CollapseSeparators(model.items);
+    return application;
 }
 
 // Shell property keys used by the Sort by and Group by submenus (all in the

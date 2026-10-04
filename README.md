@@ -49,25 +49,41 @@ untouched native menu, including extended verbs.
 
 ## Menu configuration (`menu.ini`)
 
-In custom mode the menu appearance and item rules are read from `menu.ini` in
-the mod's storage directory (created with commented defaults on first run) and
-**live-reloaded** when the file changes. Errors are logged as
+In custom mode the menu appearance, item rules, and custom commands are read
+from `menu.ini` in the mod's storage directory (created with commented defaults
+on first run). The file is written as UTF-8 with a BOM; UTF-8 without a BOM and
+UTF-16 (with or without a BOM) are also read. It is checked **when a menu
+opens** — nothing runs in the background. Errors are logged as
 `menu.ini:<line>: <message>` and the last good configuration stays in effect.
-Colors are `#RRGGBB` or `#AARRGGBB`; comments start with `;`.
+Colors are `#RRGGBB` or `#AARRGGBB`; comments start with `;` (including after a
+value).
 
 ```ini
 [appearance]                ; base appearance
 background = #1E1E1EF0      ; also used as the blur tint
 blur = true                 ; blur the screen behind the menu
-cornerRadius = 8
+cornerRadius = 8            ; or cornerRadii = tl, tr, br, bl
 border = #FFFFFF22
 shadow = true
+shadowOpacity = 120
+shadowBlur = 12
 font = Segoe UI, 9
+fontWeight = normal         ; normal | semibold | bold
+fontStyle = normal          ; normal | italic
 itemHeight = 28
 iconSize = 16
 padding = 6
+verticalPadding = 4
+minWidth = 0                ; 0 = automatic
+maxWidth = 0                ; 0 = unlimited
+marker = dot                ; dot | check | bar | none
+markerColor = #FFFFFF
+markerWidth = 14
+separatorSpacing = 0
 hoverBackground = #FFFFFF14
 textColor = #FFFFFF
+headerColor = #66FFFFFF
+showAccelerators = underline ; underline | strip | raw
 animation = none            ; none | fade | slide
 
 [appearance.light]          ; overrides when light theme is active
@@ -79,11 +95,22 @@ hide = label:"Cast to Device"
 keep = label:Share
 move = thirdParty -> "More options"
 
+[item "TortoiseSVN*"]       ; per-item overrides
+label = SVN
+icon = C:\Tools\svn.ico,0
+marker = bar
+
 [command "Open in VS Code"]
 command = code.exe "%1"
 workingDir = %dir%
 match.ext = .cs, .cpp
 menu = Tools
+
+[command "---"]             ; separator item
+type = separator
+
+[command "Copy path"]       ; built-in actions
+action = copypath           ; run | copypath | opennewwindow | properties
 
 [submenu "Tools"]
 icon = @glyph:E712
@@ -98,11 +125,32 @@ position = top
   a submenu (created automatically; the built-in "More options" grouping steps
   aside when move rules exist). Precedence: hide > keep > move.
 - **Commands**: `command`, `workingDir`, `icon`, `menu`, `match.*`, `runAs`
-  (`none`/`admin`), `showWindow`, `separator`. Placeholders: `%1`, `%*`,
+  (`none`/`admin`), `showWindow`, `separator`, `type`
+  (`command`/`separator`/`header`), `action`
+  (`run`/`copypath`/`opennewwindow`/`properties`). Placeholders: `%1`, `%*`,
   `%dir%`, plus environment variables. Command `match.*` supports the context
   predicates (`ext:`, `scope:`, `multi`, `thirdParty`); label/verb predicates
   apply to rules, not to commands. Rules run before custom items are inserted,
   so `hide` does not remove custom commands or submenus.
+- **Separators and headers**: `type = separator` draws a line; `type = header`
+  draws a non-selectable section label (colored with `headerColor`). Both honor
+  `menu` and `match.*` and keep their declaration order inside the menu.
+- **Built-in actions**: `action = copypath` copies the selection's paths,
+  `opennewwindow` opens the selected folder (or the current folder) in a new
+  Explorer window, and `properties` shows shell properties. `run` (the default)
+  executes `command`.
+- **Per-item overrides** (`[item "Label glob"]`): `label` changes what is drawn
+  (rules still match the original shell label), `icon` replaces the icon, and
+  `marker` (`dot`/`check`/`bar`/`none`) changes the selection marker. Overrides
+  apply recursively to submenu items; when several sections match, the last one
+  wins per key.
+- **Appearance**: `cornerRadii` sets per-corner radii, `minWidth`/`maxWidth`
+  bound the panel (never narrower than the widest item), `verticalPadding` and
+  `separatorSpacing` tune spacing, `marker`/`markerColor`/`markerWidth` control
+  the selection marker column, `fontWeight`/`fontStyle` style the text, and
+  `shadowOpacity`/`shadowBlur` tune the blurred shadow. `showAccelerators`
+  chooses whether shell mnemonics are underlined (`underline`), stripped
+  (`strip`), or left raw (`raw`).
 - **Submenus**: `icon`, `position` (`top`, `bottom`, `after:"Label"`,
   `before:"Label"`), `match.*`. Nesting comes from `menu = A/B` (up to 3
   levels).
@@ -111,6 +159,9 @@ position = top
 
 - Menus inside other applications' file dialogs and third-party file managers
   are untouched; the mod targets `explorer.exe`.
+- Navigation-pane menus (pinned items, Quick access) are replaced using the
+  captured shell menu rather than a prebuilt core model, so warm-up does not
+  prebuild them and their first open pays the shell's population cost.
 - Exotic shell namespaces (zip folders, Recycle Bin, network locations) use the
   native fallback.
 - On Windows 11 the modern XAML menu is suppressed; the classic menu (and this
@@ -182,6 +233,20 @@ and are pre-warmed at Explorer start, so extension items survive restarts.
 Handler registration changes are checked when a menu is opened (debounced to
 once per 5 seconds), so the mod does no background polling while Explorer is
 idle; an hourly revalidation catches handler DLL updates.
+
+## On-device checklist
+
+- Edit `menu.ini` in a UTF-8 editor and a UTF-16 editor: changes apply on the
+  next menu open; a bad line logs once and keeps the last configuration.
+- Try the new appearance keys, every marker style, per-item overrides,
+  separators/headers, and built-in actions.
+- Click-away closes the menu; right-clicking elsewhere closes and reopens;
+  leaving a submenu via any side closes it; repeated desktop right-clicks work.
+- Pinned navigation-pane items show the replacement menu.
+- With debug logging off, an idle Explorer session produces no recurring
+  warm-up or `menu.ini` log lines.
+- Open and close menus about 50 times: Explorer's handle and GPU memory stay
+  stable.
 
 ## Reporting issues
 

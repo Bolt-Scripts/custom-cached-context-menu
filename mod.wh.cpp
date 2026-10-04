@@ -280,6 +280,7 @@ enum class ActionKind : uint8_t {
     SortDirection,
     GroupBy,
     GroupDirection,
+    CustomCommand,
 };
 
 // Documented view operations, dispatched through IFolderView2 / IShellView.
@@ -328,6 +329,8 @@ struct MenuItem {
     std::wstring targetPath;
     // Index into the ShellNew template list for ActionKind::NewItem.
     uint32_t newIndex = 0;
+    // Index into RulesConfig::commands for ActionKind::CustomCommand.
+    uint32_t customCommandIndex = 0;
     // Sort/group field index into kShellPropertyKeys, and sort direction.
     uint32_t sortIndex = 0;
     bool sortAscending = true;
@@ -1138,6 +1141,31 @@ struct Rule {
     std::wstring destination;
 };
 
+enum class RunAs : uint8_t { None, Admin };
+enum class ShowWindow : uint8_t { Normal, Maximized, Minimized, Hidden };
+enum class CommandSeparator : uint8_t { None, Before, After };
+enum class SubmenuPositionKind : uint8_t { Top, Bottom, After, Before };
+
+struct CustomCommand {
+    std::wstring label;
+    std::wstring command;
+    std::wstring workingDir;
+    std::wstring iconRef;
+    PredicateExpr match;
+    RunAs runAs = RunAs::None;
+    ShowWindow showWindow = ShowWindow::Normal;
+    CommandSeparator separator = CommandSeparator::None;
+    std::wstring menuPath;
+};
+
+struct CustomSubmenu {
+    std::wstring name;
+    std::wstring iconRef;
+    SubmenuPositionKind position = SubmenuPositionKind::Bottom;
+    std::wstring positionLabel;
+    PredicateExpr match;
+};
+
 struct RulesConfig {
     Appearance appearance;
     Appearance lightAppearance;
@@ -1145,6 +1173,8 @@ struct RulesConfig {
     bool hasLightAppearance = false;
     bool hasDarkAppearance = false;
     std::vector<Rule> rules;
+    std::vector<CustomCommand> commands;
+    std::vector<CustomSubmenu> submenus;
     uint64_t revision = 0;
 };
 
@@ -1314,12 +1344,210 @@ std::wstring DefaultRulesConfigText() {
            L"; move = thirdParty -> \"More options\"\n";
 }
 
+// Declared here and defined in [CMO:RulesEngine] below.
+bool ParsePredicateExpr(const std::wstring& text, PredicateExpr& out,
+                        std::wstring& error);
+
+std::wstring ExtractQuoted(const std::wstring& text) {
+    const std::wstring trimmed = TrimWhitespace(text);
+    if (trimmed.size() < 2 || trimmed.front() != L'"' || trimmed.back() != L'"') {
+        return L"";
+    }
+    return trimmed.substr(1, trimmed.size() - 2);
+}
+
+bool AppendMatchValue(PredicateExpr& expr, const std::wstring& field,
+                      const std::wstring& value) {
+    if (field == L"multi" || field == L"thirdparty") {
+        bool enabled = true;
+        if (!ParseBool(value, enabled)) {
+            return false;
+        }
+        if (enabled) {
+            Predicate pred;
+            pred.field = field == L"multi" ? PredicateField::Multi
+                                           : PredicateField::ThirdParty;
+            expr.all.push_back(std::move(pred));
+        }
+        return true;
+    }
+    if (field != L"label" && field != L"verb" && field != L"ext" &&
+        field != L"scope") {
+        return false;
+    }
+    std::wstring error;
+    PredicateExpr parsed;
+    if (!ParsePredicateExpr(field + L":" + value, parsed, error)) {
+        return false;
+    }
+    for (Predicate& pred : parsed.all) {
+        expr.all.push_back(std::move(pred));
+    }
+    return true;
+}
+
+bool ApplyCommandValue(CustomCommand& command, const std::wstring& key,
+                       const std::wstring& value) {
+    if (key == L"command") {
+        command.command = value;
+        return true;
+    }
+    if (key == L"workingdir") {
+        command.workingDir = value;
+        return true;
+    }
+    if (key == L"icon") {
+        command.iconRef = value;
+        return true;
+    }
+    if (key == L"menu") {
+        command.menuPath = value;
+        return true;
+    }
+    if (key == L"runas") {
+        const std::wstring lower = ToLowerCopy(value);
+        if (lower == L"none") {
+            command.runAs = RunAs::None;
+            return true;
+        }
+        if (lower == L"admin") {
+            command.runAs = RunAs::Admin;
+            return true;
+        }
+        return false;
+    }
+    if (key == L"showwindow") {
+        const std::wstring lower = ToLowerCopy(value);
+        if (lower == L"normal") {
+            command.showWindow = ShowWindow::Normal;
+            return true;
+        }
+        if (lower == L"maximized") {
+            command.showWindow = ShowWindow::Maximized;
+            return true;
+        }
+        if (lower == L"minimized") {
+            command.showWindow = ShowWindow::Minimized;
+            return true;
+        }
+        if (lower == L"hidden") {
+            command.showWindow = ShowWindow::Hidden;
+            return true;
+        }
+        return false;
+    }
+    if (key == L"separator") {
+        const std::wstring lower = ToLowerCopy(value);
+        if (lower == L"none") {
+            command.separator = CommandSeparator::None;
+            return true;
+        }
+        if (lower == L"before") {
+            command.separator = CommandSeparator::Before;
+            return true;
+        }
+        if (lower == L"after") {
+            command.separator = CommandSeparator::After;
+            return true;
+        }
+        return false;
+    }
+    if (key.rfind(L"match.", 0) == 0) {
+        return AppendMatchValue(command.match, key.substr(6), value);
+    }
+    return false;
+}
+
+bool ApplySubmenuValue(CustomSubmenu& submenu, const std::wstring& key,
+                       const std::wstring& value) {
+    if (key == L"icon") {
+        submenu.iconRef = value;
+        return true;
+    }
+    if (key == L"position") {
+        const std::wstring lower = ToLowerCopy(TrimWhitespace(value));
+        if (lower == L"top") {
+            submenu.position = SubmenuPositionKind::Top;
+            return true;
+        }
+        if (lower == L"bottom") {
+            submenu.position = SubmenuPositionKind::Bottom;
+            return true;
+        }
+        if (lower.rfind(L"after:", 0) == 0) {
+            submenu.position = SubmenuPositionKind::After;
+            submenu.positionLabel = ExtractQuoted(value.substr(6));
+            return !submenu.positionLabel.empty();
+        }
+        if (lower.rfind(L"before:", 0) == 0) {
+            submenu.position = SubmenuPositionKind::Before;
+            submenu.positionLabel = ExtractQuoted(value.substr(7));
+            return !submenu.positionLabel.empty();
+        }
+        return false;
+    }
+    if (key.rfind(L"match.", 0) == 0) {
+        return AppendMatchValue(submenu.match, key.substr(6), value);
+    }
+    return false;
+}
+
+bool ApplyRuleLine(RulesConfig& config, const std::wstring& key,
+                   const std::wstring& value, std::wstring& error) {
+    RuleKind kind = RuleKind::Hide;
+    if (key == L"hide") {
+        kind = RuleKind::Hide;
+    } else if (key == L"keep") {
+        kind = RuleKind::Keep;
+    } else if (key == L"move") {
+        kind = RuleKind::Move;
+    } else {
+        error = L"unknown rule '" + key + L"'";
+        return false;
+    }
+
+    Rule rule;
+    rule.kind = kind;
+    std::wstring predicateText = value;
+    if (kind == RuleKind::Move) {
+        const size_t arrow = value.find(L"->");
+        if (arrow == std::wstring::npos) {
+            error = L"move needs '-> \"Destination\"'";
+            return false;
+        }
+        predicateText = TrimWhitespace(value.substr(0, arrow));
+        rule.destination = ExtractQuoted(value.substr(arrow + 2));
+        if (rule.destination.empty()) {
+            error = L"move needs a quoted destination";
+            return false;
+        }
+    }
+    if (!ParsePredicateExpr(predicateText, rule.match, error)) {
+        return false;
+    }
+    config.rules.push_back(std::move(rule));
+    return true;
+}
+
 bool ParseRulesConfig(const std::wstring& text, RulesConfig& out,
                       std::vector<ConfigParseError>& errors) {
     errors.clear();
 
-    enum class Section : uint8_t { None, Appearance, AppearanceLight, AppearanceDark, Ignored };
+    enum class Section : uint8_t {
+        None,
+        Appearance,
+        AppearanceLight,
+        AppearanceDark,
+        Rules,
+        Command,
+        Submenu,
+        Ignored,
+    };
     Section section = Section::None;
+
+    RulesConfig config;
+    int currentCommand = -1;
+    int currentSubmenu = -1;
 
     std::vector<std::pair<std::wstring, std::wstring>> baseValues;
     std::vector<std::pair<std::wstring, std::wstring>> lightValues;
@@ -1351,8 +1579,11 @@ bool ParseRulesConfig(const std::wstring& text, RulesConfig& out,
                 section = Section::Ignored;
                 continue;
             }
-            const std::wstring name = ToLowerCopy(TrimWhitespace(
-                trimmed.substr(1, trimmed.size() - 2)));
+            const std::wstring rawName =
+                TrimWhitespace(trimmed.substr(1, trimmed.size() - 2));
+            const std::wstring name = ToLowerCopy(rawName);
+            currentCommand = -1;
+            currentSubmenu = -1;
             if (name == L"appearance") {
                 section = Section::Appearance;
             } else if (name == L"appearance.light") {
@@ -1361,10 +1592,32 @@ bool ParseRulesConfig(const std::wstring& text, RulesConfig& out,
             } else if (name == L"appearance.dark") {
                 section = Section::AppearanceDark;
                 hasDark = true;
-            } else if (name == L"rules" || name.rfind(L"command ", 0) == 0 ||
-                       name.rfind(L"submenu ", 0) == 0) {
-                // Parsed by later tasks; values are ignored here.
-                section = Section::Ignored;
+            } else if (name == L"rules") {
+                section = Section::Rules;
+            } else if (name.rfind(L"command ", 0) == 0) {
+                const std::wstring label = ExtractQuoted(rawName.substr(8));
+                if (label.empty()) {
+                    errors.push_back(
+                        {lineNumber, L"command section needs a quoted label"});
+                    section = Section::Ignored;
+                } else {
+                    config.commands.push_back(CustomCommand{});
+                    config.commands.back().label = label;
+                    currentCommand = static_cast<int>(config.commands.size()) - 1;
+                    section = Section::Command;
+                }
+            } else if (name.rfind(L"submenu ", 0) == 0) {
+                const std::wstring submenuName = ExtractQuoted(rawName.substr(8));
+                if (submenuName.empty()) {
+                    errors.push_back(
+                        {lineNumber, L"submenu section needs a quoted name"});
+                    section = Section::Ignored;
+                } else {
+                    config.submenus.push_back(CustomSubmenu{});
+                    config.submenus.back().name = submenuName;
+                    currentSubmenu = static_cast<int>(config.submenus.size()) - 1;
+                    section = Section::Submenu;
+                }
             } else {
                 errors.push_back({lineNumber, L"unknown section '" + name + L"'"});
                 section = Section::Ignored;
@@ -1401,8 +1654,25 @@ bool ParseRulesConfig(const std::wstring& text, RulesConfig& out,
             } else {
                 darkValues.emplace_back(key, value);
             }
+        } else if (section == Section::Rules) {
+            std::wstring error;
+            if (!ApplyRuleLine(config, key, value, error)) {
+                errors.push_back({lineNumber, error});
+            }
+        } else if (section == Section::Command) {
+            if (currentCommand < 0 ||
+                !ApplyCommandValue(config.commands[currentCommand], key, value)) {
+                errors.push_back({lineNumber,
+                                  L"invalid command value for '" + key + L"'"});
+            }
+        } else if (section == Section::Submenu) {
+            if (currentSubmenu < 0 ||
+                !ApplySubmenuValue(config.submenus[currentSubmenu], key, value)) {
+                errors.push_back({lineNumber,
+                                  L"invalid submenu value for '" + key + L"'"});
+            }
         } else if (section == Section::Ignored) {
-            // Intentionally ignored for now.
+            // Intentionally ignored.
         } else {
             errors.push_back({lineNumber, L"key outside a section"});
         }
@@ -1412,7 +1682,6 @@ bool ParseRulesConfig(const std::wstring& text, RulesConfig& out,
         return false;
     }
 
-    RulesConfig config;
     for (const auto& pair : baseValues) {
         ApplyAppearanceValue(config.appearance, pair.first, pair.second);
     }
@@ -1797,6 +2066,207 @@ RulesApplication ApplyRulesToModel(MenuModel& model, const RulesConfig& config,
 
     CollapseSeparators(model.items);
     return application;
+}
+
+bool CommandMatchesContext(const PredicateExpr& expr, const ItemContext& ctx) {
+    if (expr.all.empty()) {
+        return true;
+    }
+    MenuItem dummy{};
+    return PredicateExprMatches(expr, dummy, ctx);
+}
+
+std::vector<MenuItem>::iterator FallbackInsertPoint(std::vector<MenuItem>& items) {
+    for (auto it = items.begin(); it != items.end(); ++it) {
+        if (it->action == ActionKind::Fallback) {
+            return it;
+        }
+    }
+    return items.end();
+}
+
+struct PendingCustomSubmenu {
+    std::wstring name;
+    std::wstring iconRef;
+    SubmenuPositionKind position = SubmenuPositionKind::Bottom;
+    std::wstring positionLabel;
+    std::vector<MenuItem> children;
+};
+
+void InsertCustomItems(MenuModel& model, const RulesConfig& config,
+                       const ItemContext& ctx) {
+    auto findSubmenuConfig =
+        [&](const std::wstring& name) -> const CustomSubmenu* {
+        for (const CustomSubmenu& submenu : config.submenus) {
+            if (_wcsicmp(submenu.name.c_str(), name.c_str()) == 0) {
+                return &submenu;
+            }
+        }
+        return nullptr;
+    };
+
+    std::unordered_map<std::wstring, PendingCustomSubmenu> pending;
+    std::vector<std::wstring> pendingOrder;
+    auto ensureTopLevel = [&](const std::wstring& name) -> PendingCustomSubmenu& {
+        auto it = pending.find(name);
+        if (it == pending.end()) {
+            PendingCustomSubmenu entry;
+            entry.name = name;
+            if (const CustomSubmenu* submenu = findSubmenuConfig(name)) {
+                entry.iconRef = submenu->iconRef;
+                entry.position = submenu->position;
+                entry.positionLabel = submenu->positionLabel;
+            }
+            it = pending.emplace(name, std::move(entry)).first;
+            pendingOrder.push_back(name);
+        }
+        return it->second;
+    };
+
+    auto resolveContainer =
+        [&](const std::wstring& path) -> std::vector<MenuItem>* {
+        std::vector<std::wstring> segments;
+        size_t start = 0;
+        while (start <= path.size()) {
+            const size_t slash = path.find(L'/', start);
+            std::wstring segment = TrimWhitespace(
+                path.substr(start, slash == std::wstring::npos
+                                        ? std::wstring::npos
+                                        : slash - start));
+            if (!segment.empty()) {
+                segments.push_back(std::move(segment));
+            }
+            if (slash == std::wstring::npos) {
+                break;
+            }
+            start = slash + 1;
+        }
+        if (segments.empty() || segments.size() > 3) {
+            return nullptr;
+        }
+
+        PendingCustomSubmenu& top = ensureTopLevel(segments[0]);
+        std::vector<MenuItem>* current = &top.children;
+        for (size_t s = 1; s < segments.size(); ++s) {
+            MenuItem* nested = nullptr;
+            for (MenuItem& child : *current) {
+                if (child.kind == ItemKind::Submenu &&
+                    _wcsicmp(child.label.c_str(), segments[s].c_str()) == 0) {
+                    nested = &child;
+                    break;
+                }
+            }
+            if (!nested) {
+                MenuItem submenu{};
+                submenu.id = 0xF300 + static_cast<uint32_t>(s);
+                submenu.kind = ItemKind::Submenu;
+                submenu.action = ActionKind::Submenu;
+                submenu.label = segments[s];
+                if (const CustomSubmenu* sc = findSubmenuConfig(segments[s])) {
+                    submenu.iconRef = sc->iconRef;
+                }
+                current->push_back(std::move(submenu));
+                nested = &current->back();
+            }
+            current = &nested->children;
+        }
+        return current;
+    };
+
+    std::vector<MenuItem> topLevelCommands;
+    for (size_t i = 0; i < config.commands.size(); ++i) {
+        const CustomCommand& command = config.commands[i];
+        if (!CommandMatchesContext(command.match, ctx)) {
+            continue;
+        }
+
+        MenuItem item{};
+        item.id = 0xF200 + static_cast<uint32_t>(i);
+        item.kind = ItemKind::Command;
+        item.action = ActionKind::CustomCommand;
+        item.label = command.label;
+        item.iconRef = command.iconRef;
+        item.customCommandIndex = static_cast<uint32_t>(i);
+
+        std::vector<MenuItem>* container = nullptr;
+        if (!command.menuPath.empty()) {
+            container = resolveContainer(command.menuPath);
+        }
+        if (!container) {
+            topLevelCommands.push_back(std::move(item));
+            continue;
+        }
+
+        if (command.separator == CommandSeparator::Before) {
+            MenuItem separator{};
+            separator.id = 0xF500 + static_cast<uint32_t>(i);
+            separator.kind = ItemKind::Separator;
+            container->push_back(std::move(separator));
+        }
+        container->push_back(std::move(item));
+        if (command.separator == CommandSeparator::After) {
+            MenuItem separator{};
+            separator.id = 0xF501 + static_cast<uint32_t>(i);
+            separator.kind = ItemKind::Separator;
+            container->push_back(std::move(separator));
+        }
+    }
+
+    uint32_t syntheticId = 0xF400;
+    for (const std::wstring& name : pendingOrder) {
+        PendingCustomSubmenu& entry = pending[name];
+        MenuItem submenu{};
+        submenu.id = syntheticId++;
+        submenu.kind = ItemKind::Submenu;
+        submenu.action = ActionKind::Submenu;
+        submenu.label = entry.name;
+        submenu.iconRef = entry.iconRef;
+        submenu.children = std::move(entry.children);
+
+        std::vector<MenuItem>::iterator insertAt = model.items.end();
+        if (entry.position == SubmenuPositionKind::Top) {
+            insertAt = model.items.begin();
+        } else if (entry.position == SubmenuPositionKind::After ||
+                   entry.position == SubmenuPositionKind::Before) {
+            const std::wstring target = NormalizeMenuLabel(entry.positionLabel);
+            for (size_t i = 0; i < model.items.size(); ++i) {
+                if (NormalizeMenuLabel(model.items[i].label) == target) {
+                    insertAt = model.items.begin() + static_cast<std::ptrdiff_t>(
+                        entry.position == SubmenuPositionKind::After ? i + 1 : i);
+                    break;
+                }
+            }
+            if (insertAt == model.items.end()) {
+                insertAt = FallbackInsertPoint(model.items);
+            }
+        } else {
+            insertAt = FallbackInsertPoint(model.items);
+        }
+        model.items.insert(insertAt, std::move(submenu));
+    }
+
+    for (MenuItem& item : topLevelCommands) {
+        const size_t index = item.id - 0xF200;
+        const bool separatorBefore =
+            index < config.commands.size() &&
+            config.commands[index].separator == CommandSeparator::Before;
+        const bool separatorAfter =
+            index < config.commands.size() &&
+            config.commands[index].separator == CommandSeparator::After;
+        if (separatorBefore) {
+            MenuItem separator{};
+            separator.id = 0xF600 + static_cast<uint32_t>(index);
+            separator.kind = ItemKind::Separator;
+            model.items.insert(FallbackInsertPoint(model.items), std::move(separator));
+        }
+        model.items.insert(FallbackInsertPoint(model.items), std::move(item));
+        if (separatorAfter) {
+            MenuItem separator{};
+            separator.id = 0xF601 + static_cast<uint32_t>(index);
+            separator.kind = ItemKind::Separator;
+            model.items.insert(FallbackInsertPoint(model.items), std::move(separator));
+        }
+    }
 }
 
 // Shell property keys used by the Sort by and Group by submenus (all in the
@@ -4277,12 +4747,128 @@ struct InvocationContext {
     HWND owner = nullptr;
     POINT pt = {};
     std::vector<std::wstring> paths;
+    std::wstring directory;
     IContextMenu* liveContext = nullptr;
     UINT idCmdFirst = 0;
     ShellViewKind kind = ShellViewKind::None;
     DWORD clipboardSequence = 0;
     bool clipboardHadData = false;
 };
+
+int ShowWindowToShowCmd(ShowWindow showWindow) {
+    switch (showWindow) {
+        case ShowWindow::Maximized:
+            return SW_SHOWMAXIMIZED;
+        case ShowWindow::Minimized:
+            return SW_SHOWMINIMIZED;
+        case ShowWindow::Hidden:
+            return SW_HIDE;
+        default:
+            return SW_SHOWNORMAL;
+    }
+}
+
+void ReplaceAll(std::wstring& text, const std::wstring& from,
+                const std::wstring& to) {
+    if (from.empty()) {
+        return;
+    }
+    size_t pos = 0;
+    while ((pos = text.find(from, pos)) != std::wstring::npos) {
+        text.replace(pos, from.size(), to);
+        pos += to.size();
+    }
+}
+
+std::wstring QuotePathIfNeeded(const std::wstring& path) {
+    if (path.find(L' ') == std::wstring::npos &&
+        path.find(L'\t') == std::wstring::npos) {
+        return path;
+    }
+    return L'"' + path + L'"';
+}
+
+std::wstring ExpandCommandPlaceholders(const std::wstring& command,
+                                       const InvocationContext& ctx) {
+    std::wstring expanded = ExpandEnv(command);
+
+    ReplaceAll(expanded, L"%dir%", ctx.directory);
+
+    std::wstring allPaths;
+    for (const std::wstring& path : ctx.paths) {
+        if (!allPaths.empty()) {
+            allPaths += L' ';
+        }
+        allPaths += L'"' + path + L'"';
+    }
+    ReplaceAll(expanded, L"%*", allPaths);
+
+    if (!ctx.paths.empty()) {
+        ReplaceAll(expanded, L"%1", QuotePathIfNeeded(ctx.paths.front()));
+    }
+    return expanded;
+}
+
+bool InvokeCustomCommand(const CustomCommand& command,
+                         const InvocationContext& ctx) {
+    const std::wstring expanded = ExpandCommandPlaceholders(command.command, ctx);
+    if (expanded.empty()) {
+        return false;
+    }
+    std::wstring workingDir = ExpandCommandPlaceholders(command.workingDir, ctx);
+    if (workingDir.empty()) {
+        workingDir = ctx.directory;
+    }
+
+    if (command.runAs == RunAs::Admin) {
+        SHELLEXECUTEINFOW info = {};
+        info.cbSize = sizeof(info);
+        info.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_FLAG_NO_UI;
+        info.hwnd = ctx.owner;
+        info.lpVerb = L"runas";
+        info.lpFile = expanded.c_str();
+        info.lpDirectory = workingDir.empty() ? nullptr : workingDir.c_str();
+        info.nShow = ShowWindowToShowCmd(command.showWindow);
+        if (ShellExecuteExW(&info)) {
+            if (info.hProcess) {
+                CloseHandle(info.hProcess);
+            }
+            return true;
+        }
+        return false;
+    }
+
+    std::vector<wchar_t> mutableCommand(expanded.begin(), expanded.end());
+    mutableCommand.push_back(L'\0');
+    STARTUPINFOW si = {};
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = static_cast<WORD>(ShowWindowToShowCmd(command.showWindow));
+    PROCESS_INFORMATION pi = {};
+    const BOOL ok = CreateProcessW(
+        nullptr, mutableCommand.data(), nullptr, nullptr, FALSE, 0, nullptr,
+        workingDir.empty() ? nullptr : workingDir.c_str(), &si, &pi);
+    if (ok) {
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        return true;
+    }
+
+    SHELLEXECUTEINFOW info = {};
+    info.cbSize = sizeof(info);
+    info.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_FLAG_NO_UI;
+    info.hwnd = ctx.owner;
+    info.lpFile = expanded.c_str();
+    info.lpDirectory = workingDir.empty() ? nullptr : workingDir.c_str();
+    info.nShow = ShowWindowToShowCmd(command.showWindow);
+    if (ShellExecuteExW(&info)) {
+        if (info.hProcess) {
+            CloseHandle(info.hProcess);
+        }
+        return true;
+    }
+    return false;
+}
 
 // Invokes a menu item through the live context object using its descriptor
 // (canonical verb or command offset).

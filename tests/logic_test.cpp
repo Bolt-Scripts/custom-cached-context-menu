@@ -2250,6 +2250,71 @@ int main() {
         CHECK(emptyModel.items.back().action == cmo::ActionKind::Fallback);
     }
 
+    // v2 custom commands: parsing, placeholders, insertion, nesting.
+    {
+        cmo::RulesConfig config;
+        std::vector<cmo::ConfigParseError> errors;
+        const std::wstring text =
+            L"[command \"Open in VS Code\"]\n"
+            L"command = code.exe \"%1\"\n"
+            L"workingDir = %dir%\n"
+            L"icon = C:\\Code.exe,0\n"
+            L"match.ext = .cs, .cpp\n"
+            L"menu = Tools\n"
+            L"[submenu \"Tools\"]\n"
+            L"icon = @glyph:E712\n"
+            L"position = top\n";
+        CHECK(cmo::ParseRulesConfig(text, config, errors));
+        CHECK(config.commands.size() == 1);
+        CHECK(config.commands[0].label == L"Open in VS Code");
+        CHECK(config.commands[0].menuPath == L"Tools");
+        CHECK(config.submenus.size() == 1);
+        CHECK(config.submenus[0].position == cmo::SubmenuPositionKind::Top);
+
+        cmo::InvocationContext ctx{};
+        ctx.paths = {L"C:\\src\\a.cs", L"C:\\src\\b.cs"};
+        const std::wstring expanded =
+            cmo::ExpandCommandPlaceholders(L"code.exe \"%1\" -- %* -- %dir%", ctx);
+        CHECK(expanded.find(L"C:\\src\\a.cs") != std::wstring::npos);
+        CHECK(expanded.find(L"\"C:\\src\\a.cs\" \"C:\\src\\b.cs\"") !=
+              std::wstring::npos);
+
+        cmo::MenuModel model{};
+        model.sig = cmo::ContextSignature{cmo::Scope::Files, L".cs", cmo::Shape::Single,
+                                          cmo::Variant::Normal};
+        cmo::MenuItem fb{};
+        fb.id = 1;
+        fb.kind = cmo::ItemKind::Command;
+        fb.action = cmo::ActionKind::Fallback;
+        fb.label = L"Show classic menu";
+        model.items.push_back(fb);
+        cmo::ItemContext itemCtx{};
+        itemCtx.scope = cmo::Scope::Files;
+        itemCtx.paths = {L"C:\\src\\a.cs"};
+        cmo::InsertCustomItems(model, config, itemCtx);
+        const cmo::MenuItem* tools = nullptr;
+        for (const cmo::MenuItem& item : model.items) {
+            if (item.label == L"Tools") tools = &item;
+        }
+        CHECK(tools != nullptr && tools->kind == cmo::ItemKind::Submenu);
+        CHECK(tools && tools->children.size() == 1);
+        CHECK(tools && tools->children[0].action == cmo::ActionKind::CustomCommand);
+        CHECK(model.items.front().label == L"Tools");  // position = top
+
+        // [rules] line parsing (needed by Task 6; no other task owned it).
+        cmo::RulesConfig rulesConfig;
+        std::vector<cmo::ConfigParseError> ruleErrors;
+        CHECK(cmo::ParseRulesConfig(
+            L"[rules]\nhide = label:\"Cast to Device\"\nkeep = label:Share\n"
+            L"move = thirdParty -> \"More options\"\n",
+            rulesConfig, ruleErrors));
+        CHECK(rulesConfig.rules.size() == 3);
+        CHECK(rulesConfig.rules[0].kind == cmo::RuleKind::Hide);
+        CHECK(rulesConfig.rules[1].kind == cmo::RuleKind::Keep);
+        CHECK(rulesConfig.rules[2].kind == cmo::RuleKind::Move);
+        CHECK(rulesConfig.rules[2].destination == L"More options");
+    }
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

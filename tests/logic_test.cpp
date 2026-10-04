@@ -312,6 +312,7 @@ int main() {
     submenuItem.kind = cmo::ItemKind::Submenu;
     submenuItem.action = cmo::ActionKind::Submenu;
     submenuItem.label = L"WinRAR";
+    submenuItem.flags = cmo::kModelThirdParty;
     cmo::MenuItem submenuChild{};
     submenuChild.id = 501;
     submenuChild.kind = cmo::ItemKind::Command;
@@ -341,6 +342,11 @@ int main() {
     CHECK(restoredChild != nullptr);
     CHECK(restoredChild && restoredChild->canonicalVerb == L"WinRAR.ExtractHere");
     CHECK(restoredChild && restoredChild->verbOffset == 42);
+    const cmo::MenuItem* restoredSubmenu =
+        restoredModel ? cmo::FindById(*restoredModel, 500) : nullptr;
+    CHECK(restoredSubmenu != nullptr);
+    CHECK(restoredSubmenu &&
+          (restoredSubmenu->flags & cmo::kModelThirdParty) != 0);
 
     std::vector<uint8_t> badVersion = serialized;
     const uint32_t differentVersion = cmo::kCacheVersion + 1;
@@ -1212,6 +1218,23 @@ int main() {
             CHECK(!handlerIcon.empty());
             CHECK(handlerIcon.find(L",0") != std::wstring::npos);
 
+            // The same matching classifies the item as third-party for the
+            // advanced submenu.
+            std::wstring matchedDll;
+            CHECK(cmo::LabelMatchesRegisteredHandler(handlerSig,
+                                                     L"Scan with CmoHandler",
+                                                     &matchedDll));
+            CHECK(!matchedDll.empty());
+            CHECK(!cmo::LabelMatchesRegisteredHandler(handlerSig, L"Nothing Related",
+                                                      nullptr));
+
+            std::vector<cmo::MenuItem> classified(1);
+            classified[0].kind = cmo::ItemKind::Command;
+            classified[0].action = cmo::ActionKind::ShellVerb;
+            classified[0].label = L"Scan with CmoHandler";
+            cmo::ApplyRegistryIcons(classified, handlerSig);
+            CHECK((classified[0].flags & cmo::kModelThirdParty) != 0);
+
             // Generic key name: match by the handler DLL name instead, with a
             // quoted registered path.
             HKEY genericKey = nullptr;
@@ -1268,6 +1291,115 @@ int main() {
     CHECK(!cmo::LabelMatchesWords(L"Scan with Malwarebytes", L"Contoso Ltd."));
     CHECK(!cmo::VersionInfoMatchesLabel(L"Z:\\nonexistent\\nope.dll",
                                         L"Anything"));
+
+    // Advanced submenu: configured built-ins and third-party entries move
+    // into one submenu placed above the native fallback, with separators
+    // collapsed. Disabled or empty cases leave the menu untouched.
+    {
+        const bool previousEnabled = cmo::g_settings.advancedSubmenu;
+        const std::wstring previousLabel = cmo::g_settings.advancedSubmenuLabel;
+        const std::vector<std::wstring> previousItems =
+            cmo::g_settings.advancedSubmenuItems;
+
+        CHECK(cmo::ParseAdvancedItems(L" Pin to Start ,, Open in Terminal ,").size() ==
+              2);
+        CHECK(cmo::ParseAdvancedItems(L" ").empty());
+
+        auto makeCommand = [](uint32_t id, const wchar_t* label, const wchar_t* verb,
+                              uint32_t flags) {
+            cmo::MenuItem item{};
+            item.id = id;
+            item.kind = cmo::ItemKind::Command;
+            item.action = cmo::ActionKind::ShellVerb;
+            item.label = label;
+            item.canonicalVerb = verb;
+            item.flags = flags;
+            return item;
+        };
+        auto makeSeparator = [](uint32_t id) {
+            cmo::MenuItem item{};
+            item.id = id;
+            item.kind = cmo::ItemKind::Separator;
+            return item;
+        };
+
+        auto buildMenu = [&]() {
+            cmo::MenuModel model{};
+            model.sig = cmo::ContextSignature{cmo::Scope::Files, L".x",
+                                              cmo::Shape::Single,
+                                              cmo::Variant::Normal};
+            model.items.push_back(makeCommand(1, L"Open", L"open", 0));
+            model.items.push_back(makeSeparator(2));
+            model.items.push_back(makeCommand(3, L"Scan with Malwarebytes", L"",
+                                              cmo::kModelThirdParty));
+            model.items.push_back(makeCommand(4, L"Pin to Start", L"", 0));
+            model.items.push_back(makeCommand(5, L"Share", L"Windows.ModernShare", 0));
+            model.items.push_back(makeSeparator(6));
+            cmo::MenuItem fallback = makeCommand(7, L"Show more options", L"", 0);
+            fallback.action = cmo::ActionKind::Fallback;
+            model.items.push_back(fallback);
+            return model;
+        };
+
+        cmo::g_settings.advancedSubmenu = false;
+        cmo::g_settings.advancedSubmenuLabel = L"Advanced";
+        cmo::g_settings.advancedSubmenuItems =
+            cmo::ParseAdvancedItems(L"Pin to Start, Open in Terminal");
+        {
+            cmo::MenuModel untouched = buildMenu();
+            cmo::ReorganizeAdvancedItems(untouched.items);
+            CHECK(untouched.items.size() == 7);
+        }
+
+        cmo::g_settings.advancedSubmenu = true;
+        {
+            cmo::MenuModel model = buildMenu();
+            cmo::ReorganizeAdvancedItems(model.items);
+            // Open, separator, Share, Advanced, separator, fallback.
+            CHECK(model.items.size() == 6);
+            CHECK(model.items.back().action == cmo::ActionKind::Fallback);
+            const cmo::MenuItem* advanced = nullptr;
+            for (const cmo::MenuItem& item : model.items) {
+                if (item.label == L"Advanced") {
+                    advanced = &item;
+                }
+            }
+            CHECK(advanced != nullptr);
+            CHECK(advanced && advanced->kind == cmo::ItemKind::Submenu);
+            CHECK(advanced && advanced->iconRef == L"@glyph:E712");
+            CHECK(advanced && advanced->children.size() == 2);
+            CHECK(advanced && advanced->children[0].label == L"Scan with Malwarebytes");
+            CHECK(advanced && advanced->children[1].label == L"Pin to Start");
+            // Moved children stay reachable for invocation by id.
+            const cmo::MenuItem* moved = cmo::FindById(model, 3);
+            CHECK(moved != nullptr);
+            CHECK(moved && moved->label == L"Scan with Malwarebytes");
+            bool doubledSeparator = false;
+            for (size_t i = 1; i < model.items.size(); ++i) {
+                if (model.items[i].kind == cmo::ItemKind::Separator &&
+                    model.items[i - 1].kind == cmo::ItemKind::Separator) {
+                    doubledSeparator = true;
+                }
+            }
+            CHECK(!doubledSeparator);
+        }
+
+        // No advanced items: no submenu is added.
+        cmo::g_settings.advancedSubmenuItems.clear();
+        {
+            cmo::MenuModel model = buildMenu();
+            model.items.erase(model.items.begin() + 2);
+            cmo::ReorganizeAdvancedItems(model.items);
+            CHECK(model.items.size() == 6);
+            for (const cmo::MenuItem& item : model.items) {
+                CHECK(item.label != L"Advanced");
+            }
+        }
+
+        cmo::g_settings.advancedSubmenu = previousEnabled;
+        cmo::g_settings.advancedSubmenuLabel = previousLabel;
+        cmo::g_settings.advancedSubmenuItems = previousItems;
+    }
 
     // Instant menu open: while the suppressor is active the master menu
     // animation switch is off, and it is restored afterwards. Skipped when

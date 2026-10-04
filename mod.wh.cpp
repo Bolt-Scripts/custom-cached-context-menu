@@ -2,7 +2,7 @@
 // @id              context-menu-overhaul
 // @name            Context Menu Overhaul
 // @description     Replaces the Explorer context menu with an instantly-opening cached menu, then discovers and caches shell extension items asynchronously.
-// @version         0.3.8
+// @version         0.3.9
 // @include         explorer.exe
 // @architecture    x86-64
 // @compilerOptions -lole32 -lshlwapi -luuid -lcomctl32 -ladvapi32 -lgdi32 -luxtheme -lversion
@@ -47,6 +47,15 @@ Design document: `docs/superpowers/specs/2026-10-04-context-menu-overhaul-design
 - instantMenuFade: true
   $name: Instant menu open
   $description: Temporarily disables system menu animation (fade and slide) while this mod's menu opens, so it appears instantly. Session-only; the previous setting is restored immediately.
+- advancedSubmenu: false
+  $name: Advanced submenu
+  $description: Move Windows extras and third-party shell extension entries into a submenu.
+- advancedSubmenuLabel: Advanced
+  $name: Advanced submenu label
+  $description: Label of the submenu that collects advanced items.
+- advancedSubmenuItems: "Pin to Start, Open in Terminal"
+  $name: Advanced built-in items
+  $description: Comma-separated labels or verbs of Windows items to move into the submenu.
 */
 // ==/WindhawkModSettings==
 
@@ -94,9 +103,41 @@ struct Settings {
     bool clearCache = false;
     bool debugLogging = false;
     bool instantMenuFade = true;
+    bool advancedSubmenu = false;
+    std::wstring advancedSubmenuLabel = L"Advanced";
+    std::vector<std::wstring> advancedSubmenuItems;
 };
 
 inline Settings g_settings;
+
+std::wstring TrimWhitespace(const std::wstring& text) {
+    const size_t first = text.find_first_not_of(L" \t\r\n");
+    if (first == std::wstring::npos) {
+        return L"";
+    }
+    const size_t last = text.find_last_not_of(L" \t\r\n");
+    return text.substr(first, last - first + 1);
+}
+
+std::vector<std::wstring> ParseAdvancedItems(const std::wstring& text) {
+    std::vector<std::wstring> items;
+    size_t start = 0;
+    while (start <= text.size()) {
+        const size_t comma = text.find(L',', start);
+        const std::wstring token =
+            TrimWhitespace(text.substr(start, comma == std::wstring::npos
+                                                  ? std::wstring::npos
+                                                  : comma - start));
+        if (!token.empty()) {
+            items.push_back(token);
+        }
+        if (comma == std::wstring::npos) {
+            break;
+        }
+        start = comma + 1;
+    }
+    return items;
+}
 
 void LoadSettings() {
     g_settings.enableShiftBypass = Wh_GetIntSetting(L"enableShiftBypass") != 0;
@@ -105,6 +146,17 @@ void LoadSettings() {
     g_settings.clearCache = Wh_GetIntSetting(L"clearCache") != 0;
     g_settings.debugLogging = Wh_GetIntSetting(L"debugLogging") != 0;
     g_settings.instantMenuFade = Wh_GetIntSetting(L"instantMenuFade") != 0;
+    g_settings.advancedSubmenu = Wh_GetIntSetting(L"advancedSubmenu") != 0;
+
+    PCWSTR advancedLabel = Wh_GetStringSetting(L"advancedSubmenuLabel");
+    g_settings.advancedSubmenuLabel =
+        (advancedLabel && advancedLabel[0]) ? advancedLabel : L"Advanced";
+    Wh_FreeStringSetting(advancedLabel);
+
+    PCWSTR advancedItems = Wh_GetStringSetting(L"advancedSubmenuItems");
+    g_settings.advancedSubmenuItems =
+        ParseAdvancedItems(advancedItems ? advancedItems : L"");
+    Wh_FreeStringSetting(advancedItems);
 }
 
 }  // namespace cmo
@@ -216,6 +268,7 @@ enum ModelFlags : uint32_t {
     kModelExtension = 1u << 6,
     kModelHasOffset = 1u << 7,
     kModelWarmup = 1u << 8,
+    kModelThirdParty = 1u << 9,
 };
 
 struct MenuItem {
@@ -303,6 +356,91 @@ void PruneMenuItems(std::vector<MenuItem>& items) {
         }
         return item.kind == ItemKind::Submenu && item.children.empty();
     });
+}
+
+bool EqualsIgnoreCase(const std::wstring& left, const std::wstring& right) {
+    return !left.empty() && !right.empty() &&
+           _wcsicmp(left.c_str(), right.c_str()) == 0;
+}
+
+// Advanced items are third-party handler entries plus configured Windows
+// extras. Core commands and the native fallback never move.
+bool IsAdvancedItem(const MenuItem& item) {
+    if (item.kind == ItemKind::Separator || item.action == ActionKind::Fallback) {
+        return false;
+    }
+    if (item.flags & kModelThirdParty) {
+        return true;
+    }
+    for (const std::wstring& token : g_settings.advancedSubmenuItems) {
+        if (EqualsIgnoreCase(item.label, token) ||
+            EqualsIgnoreCase(item.canonicalVerb, token)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Removes separators left dangling or duplicated by moving items out.
+void CollapseSeparators(std::vector<MenuItem>& items) {
+    std::vector<MenuItem> out;
+    out.reserve(items.size());
+    for (MenuItem& item : items) {
+        if (item.kind == ItemKind::Separator &&
+            (out.empty() || out.back().kind == ItemKind::Separator)) {
+            continue;
+        }
+        out.push_back(std::move(item));
+    }
+    while (!out.empty() && out.back().kind == ItemKind::Separator) {
+        out.pop_back();
+    }
+    items = std::move(out);
+}
+
+// Moves advanced items into one submenu placed just above the native fallback
+// entry. Runs at open time so the setting applies without a rediscovery.
+void ReorganizeAdvancedItems(std::vector<MenuItem>& items) {
+    if (!g_settings.advancedSubmenu || g_settings.advancedSubmenuLabel.empty()) {
+        return;
+    }
+
+    std::vector<MenuItem> advanced;
+    std::vector<MenuItem> kept;
+    kept.reserve(items.size());
+    for (MenuItem& item : items) {
+        if (IsAdvancedItem(item)) {
+            advanced.push_back(std::move(item));
+        } else {
+            kept.push_back(std::move(item));
+        }
+    }
+    if (advanced.empty()) {
+        return;
+    }
+
+    MenuItem submenu{};
+    submenu.id = 0xF000;
+    submenu.kind = ItemKind::Submenu;
+    submenu.action = ActionKind::Submenu;
+    submenu.label = g_settings.advancedSubmenuLabel;
+    submenu.iconRef = L"@glyph:E712";
+    submenu.children = std::move(advanced);
+
+    size_t insertAt = kept.size();
+    for (size_t i = 0; i < kept.size(); ++i) {
+        if (kept[i].action == ActionKind::Fallback) {
+            insertAt = i;
+            break;
+        }
+    }
+    while (insertAt > 0 && kept[insertAt - 1].kind == ItemKind::Separator) {
+        --insertAt;
+    }
+    kept.insert(kept.begin() + static_cast<std::ptrdiff_t>(insertAt),
+                std::move(submenu));
+    CollapseSeparators(kept);
+    items = std::move(kept);
 }
 
 // Logs any unlabeled item with its full descriptor so the extension behavior
@@ -552,7 +690,7 @@ MenuModel MergeCoreWithCached(const MenuModel& core, const MenuModel& cached) {
 namespace cmo {
 
 constexpr uint32_t kCacheMagic = 0x434F4D4F;  // "COMO"
-constexpr uint32_t kCacheVersion = 14;
+constexpr uint32_t kCacheVersion = 15;
 constexpr uint32_t kMaxCacheEntries = 1024;
 constexpr uint32_t kMaxModelItems = 4096;
 constexpr uint32_t kMaxMenuDepth = 16;
@@ -1661,6 +1799,27 @@ std::wstring ResolveRegistryIconByLabel(const ContextSignature& signature,
     return L"";
 }
 
+// Generic vendor/platform words carry no signal when matching version info
+// against menu labels; without this, labels containing "Windows" or
+// "Microsoft" would match almost every handler.
+bool IsGenericVersionWord(const std::wstring& word) {
+    static const wchar_t* kStopWords[] = {
+        L"Microsoft", L"Windows",     L"Corporation", L"Corp",
+        L"Inc",       L"Ltd",         L"LLC",         L"Software",
+        L"System",    L"Operating",   L"Company",     L"Product",
+        L"Version",   L"Common",      L"File",        L"Files",
+        L"Shell",     L"Application", L"Program",     L"Service",
+        L"Services",  L"Technologies", L"Technology", L"International",
+        L"Limited",   L"Group",       L"Global",
+    };
+    for (const wchar_t* stop : kStopWords) {
+        if (_wcsicmp(word.c_str(), stop) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // True when any significant word (5+ characters) of `text` appears in the
 // label. Used to match handler DLL version info against menu item labels.
 bool LabelMatchesWords(const std::wstring& label, const std::wstring& text) {
@@ -1671,7 +1830,8 @@ bool LabelMatchesWords(const std::wstring& label, const std::wstring& text) {
             word += c;
             continue;
         }
-        if (word.size() >= 5 && StrStrIW(label.c_str(), word.c_str()) != nullptr) {
+        if (word.size() >= 5 && !IsGenericVersionWord(word) &&
+            StrStrIW(label.c_str(), word.c_str()) != nullptr) {
             return true;
         }
         word.clear();
@@ -1731,10 +1891,15 @@ bool VersionInfoMatchesLabel(const std::wstring& path, const std::wstring& label
 // Last resort: find a ContextMenuHandlers key that matches the item label
 // (by key name, handler DLL name, or DLL version info) and extract icon 0
 // from its DLL.
-std::wstring ResolveHandlerDllIconByLabel(const ContextSignature& signature,
-                                          const std::wstring& label) {
+// True when the label matches a registered ContextMenuHandlers entry, by key
+// name, handler DLL name, or DLL version info. Fills `dllOut` with the
+// handler DLL path when matched. Used for icons and for classifying
+// third-party items.
+bool LabelMatchesRegisteredHandler(const ContextSignature& signature,
+                                   const std::wstring& label,
+                                   std::wstring* dllOut) {
     if (label.empty()) {
-        return L"";
+        return false;
     }
 
     for (const std::wstring& base : ShellIconBases(signature)) {
@@ -1796,11 +1961,23 @@ std::wstring ResolveHandlerDllIconByLabel(const ContextSignature& signature,
                     continue;
                 }
 
+                if (dllOut) {
+                    *dllOut = expanded;
+                }
                 RegCloseKey(key);
-                return std::wstring(expanded) + L",0";
+                return true;
             }
             RegCloseKey(key);
         }
+    }
+    return false;
+}
+
+std::wstring ResolveHandlerDllIconByLabel(const ContextSignature& signature,
+                                          const std::wstring& label) {
+    std::wstring dll;
+    if (LabelMatchesRegisteredHandler(signature, label, &dll)) {
+        return dll + L",0";
     }
     return L"";
 }
@@ -1841,11 +2018,24 @@ void LogHandlerCandidates(const ContextSignature& signature,
     }
 }
 
-// Fills in registry icons for static verbs that provide no menu bitmap.
+// Fills in registry icons for static verbs that provide no menu bitmap and
+// marks items that belong to registered shell extensions (used by the
+// advanced submenu).
 void ApplyRegistryIcons(std::vector<MenuItem>& items,
                         const ContextSignature& signature) {
     for (MenuItem& item : items) {
         ApplyRegistryIcons(item.children, signature);
+        if (item.kind == ItemKind::Separator) {
+            continue;
+        }
+
+        std::wstring handlerDll;
+        const bool registered =
+            LabelMatchesRegisteredHandler(signature, item.label, &handlerDll);
+        if (registered) {
+            item.flags |= kModelThirdParty;
+        }
+
         if (item.action != ActionKind::ShellVerb || !item.iconPixels.empty() ||
             !item.iconRef.empty()) {
             continue;
@@ -1855,19 +2045,17 @@ void ApplyRegistryIcons(std::vector<MenuItem>& items,
         if (icon.empty()) {
             icon = ResolveRegistryIconByLabel(signature, item.label);
         }
-        if (icon.empty()) {
-            icon = ResolveHandlerDllIconByLabel(signature, item.label);
+        if (icon.empty() && registered) {
+            icon = handlerDll + L",0";
         }
         if (!icon.empty()) {
             item.iconRef = icon;
             Wh_Log(L"Registry icon for '%s' (verb '%s'): %s", item.label.c_str(),
                    item.canonicalVerb.c_str(), icon.c_str());
-        } else {
-            if (g_settings.debugLogging) {
-                LogHandlerCandidates(signature, item.label);
-                Wh_Log(L"No registry icon for '%s' (verb '%s')", item.label.c_str(),
-                       item.canonicalVerb.c_str());
-            }
+        } else if (g_settings.debugLogging) {
+            LogHandlerCandidates(signature, item.label);
+            Wh_Log(L"No registry icon for '%s' (verb '%s')", item.label.c_str(),
+                   item.canonicalVerb.c_str());
         }
     }
 }
@@ -4337,6 +4525,8 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
                 item.children = GetSendToChildren();
             }
         }
+
+        ReorganizeAdvancedItems(model.items);
 
         Wh_Log(L"Menu prep: %llu ms",
                static_cast<unsigned long long>(g_perf.OpenPathElapsedMs()));

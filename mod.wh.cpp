@@ -2381,6 +2381,7 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
 BOOL WINAPI TrackPopupMenuEx_Hook(HMENU hMenu, UINT uFlags, int x, int y, HWND hWnd,
                                   LPTPMPARAMS lptpm) {
     ShellViewKind kind = ClassifyOwner(hWnd);
+    g_pending.ExpireOlderThan(GetTickCount64(), 60000);
     PendingCapture* pending = g_pending.Take();
     const bool shiftHeld = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
     const MenuPath path =
@@ -2418,6 +2419,7 @@ BOOL WINAPI TrackPopupMenuEx_Hook(HMENU hMenu, UINT uFlags, int x, int y, HWND h
 BOOL WINAPI TrackPopupMenu_Hook(HMENU hMenu, UINT uFlags, int x, int y, int nReserved,
                                 HWND hWnd, const RECT* prcRect) {
     ShellViewKind kind = ClassifyOwner(hWnd);
+    g_pending.ExpireOlderThan(GetTickCount64(), 60000);
     PendingCapture* pending = g_pending.Take();
     const bool shiftHeld = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
     const MenuPath path =
@@ -2592,6 +2594,9 @@ BOOL Wh_ModInit() {
             DeleteFileW(cachePath.c_str());
         } else if (cmo::g_cache.Load(cachePath)) {
             Wh_Log(L"Loaded menu cache");
+        } else {
+            // Corrupt or unreadable cache: remove it and rebuild.
+            DeleteFileW(cachePath.c_str());
         }
     }
     cmo::g_invalidation.Start();

@@ -1,0 +1,75 @@
+# Context Menu Overhaul
+
+A [Windhawk](https://windhawk.net/) mod that replaces the Windows Explorer file
+context menu with an instantly-opening cached menu, then discovers real shell
+extension items asynchronously in the background.
+
+## Why
+
+The native context menu is slow because every registered shell extension is
+loaded synchronously before the menu can be shown — often hundreds of
+milliseconds with a handful of handlers installed. This mod removes that work
+from the interactive path:
+
+1. Explorer's menu population call is intercepted and deferred.
+2. A cached menu model is shown immediately (target: under 10 ms).
+3. The real population runs afterwards, on the same UI thread, and refreshes
+   the cache — so the next open already has full third-party handler parity.
+4. Common contexts are pre-built in the background shortly after Explorer
+   starts.
+
+Hold **Shift** while right-clicking (or use **Show more options**) to get the
+untouched native menu, including extended verbs.
+
+## Install
+
+1. Install [Windhawk](https://windhawk.net/).
+2. Create a new mod and paste `mod.wh.cpp`, or install a published build from
+   the Windhawk mod collection once available.
+3. Compile and enable the mod for `explorer.exe`.
+
+## Settings
+
+| Setting | Default | Description |
+|---|---|---|
+| Shift bypass | on | Hold Shift while right-clicking for the native menu. |
+| Show more options item | on | Adds a fallback entry at the bottom of the menu. |
+| Warm-up extensions | common list | File types pre-built at Explorer startup. |
+| Warm-up delay | 5 s | Delay before background warm-up starts. |
+| Clear cache | off | Turn on to delete cached models; they rebuild on next use. |
+| Debug logging | off | Logs timings and diagnostics. |
+
+## Known limitations (v1)
+
+- Menus inside other applications' file dialogs and third-party file managers
+  are untouched; the mod targets `explorer.exe`.
+- Exotic shell namespaces (zip folders, Recycle Bin, network locations) use the
+  native fallback.
+- On Windows 11 the modern XAML menu is suppressed; the classic menu (and this
+  replacement) is always used.
+- Menu icons are not drawn yet (the native classic menu is text-only); icon
+  extraction is implemented and ready for the custom renderer.
+- Core menu labels are English; cached extension labels come from the shell and
+  are localized.
+- Per-handler DLL changes are revalidated on registry changes and with
+  **Clear cache**, not per-DLL timestamps yet.
+- "Sort by" / "New" / "Paste shortcut" fall back to the native menu on builds
+  where the shell object rejects those verbs.
+
+## Reporting issues
+
+Enable **Debug logging**, reproduce the problem, and include the Windhawk log
+output (it contains open-path timings, cache hit/miss, and discovery logs).
+
+## Development
+
+- Design: `docs/superpowers/specs/2026-10-04-context-menu-overhaul-design.md`
+- Implementation plan: `docs/superpowers/plans/2026-10-04-context-menu-overhaul.md`
+- Tests: `bash tests/run.sh` (mingw-w64 cross-compile + Wine), covering
+  signatures, models, cache serialization, LRU, invalidation stamps, warm-up
+  type normalization, and decision logic.
+
+## License
+
+MIT. Techniques adapted from the `explorer-context-menu-classic` and
+`remove-context-menu-items` Windhawk mods, credited in the source.

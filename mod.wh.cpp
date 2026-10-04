@@ -299,7 +299,10 @@ enum class ActionKind : uint8_t {
     GroupBy,
     GroupDirection,
     CustomCommand,
+    Builtin,
 };
+
+enum class BuiltinAction : uint8_t { None, CopyPath, OpenNewWindow, Properties };
 
 // Documented view operations, dispatched through IFolderView2 / IShellView.
 // The old FCIDM_* view command IDs are not defined by the Windows SDK and
@@ -352,6 +355,8 @@ struct MenuItem {
     // Transient display overrides (not serialized): per-item label and marker.
     std::wstring displayLabel;
     int markerOverride = -1;
+    // Built-in action for ActionKind::Builtin.
+    BuiltinAction builtinAction = BuiltinAction::None;
     // Sort/group field index into kShellPropertyKeys, and sort direction.
     uint32_t sortIndex = 0;
     bool sortAscending = true;
@@ -1201,6 +1206,7 @@ struct CustomCommand {
     std::wstring label;
     std::wstring command;
     CommandType type = CommandType::Command;
+    BuiltinAction action = BuiltinAction::None;
     std::wstring workingDir;
     std::wstring iconRef;
     PredicateExpr match;
@@ -1690,6 +1696,26 @@ bool ApplyCommandValue(CustomCommand& command, const std::wstring& key,
         }
         if (lower == L"after") {
             command.separator = CommandSeparator::After;
+            return true;
+        }
+        return false;
+    }
+    if (key == L"action") {
+        const std::wstring lower = ToLowerCopy(TrimWhitespace(value));
+        if (lower == L"run") {
+            command.action = BuiltinAction::None;
+            return true;
+        }
+        if (lower == L"copypath") {
+            command.action = BuiltinAction::CopyPath;
+            return true;
+        }
+        if (lower == L"opennewwindow") {
+            command.action = BuiltinAction::OpenNewWindow;
+            return true;
+        }
+        if (lower == L"properties") {
+            command.action = BuiltinAction::Properties;
             return true;
         }
         return false;
@@ -2513,6 +2539,11 @@ void InsertCustomItems(MenuModel& model, const RulesConfig& config,
         } else if (command.type == CommandType::Header) {
             item.kind = ItemKind::Header;
             item.action = ActionKind::ViewAction;
+        } else if (command.action != BuiltinAction::None) {
+            item.kind = ItemKind::Command;
+            item.action = ActionKind::Builtin;
+            item.builtinAction = command.action;
+            item.iconRef = command.iconRef;
         } else {
             item.kind = ItemKind::Command;
             item.action = ActionKind::CustomCommand;
@@ -8758,6 +8789,39 @@ std::optional<uint32_t> FindNativeOffsetInMenu(HMENU menu, UINT idCmdFirst,
     return std::nullopt;
 }
 
+bool InvokeBuiltinAction(const MenuItem& item, const InvocationContext& ctx) {
+    switch (item.builtinAction) {
+        case BuiltinAction::CopyPath:
+            return CopyAsPath(ctx.paths);
+        case BuiltinAction::OpenNewWindow: {
+            const std::wstring folder =
+                ctx.paths.empty() ? ctx.directory : ctx.paths.front();
+            if (folder.empty()) {
+                return false;
+            }
+            SHELLEXECUTEINFOW info = {};
+            info.cbSize = sizeof(info);
+            info.fMask = SEE_MASK_FLAG_NO_UI;
+            info.hwnd = ctx.owner;
+            info.lpVerb = L"explore";
+            info.lpFile = folder.c_str();
+            info.nShow = SW_SHOWNORMAL;
+            return ShellExecuteExW(&info) != FALSE;
+        }
+        case BuiltinAction::Properties: {
+            if (ctx.paths.empty()) {
+                return false;
+            }
+            SHObjectProperties(ctx.owner, SHOP_FILEPATH, ctx.paths.front().c_str(),
+                               nullptr);
+            return true;
+        }
+        case BuiltinAction::None:
+            return false;
+    }
+    return false;
+}
+
 InvokeResult InvokeItem(const MenuItem& item, const InvocationContext& ctx,
                         PendingCapture& capture) {
     if (item.kind == ItemKind::Separator || (item.flags & kModelDisabled)) {
@@ -8784,6 +8848,9 @@ InvokeResult InvokeItem(const MenuItem& item, const InvocationContext& ctx,
         case ActionKind::GroupDirection:
             return InvokeGroupDirection(item, ctx) ? InvokeResult::Handled
                                                    : InvokeResult::Failed;
+        case ActionKind::Builtin:
+            return InvokeBuiltinAction(item, ctx) ? InvokeResult::Handled
+                                                  : InvokeResult::Failed;
         case ActionKind::CustomCommand:
             if (ctx.config &&
                 item.customCommandIndex < ctx.config->commands.size() &&

@@ -2935,6 +2935,36 @@ int main() {
         CHECK(state.keyboardIndex == 2);  // header and separator skipped
     }
 
+    // v2.1 built-in actions: parse and map into the model.
+    {
+        cmo::RulesConfig config;
+        std::vector<cmo::ConfigParseError> errors;
+        CHECK(cmo::ParseRulesConfig(
+            L"[command \"Copy path\"]\naction = copypath\n"
+            L"[command \"New window\"]\naction = opennewwindow\n"
+            L"[command \"Properties\"]\naction = properties\n",
+            config, errors));
+        CHECK(config.commands[0].action == cmo::BuiltinAction::CopyPath);
+
+        cmo::MenuModel model{};
+        cmo::MenuItem fb{};
+        fb.id = 1;
+        fb.kind = cmo::ItemKind::Command;
+        fb.action = cmo::ActionKind::Fallback;
+        fb.label = L"Show classic menu";
+        model.items.push_back(fb);
+        cmo::ItemContext ctx{};
+        ctx.scope = cmo::Scope::Files;
+        cmo::InsertCustomItems(model, config, ctx);
+        CHECK(model.items[0].action == cmo::ActionKind::Builtin);
+        CHECK(model.items[0].builtinAction == cmo::BuiltinAction::CopyPath);
+        CHECK(model.items[2].builtinAction == cmo::BuiltinAction::Properties);
+
+        std::vector<cmo::ConfigParseError> badErrors;
+        CHECK(!cmo::ParseRulesConfig(L"[command \"X\"]\naction = explode\n", config,
+                                     badErrors));
+    }
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

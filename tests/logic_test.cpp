@@ -781,6 +781,25 @@ int main() {
         CHECK(unlabeled.items[2].children.size() == 1);
     }
 
+    // Icons: core actions carry glyph references again.
+    bool cutGlyph = false;
+    bool renameGlyph = false;
+    bool deleteGlyph = false;
+    for (const cmo::MenuItem& item : single.items) {
+        if (item.label == L"Cut") {
+            cutGlyph = item.iconRef == L"@glyph:E8C6";
+        }
+        if (item.label == L"Rename") {
+            renameGlyph = item.iconRef == L"@glyph:E8AC";
+        }
+        if (item.label == L"Delete") {
+            deleteGlyph = item.iconRef == L"@glyph:E74D";
+        }
+    }
+    CHECK(cutGlyph);
+    CHECK(renameGlyph);
+    CHECK(deleteGlyph);
+
     // Icons: pixel blobs round-trip through the cache format.
     {
         cmo::Cache pixelCache;
@@ -866,7 +885,8 @@ int main() {
         ReleaseDC(nullptr, screen);
     }
 
-    // Icons: captured pixels are adopted for matching core items.
+    // Icons: core items keep their own glyph icons; captured native bitmaps
+    // belong to extension items only.
     {
         cmo::MenuModel iconCore = cmo::BuildCoreFileModel(onePath, cmo::Shape::Single);
         cmo::MenuModel iconCached{};
@@ -880,13 +900,56 @@ int main() {
         nativeCutItem.iconPixels.assign(16 * 16 * 4, 0x33);
         iconCached.items.push_back(nativeCutItem);
         cmo::MenuModel iconMerged = cmo::MergeCoreWithCached(iconCore, iconCached);
-        bool cutIconAdopted = false;
+        bool cutKeptGlyph = false;
         for (const cmo::MenuItem& item : iconMerged.items) {
             if (item.label == L"Cut") {
-                cutIconAdopted = item.iconPixels.size() == 16 * 16 * 4;
+                cutKeptGlyph = item.iconRef == L"@glyph:E8C6" &&
+                               item.iconPixels.empty();
             }
         }
-        CHECK(cutIconAdopted);
+        CHECK(cutKeptGlyph);
+    }
+
+    // Icons: glyph rendering must not crash when the icon font is absent.
+    {
+        cmo::MenuItem glyphItem{};
+        glyphItem.iconRef = L"@glyph:E8C6";
+        HBITMAP glyph = cmo::g_iconCache.GetBitmap(glyphItem, 16);
+        (void)glyph;
+    }
+
+    // Icons: static verbs without a menu bitmap resolve their registry Icon.
+    {
+        HKEY verbKey = nullptr;
+        if (RegCreateKeyExW(HKEY_CURRENT_USER,
+                            L"Software\\Classes\\cmotestfile\\shell\\cmoverb", 0,
+                            nullptr, 0, KEY_WRITE, nullptr, &verbKey, nullptr) ==
+            ERROR_SUCCESS) {
+            const wchar_t iconValue[] = L"shell32.dll,3";
+            RegSetValueExW(verbKey, L"Icon", 0, REG_SZ,
+                           reinterpret_cast<const BYTE*>(iconValue),
+                           sizeof(iconValue));
+            RegCloseKey(verbKey);
+
+            HKEY extKey = nullptr;
+            if (RegCreateKeyExW(HKEY_CURRENT_USER, L"Software\\Classes\\.cmotest",
+                                0, nullptr, 0, KEY_WRITE, nullptr, &extKey,
+                                nullptr) == ERROR_SUCCESS) {
+                const wchar_t progId[] = L"cmotestfile";
+                RegSetValueExW(extKey, nullptr, 0, REG_SZ,
+                               reinterpret_cast<const BYTE*>(progId),
+                               sizeof(progId));
+                RegCloseKey(extKey);
+            }
+
+            cmo::ContextSignature sig{cmo::Scope::Files, L".cmotest",
+                                      cmo::Shape::Single, cmo::Variant::Normal};
+            CHECK_EQ(cmo::ResolveRegistryIcon(sig, L"cmoverb"),
+                     std::wstring(L"shell32.dll,3"));
+
+            RegDeleteTreeW(HKEY_CURRENT_USER, L"Software\\Classes\\cmotestfile");
+            RegDeleteTreeW(HKEY_CURRENT_USER, L"Software\\Classes\\.cmotest");
+        }
     }
 
     // Instant menu open: while the suppressor is active the master menu

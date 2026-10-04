@@ -2,7 +2,7 @@
 // @id              context-menu-overhaul
 // @name            Context Menu Overhaul
 // @description     Replaces the Explorer context menu with an instantly-opening cached menu, then discovers and caches shell extension items asynchronously.
-// @version         0.3.1
+// @version         0.3.2
 // @include         explorer.exe
 // @architecture    x86-64
 // @compilerOptions -lole32 -lshlwapi -luuid -lcomctl32 -ladvapi32 -lgdi32 -luxtheme
@@ -403,9 +403,10 @@ MenuModel BuildCoreModel(Scope scope, const std::vector<std::wstring>& paths, Sh
                                                    ViewAction::ViewDetails, kModelNone));
 
         addCommand(L"Sort by", L"sortby");
-        addViewAction(L"Refresh", L"refresh", ViewAction::Refresh);
+        addViewAction(L"Refresh", L"refresh", ViewAction::Refresh, kModelNone,
+                      L"@glyph:E72C");
         addSeparator();
-        addCommand(L"Paste", L"paste");
+        addCommand(L"Paste", L"paste", kModelNone, L"@glyph:E77F");
         addCommand(L"Paste shortcut", L"pastelink");
         addSeparator();
         addCommand(L"New", L"new");
@@ -424,7 +425,7 @@ MenuModel BuildCoreModel(Scope scope, const std::vector<std::wstring>& paths, Sh
         addCommand(L"Open in new window", L"opennew");
         addCommand(L"Pin to Quick access", L"pintohome");
         addSeparator();
-        addCommand(L"Properties", L"properties");
+        addCommand(L"Properties", L"properties", kModelNone, L"@glyph:E713");
         addSeparator();
         addFallback();
         return model;
@@ -437,14 +438,15 @@ MenuModel BuildCoreModel(Scope scope, const std::vector<std::wstring>& paths, Sh
         addSeparator();
     } else {
         addCommand(openLabel, L"open", kModelDefault);
-        addCommand(L"Open with", L"openwith");
+        addCommand(L"Open with", L"openwith", kModelNone, L"@glyph:E8E5");
         addSeparator();
     }
 
-    addCommand(L"Cut", L"cut");
-    addCommand(L"Copy", L"copy");
-    addViewAction(L"Rename", L"rename", ViewAction::Rename, multiDisabled);
-    addCommand(L"Delete", L"delete");
+    addCommand(L"Cut", L"cut", kModelNone, L"@glyph:E8C6");
+    addCommand(L"Copy", L"copy", kModelNone, L"@glyph:E8C8");
+    addViewAction(L"Rename", L"rename", ViewAction::Rename, multiDisabled,
+                  L"@glyph:E8AC");
+    addCommand(L"Delete", L"delete", kModelNone, L"@glyph:E74D");
     addSeparator();
     addCommand(L"Create shortcut", L"createshortcut", multiDisabled);
     addSubmenu(L"Send to");
@@ -505,15 +507,11 @@ MenuModel MergeCoreWithCached(const MenuModel& core, const MenuModel& cached) {
             if (coreItem.action != ActionKind::ShellVerb || !matches(coreItem, item)) {
                 continue;
             }
-            // Adopt the native descriptor and icon: the shell rejects some
-            // canonical verb strings but its own offsets always dispatch,
-            // and its captured bitmap is exactly what the classic menu shows.
+            // Adopt the native invocation descriptor: the shell rejects some
+            // canonical verb strings but its own offsets always dispatch.
             coreItem.canonicalVerb = item.canonicalVerb;
             coreItem.verbOffset = item.verbOffset;
             coreItem.flags |= kModelHasOffset;
-            if (!item.iconPixels.empty()) {
-                coreItem.iconPixels = item.iconPixels;
-            }
             matchedCore = true;
             break;
         }
@@ -551,7 +549,7 @@ MenuModel MergeCoreWithCached(const MenuModel& core, const MenuModel& cached) {
 namespace cmo {
 
 constexpr uint32_t kCacheMagic = 0x434F4D4F;  // "COMO"
-constexpr uint32_t kCacheVersion = 7;
+constexpr uint32_t kCacheVersion = 8;
 constexpr uint32_t kMaxCacheEntries = 1024;
 constexpr uint32_t kMaxModelItems = 4096;
 constexpr uint32_t kMaxMenuDepth = 16;
@@ -1415,6 +1413,95 @@ void CaptureBitmapPixels(HBITMAP bitmap, std::vector<uint8_t>& out) {
     }
 }
 
+// Reads a string value from a Classes subkey; HKCU takes precedence over
+// HKLM, mirroring the HKEY_CLASSES_ROOT merge order.
+std::wstring ReadClassesString(const std::wstring& subKey, const wchar_t* valueName) {
+    const std::wstring fullKey = L"Software\\Classes\\" + subKey;
+    for (HKEY root : {HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE}) {
+        HKEY key = nullptr;
+        if (RegOpenKeyExW(root, fullKey.c_str(), 0, KEY_READ, &key) !=
+            ERROR_SUCCESS) {
+            continue;
+        }
+
+        wchar_t buffer[512] = {};
+        DWORD size = sizeof(buffer);
+        DWORD type = 0;
+        std::wstring result;
+        if (RegQueryValueExW(key, valueName, nullptr, &type,
+                             reinterpret_cast<LPBYTE>(buffer),
+                             &size) == ERROR_SUCCESS &&
+            (type == REG_SZ || type == REG_EXPAND_SZ) && buffer[0]) {
+            result.assign(buffer);
+        }
+        RegCloseKey(key);
+        if (!result.empty()) {
+            return result;
+        }
+    }
+    return L"";
+}
+
+// Resolves the icon a static verb registers under HKCR for this context.
+std::wstring ResolveRegistryIcon(const ContextSignature& signature,
+                                 const std::wstring& verb) {
+    if (verb.empty()) {
+        return L"";
+    }
+
+    std::vector<std::wstring> bases;
+    if (signature.scope == Scope::Folders || signature.scope == Scope::Drive) {
+        bases.push_back(L"Directory");
+        bases.push_back(L"Folder");
+        bases.push_back(L"AllFilesystemObjects");
+        bases.push_back(L"*");
+    } else if (signature.scope == Scope::Background ||
+               signature.scope == Scope::Desktop) {
+        bases.push_back(L"Directory\\Background");
+        bases.push_back(L"DesktopBackground");
+    } else {
+        const std::wstring& typeKey = signature.typeKey;
+        if (!typeKey.empty() && typeKey != L"*" && typeKey != L"mixed" &&
+            typeKey[0] == L'.') {
+            const std::wstring progId = ReadClassesString(typeKey, nullptr);
+            if (!progId.empty()) {
+                bases.push_back(progId);
+            }
+            bases.push_back(typeKey);
+            bases.push_back(L"SystemFileAssociations\\" + typeKey);
+        }
+        bases.push_back(L"*");
+        bases.push_back(L"AllFilesystemObjects");
+    }
+
+    for (const std::wstring& base : bases) {
+        const std::wstring icon =
+            ReadClassesString(base + L"\\shell\\" + verb, L"Icon");
+        if (!icon.empty()) {
+            return icon;
+        }
+    }
+    return L"";
+}
+
+// Fills in registry icons for static verbs that provide no menu bitmap.
+void ApplyRegistryIcons(std::vector<MenuItem>& items,
+                        const ContextSignature& signature) {
+    for (MenuItem& item : items) {
+        ApplyRegistryIcons(item.children, signature);
+        if (item.action != ActionKind::ShellVerb || !item.iconPixels.empty() ||
+            !item.iconRef.empty() || item.canonicalVerb.empty()) {
+            continue;
+        }
+        const std::wstring icon = ResolveRegistryIcon(signature, item.canonicalVerb);
+        if (!icon.empty()) {
+            item.iconRef = icon;
+            Wh_Log(L"Registry icon for '%s' (verb '%s'): %s", item.label.c_str(),
+                   item.canonicalVerb.c_str(), icon.c_str());
+        }
+    }
+}
+
 void BuildItemsFromHMenu(HMENU menu, UINT idCmdFirst, IContextMenu* context,
                          uint32_t& nextId, std::vector<MenuItem>& out, bool& ownerDraw) {
     const int count = GetMenuItemCount(menu);
@@ -1552,15 +1639,14 @@ void DiscoverIntoCache(PendingCapture& capture, const ContextSignature& signatur
     InitializeMenuRecursive(capture, capture.populatedMenu, 0);
     MenuModel model = BuildModelFromHMenu(capture.populatedMenu, capture.idCmdFirst,
                                           signature, capture.obj);
+    ApplyRegistryIcons(model.items, signature);
     model.handlerModules = capture.handlerModules;
     model.sourceStamp = capture.sourceStamp;
     capture.discoveryDone = true;
 
     Wh_Log(L"Discovered %zu menu items in %llu ms", model.items.size(),
            static_cast<unsigned long long>(GetTickCount64() - start));
-    if (g_settings.debugLogging) {
-        DumpModelItems(model.items, 0);
-    }
+    DumpModelItems(model.items, 0);
     g_cache.Put(std::move(model));
 }
 
@@ -2522,6 +2608,21 @@ public:
         return BitmapFromRef(item.iconRef, sizePx);
     }
 
+    // The owner window whose theme determines the menu background color.
+    void SetThemeOwner(HWND owner) { themeOwner_ = owner; }
+
+    // Pre-renders the core action glyphs, so the open path only attaches
+    // already-cached bitmaps.
+    void PreloadCoreIcons(int sizePx) {
+        static const wchar_t* kGlyphRefs[] = {
+            L"@glyph:E8C6", L"@glyph:E8C8", L"@glyph:E8AC", L"@glyph:E74D",
+            L"@glyph:E713", L"@glyph:E8E5", L"@glyph:E72C", L"@glyph:E77F",
+        };
+        for (const wchar_t* ref : kGlyphRefs) {
+            BitmapFromRef(ref, sizePx);
+        }
+    }
+
     void Clear() {
         for (auto& pair : bitmaps_) {
             if (pair.second) {
@@ -2546,9 +2647,18 @@ private:
         }
 
         HBITMAP bitmap = nullptr;
-        HICON icon = GetIcon(ref, sizePx);
-        if (icon) {
-            bitmap = BitmapFromIcon(icon, sizePx);
+        if (ref.rfind(L"@glyph:", 0) == 0) {
+            const wchar_t codepoint =
+                static_cast<wchar_t>(wcstoul(ref.c_str() + 7, nullptr, 16));
+            std::vector<uint8_t> pixels;
+            if (GlyphPixels(codepoint, sizePx, pixels)) {
+                bitmap = OpaqueBitmapFromBgra(pixels, sizePx, sizePx, sizePx);
+            }
+        } else {
+            HICON icon = GetIcon(ref, sizePx);
+            if (icon) {
+                bitmap = BitmapFromIcon(icon, sizePx);
+            }
         }
         bitmaps_[key] = bitmap;
         return bitmap;
@@ -2624,7 +2734,7 @@ private:
         header.bV5AlphaMask = 0xFF000000;
     }
 
-    static HBITMAP BitmapFromIcon(HICON icon, int sizePx) {
+    HBITMAP BitmapFromIcon(HICON icon, int sizePx) {
         HDC screen = GetDC(nullptr);
         HDC memory = CreateCompatibleDC(screen);
         BITMAPV5HEADER header = {};
@@ -2635,6 +2745,12 @@ private:
             nullptr, 0);
         if (bitmap && bits) {
             HGDIOBJ old = SelectObject(memory, bitmap);
+            // Fill with the menu background first: menus draw bitmaps without
+            // alpha, so the icon must be composited here.
+            RECT rect = {0, 0, sizePx, sizePx};
+            HBRUSH backgroundBrush = CreateSolidBrush(MenuBackgroundColor());
+            FillRect(memory, &rect, backgroundBrush);
+            DeleteObject(backgroundBrush);
             DrawIconEx(memory, 0, 0, icon, sizePx, sizePx, 0, nullptr, DI_NORMAL);
             SelectObject(memory, old);
         }
@@ -2643,25 +2759,41 @@ private:
         return bitmap;
     }
 
-    static COLORREF MenuBackgroundColor() {
-        HTHEME theme = OpenThemeData(nullptr, L"Menu");
+    COLORREF MenuBackgroundColor() const {
+        COLORREF color = 0;
+        bool haveColor = false;
+        HTHEME theme = OpenThemeData(themeOwner_, L"Menu");
         if (theme) {
-            COLORREF color = 0;
             if (SUCCEEDED(GetThemeColor(theme, MENU_POPUPBACKGROUND, 0, TMT_FILLCOLOR,
                                         &color))) {
-                CloseThemeData(theme);
-                return color;
+                haveColor = true;
             }
             CloseThemeData(theme);
         }
-        return GetSysColor(COLOR_MENU);
+        if (!haveColor) {
+            color = GetSysColor(COLOR_MENU);
+        }
+
+        // The theme lookup can return light colors even in dark mode; keep
+        // the baked-in background consistent with the actual menu.
+        const bool darkTheme = IsDarkThemeActive();
+        const int luminance = (GetRValue(color) * 30 + GetGValue(color) * 59 +
+                               GetBValue(color) * 11) /
+                              100;
+        if (darkTheme && luminance > 128) {
+            return RGB(44, 44, 44);
+        }
+        if (!darkTheme && luminance < 128) {
+            return GetSysColor(COLOR_MENU);
+        }
+        return color;
     }
 
     // Composites captured BGRA pixels over the actual themed menu background
     // into an opaque 32bpp bitmap. Classic menus draw MIM_BITMAP bitmaps
     // without alpha blending, so transparency must be baked in here.
-    static HBITMAP OpaqueBitmapFromBgra(const std::vector<uint8_t>& pixels, int width,
-                                        int height, int sizePx) {
+    HBITMAP OpaqueBitmapFromBgra(const std::vector<uint8_t>& pixels, int width,
+                                 int height, int sizePx) {
         HDC screen = GetDC(nullptr);
         HDC sourceDc = CreateCompatibleDC(screen);
         HDC targetDc = CreateCompatibleDC(screen);
@@ -2742,6 +2874,119 @@ private:
         return target;
     }
 
+    static bool IsDarkThemeActive() {
+        DWORD lightTheme = 1;
+        DWORD size = sizeof(lightTheme);
+        HKEY key = nullptr;
+        if (RegOpenKeyExW(
+                HKEY_CURRENT_USER,
+                L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+                0, KEY_READ, &key) == ERROR_SUCCESS) {
+            RegQueryValueExW(key, L"AppsUseLightTheme", nullptr, nullptr,
+                             reinterpret_cast<LPBYTE>(&lightTheme), &size);
+            RegCloseKey(key);
+        }
+        return lightTheme == 0;
+    }
+
+    static bool FontExists(const wchar_t* faceName) {
+        HDC dc = GetDC(nullptr);
+        LOGFONTW logFont = {};
+        logFont.lfCharSet = DEFAULT_CHARSET;
+        wcsncpy(logFont.lfFaceName, faceName, LF_FACESIZE - 1);
+        bool found = false;
+        EnumFontFamiliesExW(
+            dc, &logFont,
+            [](const LOGFONTW*, const TEXTMETRICW*, DWORD, LPARAM lParam) -> int {
+                *reinterpret_cast<bool*>(lParam) = true;
+                return 0;
+            },
+            reinterpret_cast<LPARAM>(&found), 0);
+        ReleaseDC(nullptr, dc);
+        return found;
+    }
+
+    // Renders an icon-font glyph into straight BGRA pixels (alpha =
+    // coverage) in the menu text color. The caller composites it over the
+    // menu background.
+    static bool GlyphPixels(wchar_t codepoint, int sizePx,
+                            std::vector<uint8_t>& out) {
+        static const wchar_t* kFonts[] = {L"Segoe Fluent Icons",
+                                          L"Segoe MDL2 Assets"};
+        for (const wchar_t* font : kFonts) {
+            if (!FontExists(font)) {
+                continue;
+            }
+
+            HDC screen = GetDC(nullptr);
+            HDC memory = CreateCompatibleDC(screen);
+            BITMAPV5HEADER header = {};
+            FillBitmapHeader(header, sizePx, sizePx);
+            void* bits = nullptr;
+            HBITMAP bitmap = CreateDIBSection(
+                screen, reinterpret_cast<BITMAPINFO*>(&header), DIB_RGB_COLORS,
+                &bits, nullptr, 0);
+            if (!bitmap || !bits) {
+                if (bitmap) {
+                    DeleteObject(bitmap);
+                }
+                DeleteDC(memory);
+                ReleaseDC(nullptr, screen);
+                continue;
+            }
+
+            memset(bits, 0, static_cast<size_t>(sizePx) * sizePx * 4);
+            HGDIOBJ oldBitmap = SelectObject(memory, bitmap);
+            HFONT fontHandle = CreateFontW(
+                -sizePx, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+                OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                DEFAULT_PITCH | FF_DONTCARE, font);
+            HGDIOBJ oldFont = SelectObject(memory, fontHandle);
+            SetBkMode(memory, TRANSPARENT);
+            SetTextColor(memory, RGB(255, 255, 255));
+            RECT rect = {0, 0, sizePx, sizePx};
+            DrawTextW(memory, &codepoint, 1, &rect,
+                      DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+            SelectObject(memory, oldFont);
+            DeleteObject(fontHandle);
+            SelectObject(memory, oldBitmap);
+            DeleteDC(memory);
+            ReleaseDC(nullptr, screen);
+
+            const bool darkTheme = IsDarkThemeActive();
+            const COLORREF textColor = GetSysColor(COLOR_MENUTEXT);
+            const uint8_t red = darkTheme ? 255 : GetRValue(textColor);
+            const uint8_t green = darkTheme ? 255 : GetGValue(textColor);
+            const uint8_t blue = darkTheme ? 255 : GetBValue(textColor);
+
+            const uint8_t* pixels = static_cast<const uint8_t*>(bits);
+            out.assign(static_cast<size_t>(sizePx) * sizePx * 4, 0);
+            bool anyCoverage = false;
+            for (int i = 0; i < sizePx * sizePx; ++i) {
+                uint8_t coverage = pixels[i * 4];
+                if (pixels[i * 4 + 1] > coverage) {
+                    coverage = pixels[i * 4 + 1];
+                }
+                if (pixels[i * 4 + 2] > coverage) {
+                    coverage = pixels[i * 4 + 2];
+                }
+                if (coverage > 0) {
+                    anyCoverage = true;
+                }
+                out[i * 4] = blue;
+                out[i * 4 + 1] = green;
+                out[i * 4 + 2] = red;
+                out[i * 4 + 3] = coverage;
+            }
+            DeleteObject(bitmap);
+            if (anyCoverage) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    HWND themeOwner_ = nullptr;
     std::unordered_map<std::wstring, HBITMAP> bitmaps_;
     std::unordered_map<std::wstring, HICON> icons_;
 };
@@ -2764,6 +3009,7 @@ public:
             return std::nullopt;
         }
         const int iconSize = GetSystemMetrics(SM_CXSMICON);
+        g_iconCache.SetThemeOwner(owner);
         AppendItems(menu, model.items, iconSize);
 
         if (!TrackPopupMenuEx_Original) {
@@ -3254,6 +3500,7 @@ private:
             MenuModel model = BuildModelFromHMenu(offscreen, 1, signature, menu);
             DestroyMenu(offscreen);
             if (!model.items.empty()) {
+                ApplyRegistryIcons(model.items, signature);
                 model.handlerModules =
                     DiffModules(modulesBefore, SnapshotLoadedModules());
                 model.sourceStamp = ComputeModuleStamp(model.handlerModules);
@@ -3785,6 +4032,7 @@ BOOL Wh_ModInit() {
     }
 
     cmo::LoadSettings();
+    cmo::g_iconCache.PreloadCoreIcons(GetSystemMetrics(SM_CXSMICON));
 
     const std::wstring cachePath = cmo::CacheFilePath();
     if (!cachePath.empty()) {

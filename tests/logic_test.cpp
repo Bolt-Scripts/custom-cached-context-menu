@@ -2828,6 +2828,44 @@ int main() {
         CHECK(released == 3);
     }
 
+    // v2.1 appearance additions: parse, defaults, metrics.
+    {
+        cmo::RulesConfig config;
+        std::vector<cmo::ConfigParseError> errors;
+        CHECK(cmo::ParseRulesConfig(
+            L"[appearance]\nverticalPadding = 8\nminWidth = 120\nmaxWidth = 400\n"
+            L"itemPadding = 3\nseparatorSpacing = 2\nmarkerWidth = 18\n"
+            L"fontWeight = bold\nfontStyle = italic\ncornerRadii = 2, 4, 6, 8\n"
+            L"shadowOpacity = 90\nshadowBlur = 20\nmarker = bar\n"
+            L"markerColor = #11223344\nheaderColor = #55667788\n"
+            L"showAccelerators = strip\n",
+            config, errors));
+        CHECK(config.appearance.verticalPadding == 8);
+        CHECK(config.appearance.minWidth == 120);
+        CHECK(config.appearance.itemPadding == 3);
+        CHECK(config.appearance.hasCornerRadii);
+        CHECK(config.appearance.cornerRadii.bottomRight == 6);
+        CHECK(config.appearance.marker == cmo::MarkerStyle::Bar);
+        CHECK(config.appearance.fontWeight == cmo::FontWeightKind::Bold);
+        CHECK(config.appearance.acceleratorMode == cmo::AcceleratorMode::Strip);
+
+        const cmo::LayoutMetrics metrics =
+            cmo::ResolveLayoutMetrics(config.appearance, 96, true);
+        CHECK(metrics.verticalPadding == 8);
+        CHECK(metrics.markerWidth == 18);
+        CHECK(metrics.itemPadding == 3);
+        CHECK(metrics.cornerRadii.topRight == 4);
+        CHECK(metrics.markerColor == 0x11223344u);
+        CHECK(metrics.headerColor == 0x55667788u);
+
+        std::vector<cmo::ConfigParseError> badErrors;
+        CHECK(!cmo::ParseRulesConfig(L"[appearance]\nmarker = zigzag\n", config,
+                                     badErrors));
+        CHECK(!badErrors.empty());
+        CHECK(!cmo::ParseRulesConfig(L"[appearance]\ncornerRadii = 1, 2, 3\n", config,
+                                     badErrors));
+    }
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

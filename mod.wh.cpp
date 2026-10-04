@@ -1110,6 +1110,17 @@ void DumpSuspiciousItems(const std::vector<MenuItem>& items, int depth) {
 // ===========================================================================
 
 enum class AnimationKind : uint8_t { None, Fade, Slide };
+enum class MarkerStyle : uint8_t { Dot, Check, Bar, None };
+enum class FontWeightKind : uint8_t { Normal, Semibold, Bold };
+enum class FontStyleKind : uint8_t { Normal, Italic };
+enum class AcceleratorMode : uint8_t { Underline, Strip, Raw };
+
+struct CornerRadii {
+    int topLeft = 0;
+    int topRight = 0;
+    int bottomRight = 0;
+    int bottomLeft = 0;
+};
 
 struct Appearance {
     uint32_t background = 0xF01E1E1E;
@@ -1133,6 +1144,24 @@ struct Appearance {
     uint32_t submenuArrow = 0x99FFFFFF;
     AnimationKind animation = AnimationKind::None;
     int animationDuration = 120;
+    int verticalPadding = 4;
+    int minWidth = 0;
+    int maxWidth = 0;
+    int itemPadding = -1;
+    int separatorSpacing = 0;
+    int markerWidth = 14;
+    FontWeightKind fontWeight = FontWeightKind::Normal;
+    FontStyleKind fontStyle = FontStyleKind::Normal;
+    CornerRadii cornerRadii;
+    bool hasCornerRadii = false;
+    int shadowOpacity = 120;
+    int shadowBlur = 12;
+    MarkerStyle marker = MarkerStyle::Dot;
+    uint32_t markerColor = 0xFFFFFFFF;
+    bool hasMarkerColor = false;
+    uint32_t headerColor = 0x66FFFFFF;
+    bool hasHeaderColor = false;
+    AcceleratorMode acceleratorMode = AcceleratorMode::Underline;
 };
 
 struct ConfigParseError {
@@ -1295,6 +1324,106 @@ bool ParseAnimationKind(const std::wstring& text, AnimationKind& kind) {
     return false;
 }
 
+bool ParseMarkerStyle(const std::wstring& text, MarkerStyle& style) {
+    const std::wstring lower = ToLowerCopy(TrimWhitespace(text));
+    if (lower == L"dot") {
+        style = MarkerStyle::Dot;
+        return true;
+    }
+    if (lower == L"check") {
+        style = MarkerStyle::Check;
+        return true;
+    }
+    if (lower == L"bar") {
+        style = MarkerStyle::Bar;
+        return true;
+    }
+    if (lower == L"none") {
+        style = MarkerStyle::None;
+        return true;
+    }
+    return false;
+}
+
+bool ParseFontWeight(const std::wstring& text, FontWeightKind& weight) {
+    const std::wstring lower = ToLowerCopy(TrimWhitespace(text));
+    if (lower == L"normal") {
+        weight = FontWeightKind::Normal;
+        return true;
+    }
+    if (lower == L"semibold") {
+        weight = FontWeightKind::Semibold;
+        return true;
+    }
+    if (lower == L"bold") {
+        weight = FontWeightKind::Bold;
+        return true;
+    }
+    return false;
+}
+
+bool ParseFontStyle(const std::wstring& text, FontStyleKind& style) {
+    const std::wstring lower = ToLowerCopy(TrimWhitespace(text));
+    if (lower == L"normal") {
+        style = FontStyleKind::Normal;
+        return true;
+    }
+    if (lower == L"italic") {
+        style = FontStyleKind::Italic;
+        return true;
+    }
+    return false;
+}
+
+bool ParseAcceleratorMode(const std::wstring& text, AcceleratorMode& mode) {
+    const std::wstring lower = ToLowerCopy(TrimWhitespace(text));
+    if (lower == L"underline") {
+        mode = AcceleratorMode::Underline;
+        return true;
+    }
+    if (lower == L"strip") {
+        mode = AcceleratorMode::Strip;
+        return true;
+    }
+    if (lower == L"raw") {
+        mode = AcceleratorMode::Raw;
+        return true;
+    }
+    return false;
+}
+
+bool ParseCornerRadii(const std::wstring& value, CornerRadii& radii) {
+    int values[4] = {};
+    size_t start = 0;
+    int count = 0;
+    while (start <= value.size() && count < 4) {
+        const size_t comma = value.find(L',', start);
+        const std::wstring part = TrimWhitespace(
+            value.substr(start, comma == std::wstring::npos ? std::wstring::npos
+                                                            : comma - start));
+        if (part.empty() || !ParseIntValue(part, values[count]) || values[count] < 0) {
+            return false;
+        }
+        ++count;
+        if (comma == std::wstring::npos) {
+            break;
+        }
+        start = comma + 1;
+    }
+    if (count != 4) {
+        return false;
+    }
+    // Reject a trailing extra value.
+    if (value.find(L',', start) != std::wstring::npos) {
+        return false;
+    }
+    radii.topLeft = values[0];
+    radii.topRight = values[1];
+    radii.bottomRight = values[2];
+    radii.bottomLeft = values[3];
+    return true;
+}
+
 // Applies one appearance key/value; false means invalid key or value.
 bool ApplyAppearanceValue(Appearance& appearance, const std::wstring& key,
                           const std::wstring& value) {
@@ -1334,6 +1463,69 @@ bool ApplyAppearanceValue(Appearance& appearance, const std::wstring& key,
     if (key == L"animationduration") {
         return ParseIntValue(value, appearance.animationDuration) &&
                appearance.animationDuration >= 0;
+    }
+    if (key == L"verticalpadding") {
+        return ParseIntValue(value, appearance.verticalPadding) &&
+               appearance.verticalPadding >= 0;
+    }
+    if (key == L"minwidth") {
+        return ParseIntValue(value, appearance.minWidth) && appearance.minWidth >= 0;
+    }
+    if (key == L"maxwidth") {
+        return ParseIntValue(value, appearance.maxWidth) && appearance.maxWidth >= 0;
+    }
+    if (key == L"itempadding") {
+        return ParseIntValue(value, appearance.itemPadding) &&
+               appearance.itemPadding >= 0;
+    }
+    if (key == L"separatorspacing") {
+        return ParseIntValue(value, appearance.separatorSpacing) &&
+               appearance.separatorSpacing >= 0;
+    }
+    if (key == L"markerwidth") {
+        return ParseIntValue(value, appearance.markerWidth) &&
+               appearance.markerWidth >= 0;
+    }
+    if (key == L"fontweight") {
+        return ParseFontWeight(value, appearance.fontWeight);
+    }
+    if (key == L"fontstyle") {
+        return ParseFontStyle(value, appearance.fontStyle);
+    }
+    if (key == L"cornerradii") {
+        if (!ParseCornerRadii(value, appearance.cornerRadii)) {
+            return false;
+        }
+        appearance.hasCornerRadii = true;
+        return true;
+    }
+    if (key == L"shadowopacity") {
+        return ParseIntValue(value, appearance.shadowOpacity) &&
+               appearance.shadowOpacity >= 0 && appearance.shadowOpacity <= 255;
+    }
+    if (key == L"shadowblur") {
+        return ParseIntValue(value, appearance.shadowBlur) &&
+               appearance.shadowBlur >= 0;
+    }
+    if (key == L"marker") {
+        return ParseMarkerStyle(value, appearance.marker);
+    }
+    if (key == L"markercolor") {
+        if (!ParseColor(value, appearance.markerColor)) {
+            return false;
+        }
+        appearance.hasMarkerColor = true;
+        return true;
+    }
+    if (key == L"headercolor") {
+        if (!ParseColor(value, appearance.headerColor)) {
+            return false;
+        }
+        appearance.hasHeaderColor = true;
+        return true;
+    }
+    if (key == L"showaccelerators") {
+        return ParseAcceleratorMode(value, appearance.acceleratorMode);
     }
     return false;
 }
@@ -2631,6 +2823,22 @@ struct LayoutMetrics {
     uint32_t pressedBackground = 0x22FFFFFF;
     uint32_t separator = 0x18FFFFFF;
     uint32_t submenuArrow = 0x99FFFFFF;
+    int verticalPadding = 4;
+    int itemPadding = 6;
+    int separatorSpacing = 0;
+    int minWidth = 0;
+    int maxWidth = 0;
+    int markerWidth = 14;
+    FontWeightKind fontWeight = FontWeightKind::Normal;
+    FontStyleKind fontStyle = FontStyleKind::Normal;
+    CornerRadii cornerRadii;
+    bool hasCornerRadii = false;
+    int shadowOpacity = 120;
+    int shadowBlur = 12;
+    MarkerStyle marker = MarkerStyle::Dot;
+    uint32_t markerColor = 0xFFFFFFFF;
+    uint32_t headerColor = 0x66FFFFFF;
+    AcceleratorMode acceleratorMode = AcceleratorMode::Underline;
 };
 
 LayoutMetrics ResolveLayoutMetrics(const Appearance& appearance, uint32_t dpi,
@@ -2656,6 +2864,30 @@ LayoutMetrics ResolveLayoutMetrics(const Appearance& appearance, uint32_t dpi,
     metrics.pressedBackground = appearance.pressedBackground;
     metrics.separator = appearance.separator;
     metrics.submenuArrow = appearance.submenuArrow;
+    metrics.verticalPadding = MulDiv(appearance.verticalPadding, scale, 96);
+    metrics.itemPadding = appearance.itemPadding >= 0
+                              ? MulDiv(appearance.itemPadding, scale, 96)
+                              : metrics.padding;
+    metrics.separatorSpacing = MulDiv(appearance.separatorSpacing, scale, 96);
+    metrics.minWidth = MulDiv(appearance.minWidth, scale, 96);
+    metrics.maxWidth = MulDiv(appearance.maxWidth, scale, 96);
+    metrics.markerWidth = MulDiv(appearance.markerWidth, scale, 96);
+    metrics.fontWeight = appearance.fontWeight;
+    metrics.fontStyle = appearance.fontStyle;
+    metrics.cornerRadii = {
+        MulDiv(appearance.cornerRadii.topLeft, scale, 96),
+        MulDiv(appearance.cornerRadii.topRight, scale, 96),
+        MulDiv(appearance.cornerRadii.bottomRight, scale, 96),
+        MulDiv(appearance.cornerRadii.bottomLeft, scale, 96)};
+    metrics.hasCornerRadii = appearance.hasCornerRadii;
+    metrics.shadowOpacity = appearance.shadowOpacity;
+    metrics.shadowBlur = MulDiv(appearance.shadowBlur, scale, 96);
+    metrics.marker = appearance.marker;
+    metrics.markerColor = appearance.hasMarkerColor ? appearance.markerColor
+                                                    : appearance.textColor;
+    metrics.headerColor = appearance.hasHeaderColor ? appearance.headerColor
+                                                    : appearance.disabledTextColor;
+    metrics.acceleratorMode = appearance.acceleratorMode;
     return metrics;
 }
 

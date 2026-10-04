@@ -64,10 +64,11 @@ untouched native menu, including extended verbs.
   shell's file-type icons, and the View modes use glyphs.
 - Warm-up models are provisional: they are shown instantly but never overwrite
   a live model, and are refreshed from the real context on first use.
-- On the first open of an uncached context, the menu shows the core commands,
-  then closes briefly while the shell populates and reopens with the full set.
-  Population blocks the UI thread, so the menu is closed for that moment
-  instead of freezing blank.
+- The first open of an uncached context waits for the shell to populate and
+  then shows the full menu — the same first-open cost as the native menu.
+  Everything after that is instant, and warm-up keeps common types instant
+  from the start. (An instant placeholder menu was tried, but the shell's
+  population blocks the UI thread and left it blank.)
 - With the **More options submenu** on, discovered items whose verb is not a
   known Windows verb (i.e. third-party shell extensions, however they are
   registered) and the configured Windows extras are grouped into one submenu

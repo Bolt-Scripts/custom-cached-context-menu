@@ -2,7 +2,7 @@
 // @id              context-menu-overhaul
 // @name            Context Menu Overhaul
 // @description     Replaces the Explorer context menu with an instantly-opening cached menu, then discovers and caches shell extension items asynchronously.
-// @version         0.3.23
+// @version         0.3.24
 // @include         explorer.exe
 // @architecture    x86-64
 // @compilerOptions -lole32 -lshlwapi -luuid -lcomctl32 -ladvapi32 -lgdi32 -luxtheme -lversion
@@ -5676,11 +5676,23 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
 
     while (true) {
         std::optional<MenuModel> cached = g_cache.Find(signature);
-        const bool needsDiscovery = !cached || (cached->flags & kModelWarmup);
+        bool needsDiscovery = !cached || (cached->flags & kModelWarmup);
         Wh_Log(L"Cache %s: scope=%d key=%s shape=%d paths=%zu",
                cached ? (needsDiscovery ? L"warm" : L"hit") : L"miss",
                static_cast<int>(scope), typeKey.c_str(), static_cast<int>(shape),
                paths.size());
+
+        // A true cache miss has no menu to show. Populate first: the shell's
+        // population blocks the UI thread, so a placeholder menu would sit
+        // blank until the real menu replaced it. The native menu pays the same
+        // first-open cost. Warm entries are shown provisionally and refreshed
+        // after the menu closes.
+        if (!cached && !capture.discoveryDone) {
+            Wh_Log(L"Populating before showing the menu");
+            DiscoverIntoCache(capture, signature);
+            cached = g_cache.Find(signature);
+            needsDiscovery = !cached || (cached->flags & kModelWarmup);
+        }
 
         MenuModel model =
             cached ? MergeCoreWithCached(BuildCoreModel(scope, paths, shape), *cached)
@@ -5719,19 +5731,8 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
                static_cast<unsigned long long>(g_perf.OpenPathElapsedMs()));
 
         bool creationFailed = false;
-        std::optional<uint32_t> chosen;
-        {
-            // On a cache miss the menu paints immediately and discovery runs
-            // from the timer while the menu is interactive, so closing stays
-            // instant. Cache hits skip population entirely.
-            if (!needsDiscovery) {
-                chosen = NativeMenuView::Show(model, owner, pt, &creationFailed);
-            } else {
-                OwnerSubclass subclass(owner, &capture, /*forwardMenuMessages=*/false);
-                subclass.StartDiscoveryTimer(signature);
-                chosen = NativeMenuView::Show(model, owner, pt, &creationFailed);
-            }
-        }
+        std::optional<uint32_t> chosen =
+            NativeMenuView::Show(model, owner, pt, &creationFailed);
 
         if (creationFailed) {
             Wh_Log(L"Menu creation failed; using the native menu");
@@ -5781,20 +5782,8 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
             break;
         }
 
-        // Discovery was requested while the menu was open. The menu is closed
-        // now, so populate without a visible menu and rebuild with the full
-        // model.
-        if (capture.reopenRequested) {
-            capture.reopenRequested = false;
-            if (!capture.discoveryDone) {
-                DiscoverIntoCache(capture, signature);
-            }
-            continue;
-        }
-
-        // If the timer did not run while the menu was open (fast dismissal),
-        // warm the cache now. Warm-up entries are refreshed from the real
-        // context on first use; live entries never populate again.
+        // Warm-up entries are provisional: refresh them from the real context
+        // now that the menu has closed. Live entries never populate again.
         if (needsDiscovery && !capture.discoveryDone) {
             DiscoverIntoCache(capture, signature);
         }

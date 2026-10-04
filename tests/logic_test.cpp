@@ -2382,6 +2382,65 @@ int main() {
         CHECK(at144.fontSize == at96.fontSize * 1.5f);
     }
 
+    // v2 layout geometry: heights, gutter, submenu recursion, disabled color.
+    {
+        cmo::LayoutMetrics metrics{};
+        metrics.itemHeight = 28;
+        metrics.separatorHeight = 7;
+        metrics.iconSize = 16;
+        metrics.padding = 6;
+        metrics.gutterWidth = 22;
+        metrics.submenuArrowWidth = 16;
+        metrics.textColor = 0xFFFFFFFFu;
+        metrics.disabledTextColor = 0x66FFFFFFu;
+
+        std::vector<cmo::MenuItem> items;
+        cmo::MenuItem open{};
+        open.id = 1;
+        open.kind = cmo::ItemKind::Command;
+        open.action = cmo::ActionKind::ShellVerb;
+        open.label = L"Open";
+        items.push_back(open);
+        cmo::MenuItem sep{};
+        sep.id = 2;
+        sep.kind = cmo::ItemKind::Separator;
+        items.push_back(sep);
+        cmo::MenuItem disabled{};
+        disabled.id = 3;
+        disabled.kind = cmo::ItemKind::Command;
+        disabled.action = cmo::ActionKind::ShellVerb;
+        disabled.label = L"Paste";
+        disabled.flags = cmo::kModelDisabled;
+        items.push_back(disabled);
+        cmo::MenuItem sub{};
+        sub.id = 4;
+        sub.kind = cmo::ItemKind::Submenu;
+        sub.action = cmo::ActionKind::Submenu;
+        sub.label = L"More options";
+        cmo::MenuItem child{};
+        child.id = 5;
+        child.kind = cmo::ItemKind::Command;
+        child.action = cmo::ActionKind::ShellVerb;
+        child.label = L"WinRAR";
+        sub.children.push_back(child);
+        items.push_back(sub);
+
+        cmo::LayoutPanel panel = cmo::BuildLayoutPanel(items, metrics);
+        CHECK(panel.items.size() == 4);
+        CHECK(panel.size.cy == 28 + 7 + 28 + 28);
+        CHECK(panel.items[0].rect.top == 0);
+        CHECK(panel.items[0].rect.bottom == 28);
+        CHECK(panel.items[1].rect.top == 28);
+        CHECK(panel.items[2].rect.top == 35);
+        CHECK(panel.items[2].textColor == 0x66FFFFFFu);
+        CHECK(panel.items[0].textRect.left == 6 + 22);
+        CHECK(panel.items[0].gutterRect.left == 6);
+        CHECK(panel.children.size() == 1);
+        CHECK(panel.children[0].items.size() == 1);
+        CHECK(panel.items[3].submenuIndex == 0);
+        CHECK(panel.items[3].textRect.right <= panel.size.cx - 16);
+    }
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

@@ -2533,6 +2533,125 @@ LayoutMetrics ResolveLayoutMetrics(const Appearance& appearance, uint32_t dpi,
     return metrics;
 }
 
+struct InvocationDescriptor {
+    uint32_t id = 0;
+    ActionKind action = ActionKind::ViewAction;
+    uint32_t viewAction = 0;
+    uint32_t verbOffset = 0;
+    uint32_t sortIndex = 0;
+    uint32_t customCommandIndex = 0;
+    uint32_t newIndex = 0;
+    std::wstring canonicalVerb;
+    std::wstring targetPath;
+    bool hasOffset = false;
+};
+
+struct LayoutItem {
+    RECT rect = {};
+    RECT gutterRect = {};
+    RECT iconRect = {};
+    RECT textRect = {};
+    std::wstring label;
+    std::wstring iconRef;
+    uint32_t flags = 0;
+    uint32_t textColor = 0;
+    uint32_t hoverTextColor = 0;
+    int submenuIndex = -1;
+    InvocationDescriptor invocation;
+};
+
+struct LayoutPanel {
+    SIZE size = {};
+    std::vector<LayoutItem> items;
+    std::vector<LayoutPanel> children;
+};
+
+// Renderer supplies a DirectWrite-based measurer; the default estimate keeps
+// the builder pure and testable.
+using TextMeasureFn = int (*)(const wchar_t*, size_t, const LayoutMetrics&);
+
+int EstimateTextWidth(const wchar_t* label, size_t length,
+                      const LayoutMetrics& metrics) {
+    (void)label;
+    return static_cast<int>(static_cast<float>(length) * metrics.fontSize * 0.6f) + 4;
+}
+
+LayoutPanel BuildLayoutPanel(const std::vector<MenuItem>& items,
+                             const LayoutMetrics& metrics,
+                             TextMeasureFn measure = nullptr) {
+    LayoutPanel panel;
+    const int textLeft = metrics.padding + metrics.gutterWidth;
+    const int textGap = metrics.padding;
+
+    int y = 0;
+    int contentWidth = 0;
+    for (const MenuItem& item : items) {
+        const int height = item.kind == ItemKind::Separator ? metrics.separatorHeight
+                                                            : metrics.itemHeight;
+        if (item.kind != ItemKind::Separator) {
+            const int textWidth =
+                measure ? measure(item.label.c_str(), item.label.size(), metrics)
+                        : EstimateTextWidth(item.label.c_str(), item.label.size(),
+                                            metrics);
+            const int arrowSpace = item.kind == ItemKind::Submenu
+                                       ? metrics.submenuArrowWidth
+                                       : 0;
+            contentWidth = std::max(
+                contentWidth, textLeft + textWidth + arrowSpace + textGap);
+        }
+        y += height;
+    }
+    panel.size = {std::max(contentWidth, 80), y};
+
+    int offset = 0;
+    for (const MenuItem& item : items) {
+        LayoutItem layout{};
+        layout.label = item.label;
+        layout.iconRef = item.iconRef;
+        layout.flags = item.flags;
+        layout.textColor = (item.flags & kModelDisabled) ? metrics.disabledTextColor
+                                                         : metrics.textColor;
+        layout.hoverTextColor = metrics.textColor;
+        layout.invocation.id = item.id;
+        layout.invocation.action = item.action;
+        layout.invocation.viewAction = item.viewAction;
+        layout.invocation.verbOffset = item.verbOffset;
+        layout.invocation.sortIndex = item.sortIndex;
+        layout.invocation.customCommandIndex = item.customCommandIndex;
+        layout.invocation.newIndex = item.newIndex;
+        layout.invocation.canonicalVerb = item.canonicalVerb;
+        layout.invocation.targetPath = item.targetPath;
+        layout.invocation.hasOffset = (item.flags & kModelHasOffset) != 0;
+
+        const int height = item.kind == ItemKind::Separator ? metrics.separatorHeight
+                                                            : metrics.itemHeight;
+        layout.rect = {0, offset, panel.size.cx, offset + height};
+
+        if (item.kind != ItemKind::Separator) {
+            layout.gutterRect = {metrics.padding, offset,
+                                 metrics.padding + metrics.gutterWidth, offset + height};
+            const int iconLeft =
+                metrics.padding + (metrics.gutterWidth - metrics.iconSize) / 2;
+            layout.iconRect = {iconLeft, offset + (height - metrics.iconSize) / 2,
+                               iconLeft + metrics.iconSize,
+                               offset + (height + metrics.iconSize) / 2};
+            const int arrowSpace =
+                item.kind == ItemKind::Submenu ? metrics.submenuArrowWidth : 0;
+            layout.textRect = {textLeft, offset,
+                               panel.size.cx - textGap - arrowSpace, offset + height};
+        }
+
+        if (item.kind == ItemKind::Submenu) {
+            layout.submenuIndex = static_cast<int>(panel.children.size());
+            panel.children.push_back(
+                BuildLayoutPanel(item.children, metrics, measure));
+        }
+        panel.items.push_back(std::move(layout));
+        offset += height;
+    }
+    return panel;
+}
+
 // Shell property keys used by the Sort by and Group by submenus (all in the
 // shell's System property set, defined here so no SDK propkey.h is needed).
 const PROPERTYKEY kShellPropertyKeys[] = {

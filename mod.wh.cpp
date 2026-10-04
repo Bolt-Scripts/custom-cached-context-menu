@@ -2,7 +2,7 @@
 // @id              context-menu-overhaul
 // @name            Context Menu Overhaul
 // @description     Replaces the Explorer context menu with an instantly-opening cached menu, then discovers and caches shell extension items asynchronously.
-// @version         0.3.2
+// @version         0.3.3
 // @include         explorer.exe
 // @architecture    x86-64
 // @compilerOptions -lole32 -lshlwapi -luuid -lcomctl32 -ladvapi32 -lgdi32 -luxtheme
@@ -549,7 +549,7 @@ MenuModel MergeCoreWithCached(const MenuModel& core, const MenuModel& cached) {
 namespace cmo {
 
 constexpr uint32_t kCacheMagic = 0x434F4D4F;  // "COMO"
-constexpr uint32_t kCacheVersion = 8;
+constexpr uint32_t kCacheVersion = 9;
 constexpr uint32_t kMaxCacheEntries = 1024;
 constexpr uint32_t kMaxModelItems = 4096;
 constexpr uint32_t kMaxMenuDepth = 16;
@@ -1442,13 +1442,8 @@ std::wstring ReadClassesString(const std::wstring& subKey, const wchar_t* valueN
     return L"";
 }
 
-// Resolves the icon a static verb registers under HKCR for this context.
-std::wstring ResolveRegistryIcon(const ContextSignature& signature,
-                                 const std::wstring& verb) {
-    if (verb.empty()) {
-        return L"";
-    }
-
+// Candidate shell keys for a context, most specific first.
+std::vector<std::wstring> ShellIconBases(const ContextSignature& signature) {
     std::vector<std::wstring> bases;
     if (signature.scope == Scope::Folders || signature.scope == Scope::Drive) {
         bases.push_back(L"Directory");
@@ -1473,13 +1468,74 @@ std::wstring ResolveRegistryIcon(const ContextSignature& signature,
         bases.push_back(L"*");
         bases.push_back(L"AllFilesystemObjects");
     }
+    return bases;
+}
 
-    for (const std::wstring& base : bases) {
+// Resolves the icon a static verb registers under HKCR for this context.
+std::wstring ResolveRegistryIcon(const ContextSignature& signature,
+                                 const std::wstring& verb) {
+    if (verb.empty()) {
+        return L"";
+    }
+
+    for (const std::wstring& base : ShellIconBases(signature)) {
         const std::wstring icon =
             ReadClassesString(base + L"\\shell\\" + verb, L"Icon");
         if (!icon.empty()) {
             return icon;
         }
+    }
+    return L"";
+}
+
+// Finds a shell verb key whose display text matches the item label, for
+// handlers whose key name differs from the canonical verb.
+std::wstring ResolveRegistryIconByLabel(const ContextSignature& signature,
+                                        const std::wstring& label) {
+    std::wstring normalized = label;
+    normalized.erase(std::remove(normalized.begin(), normalized.end(), L'&'),
+                     normalized.end());
+    if (normalized.empty()) {
+        return L"";
+    }
+
+    for (const std::wstring& base : ShellIconBases(signature)) {
+        const std::wstring shellKey = base + L"\\shell";
+        HKEY key = nullptr;
+        if (RegOpenKeyExW(HKEY_CURRENT_USER,
+                          (L"Software\\Classes\\" + shellKey).c_str(), 0, KEY_READ,
+                          &key) != ERROR_SUCCESS &&
+            RegOpenKeyExW(HKEY_LOCAL_MACHINE,
+                          (L"Software\\Classes\\" + shellKey).c_str(), 0, KEY_READ,
+                          &key) != ERROR_SUCCESS) {
+            continue;
+        }
+
+        for (DWORD i = 0;; ++i) {
+            wchar_t name[256] = {};
+            DWORD nameLength = ARRAYSIZE(name);
+            if (RegEnumKeyExW(key, i, name, &nameLength, nullptr, nullptr, nullptr,
+                              nullptr) != ERROR_SUCCESS) {
+                break;
+            }
+
+            const std::wstring verbKey = shellKey + L"\\" + name;
+            std::wstring display = ReadClassesString(verbKey, L"MUIVerb");
+            if (display.empty()) {
+                display = ReadClassesString(verbKey, nullptr);
+            }
+            display.erase(std::remove(display.begin(), display.end(), L'&'),
+                          display.end());
+            if (!display.empty() &&
+                _wcsicmp(display.c_str(), normalized.c_str()) == 0) {
+                const std::wstring icon = ReadClassesString(verbKey, L"Icon");
+                if (!icon.empty()) {
+                    RegCloseKey(key);
+                    return icon;
+                }
+            }
+        }
+        RegCloseKey(key);
     }
     return L"";
 }
@@ -1490,14 +1546,21 @@ void ApplyRegistryIcons(std::vector<MenuItem>& items,
     for (MenuItem& item : items) {
         ApplyRegistryIcons(item.children, signature);
         if (item.action != ActionKind::ShellVerb || !item.iconPixels.empty() ||
-            !item.iconRef.empty() || item.canonicalVerb.empty()) {
+            !item.iconRef.empty()) {
             continue;
         }
-        const std::wstring icon = ResolveRegistryIcon(signature, item.canonicalVerb);
+
+        std::wstring icon = ResolveRegistryIcon(signature, item.canonicalVerb);
+        if (icon.empty()) {
+            icon = ResolveRegistryIconByLabel(signature, item.label);
+        }
         if (!icon.empty()) {
             item.iconRef = icon;
             Wh_Log(L"Registry icon for '%s' (verb '%s'): %s", item.label.c_str(),
                    item.canonicalVerb.c_str(), icon.c_str());
+        } else {
+            Wh_Log(L"No registry icon for '%s' (verb '%s')", item.label.c_str(),
+                   item.canonicalVerb.c_str());
         }
     }
 }
@@ -2824,38 +2887,86 @@ private:
             FillRect(targetDc, &rect, backgroundBrush);
             DeleteObject(backgroundBrush);
 
-            bool hasAlpha = false;
-            for (size_t i = 3; i < pixels.size(); i += 4) {
-                if (pixels[i] != 0 && pixels[i] != 255) {
-                    hasAlpha = true;
-                    break;
+            if (width == sizePx && height == sizePx) {
+                // Composite in software: menus draw bitmaps without alpha, so
+                // transparency has to be resolved here. Zero-alpha pixels keep
+                // the background; when the bitmap has no alpha channel at all,
+                // black is treated as the classic color key.
+                bool allZeroAlpha = true;
+                for (size_t i = 3; i < pixels.size(); i += 4) {
+                    if (pixels[i] != 0) {
+                        allZeroAlpha = false;
+                        break;
+                    }
                 }
-            }
 
-            if (hasAlpha) {
-                // Premultiply for GdiAlphaBlend with AC_SRC_ALPHA.
-                std::vector<uint8_t> premultiplied = pixels;
-                for (size_t i = 0; i < premultiplied.size(); i += 4) {
-                    const uint32_t alpha = premultiplied[i + 3];
-                    premultiplied[i] =
-                        static_cast<uint8_t>(premultiplied[i] * alpha / 255);
-                    premultiplied[i + 1] =
-                        static_cast<uint8_t>(premultiplied[i + 1] * alpha / 255);
-                    premultiplied[i + 2] =
-                        static_cast<uint8_t>(premultiplied[i + 2] * alpha / 255);
+                uint8_t* target = static_cast<uint8_t*>(targetBits);
+                for (int i = 0; i < sizePx * sizePx; ++i) {
+                    const uint8_t blue = pixels[i * 4];
+                    const uint8_t green = pixels[i * 4 + 1];
+                    const uint8_t red = pixels[i * 4 + 2];
+                    const uint8_t alpha = pixels[i * 4 + 3];
+
+                    if (allZeroAlpha) {
+                        if (blue == 0 && green == 0 && red == 0) {
+                            continue;  // color key
+                        }
+                        target[i * 4] = blue;
+                        target[i * 4 + 1] = green;
+                        target[i * 4 + 2] = red;
+                        continue;
+                    }
+                    if (alpha == 0) {
+                        continue;
+                    }
+                    if (alpha == 255) {
+                        target[i * 4] = blue;
+                        target[i * 4 + 1] = green;
+                        target[i * 4 + 2] = red;
+                        continue;
+                    }
+                    const uint32_t inverse = 255 - alpha;
+                    target[i * 4] = static_cast<uint8_t>(
+                        (blue * alpha + target[i * 4] * inverse) / 255);
+                    target[i * 4 + 1] = static_cast<uint8_t>(
+                        (green * alpha + target[i * 4 + 1] * inverse) / 255);
+                    target[i * 4 + 2] = static_cast<uint8_t>(
+                        (red * alpha + target[i * 4 + 2] * inverse) / 255);
                 }
-                memcpy(sourceBits, premultiplied.data(), premultiplied.size());
-
-                BLENDFUNCTION blend = {};
-                blend.BlendOp = AC_SRC_OVER;
-                blend.SourceConstantAlpha = 255;
-                blend.AlphaFormat = AC_SRC_ALPHA;
-                GdiAlphaBlend(targetDc, 0, 0, sizePx, sizePx, sourceDc, 0, 0, width,
-                              height, blend);
             } else {
-                SetStretchBltMode(targetDc, HALFTONE);
-                StretchBlt(targetDc, 0, 0, sizePx, sizePx, sourceDc, 0, 0, width,
-                           height, SRCCOPY);
+                bool hasAlpha = false;
+                for (size_t i = 3; i < pixels.size(); i += 4) {
+                    if (pixels[i] != 0 && pixels[i] != 255) {
+                        hasAlpha = true;
+                        break;
+                    }
+                }
+
+                if (hasAlpha) {
+                    // Premultiply for GdiAlphaBlend with AC_SRC_ALPHA.
+                    std::vector<uint8_t> premultiplied = pixels;
+                    for (size_t i = 0; i < premultiplied.size(); i += 4) {
+                        const uint32_t alpha = premultiplied[i + 3];
+                        premultiplied[i] = static_cast<uint8_t>(
+                            premultiplied[i] * alpha / 255);
+                        premultiplied[i + 1] = static_cast<uint8_t>(
+                            premultiplied[i + 1] * alpha / 255);
+                        premultiplied[i + 2] = static_cast<uint8_t>(
+                            premultiplied[i + 2] * alpha / 255);
+                    }
+                    memcpy(sourceBits, premultiplied.data(), premultiplied.size());
+
+                    BLENDFUNCTION blend = {};
+                    blend.BlendOp = AC_SRC_OVER;
+                    blend.SourceConstantAlpha = 255;
+                    blend.AlphaFormat = AC_SRC_ALPHA;
+                    GdiAlphaBlend(targetDc, 0, 0, sizePx, sizePx, sourceDc, 0, 0,
+                                  width, height, blend);
+                } else {
+                    SetStretchBltMode(targetDc, HALFTONE);
+                    StretchBlt(targetDc, 0, 0, sizePx, sizePx, sourceDc, 0, 0, width,
+                               height, SRCCOPY);
+                }
             }
 
             SelectObject(targetDc, oldTarget);

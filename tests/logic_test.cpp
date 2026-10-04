@@ -952,6 +952,70 @@ int main() {
         }
     }
 
+    // Icons: alpha-less bitmaps treat black as the transparent color key.
+    {
+        std::vector<uint8_t> keyedPixels(16 * 16 * 4, 0);
+        // One red pixel, black everywhere else, alpha all zero.
+        keyedPixels[(5 * 16 + 5) * 4] = 0x00;
+        keyedPixels[(5 * 16 + 5) * 4 + 1] = 0x00;
+        keyedPixels[(5 * 16 + 5) * 4 + 2] = 0xFF;
+        keyedPixels[(5 * 16 + 5) * 4 + 3] = 0x00;
+
+        cmo::MenuItem keyedItem{};
+        keyedItem.iconPixels = keyedPixels;
+        HBITMAP keyedBitmap = cmo::g_iconCache.GetBitmap(keyedItem, 16);
+        CHECK(keyedBitmap != nullptr);
+        if (keyedBitmap) {
+            BITMAPINFO readInfo = {};
+            readInfo.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+            readInfo.bmiHeader.biWidth = 16;
+            readInfo.bmiHeader.biHeight = 16;
+            readInfo.bmiHeader.biPlanes = 1;
+            readInfo.bmiHeader.biBitCount = 32;
+            readInfo.bmiHeader.biCompression = BI_RGB;
+            std::vector<uint8_t> readPixels(16 * 16 * 4);
+            HDC readDc = GetDC(nullptr);
+            const int readLines = GetDIBits(readDc, keyedBitmap, 0, 16,
+                                            readPixels.data(), &readInfo, DIB_RGB_COLORS);
+            ReleaseDC(nullptr, readDc);
+            CHECK(readLines == 16);
+            if (readLines == 16) {
+                // Bottom-up rows: the red pixel is at row 16-1-5.
+                const size_t redIndex = ((16 - 1 - 5) * 16 + 5) * 4;
+                const size_t cornerIndex = 0;
+                CHECK(readPixels[redIndex + 2] > 200);
+                CHECK(readPixels[cornerIndex] != 0 ||
+                      readPixels[cornerIndex + 1] != 0 ||
+                      readPixels[cornerIndex + 2] != 0);
+            }
+        }
+    }
+
+    // Icons: label-based registry lookup finds handlers whose key name
+    // differs from the canonical verb.
+    {
+        HKEY labelKey = nullptr;
+        if (RegCreateKeyExW(HKEY_CURRENT_USER,
+                            L"Software\\Classes\\*\\shell\\cmolabel", 0, nullptr, 0,
+                            KEY_WRITE, nullptr, &labelKey, nullptr) == ERROR_SUCCESS) {
+            const wchar_t muiVerb[] = L"Cmo Label";
+            RegSetValueExW(labelKey, L"MUIVerb", 0, REG_SZ,
+                           reinterpret_cast<const BYTE*>(muiVerb), sizeof(muiVerb));
+            const wchar_t iconValue[] = L"shell32.dll,4";
+            RegSetValueExW(labelKey, L"Icon", 0, REG_SZ,
+                           reinterpret_cast<const BYTE*>(iconValue),
+                           sizeof(iconValue));
+            RegCloseKey(labelKey);
+
+            cmo::ContextSignature labelSig{cmo::Scope::Files, L".cmotest2",
+                                           cmo::Shape::Single, cmo::Variant::Normal};
+            CHECK_EQ(cmo::ResolveRegistryIconByLabel(labelSig, L"Cmo Label"),
+                     std::wstring(L"shell32.dll,4"));
+
+            RegDeleteTreeW(HKEY_CURRENT_USER, L"Software\\Classes\\*\\shell\\cmolabel");
+        }
+    }
+
     // Instant menu open: while the suppressor is active the master menu
     // animation switch is off, and it is restored afterwards. Skipped when
     // the environment does not implement the SPI.

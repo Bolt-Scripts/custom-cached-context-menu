@@ -3167,7 +3167,16 @@ LayoutPanel BuildLayoutPanel(const std::vector<MenuItem>& items,
         }
         y += height;
     }
-    panel.size = {std::max(contentWidth, 80), y + metrics.verticalPadding};
+    int panelWidth = std::max(contentWidth, 80);
+    if (metrics.minWidth > 0) {
+        panelWidth = std::max(panelWidth, metrics.minWidth);
+    }
+    if (metrics.maxWidth > 0) {
+        // maxWidth is a soft cap: never narrower than the widest item.
+        panelWidth =
+            std::min(panelWidth, std::max(metrics.maxWidth, contentWidth));
+    }
+    panel.size = {panelWidth, y + metrics.verticalPadding};
 
     int offset = metrics.verticalPadding;
     for (const MenuItem& item : items) {

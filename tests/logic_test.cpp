@@ -3102,6 +3102,35 @@ int main() {
               panel.items[0].iconRect.left + metrics.iconSize + metrics.padding);
     }
 
+    // v2.1 width clamping: min and max, never below content.
+    {
+        cmo::LayoutMetrics metrics{};
+        metrics.itemHeight = 28;
+        metrics.verticalPadding = 0;
+        metrics.padding = 6;
+        metrics.markerWidth = 14;
+        metrics.iconSize = 16;
+        cmo::MenuItem item{};
+        item.id = 1;
+        item.kind = cmo::ItemKind::Command;
+        item.action = cmo::ActionKind::ShellVerb;
+        item.label = L"Short";
+        std::vector<cmo::MenuItem> items = {item};
+
+        const cmo::LayoutPanel autoPanel = cmo::BuildLayoutPanel(items, metrics);
+        const int contentWidth = autoPanel.size.cx;
+
+        metrics.minWidth = contentWidth + 50;
+        CHECK(cmo::BuildLayoutPanel(items, metrics).size.cx == contentWidth + 50);
+
+        metrics.minWidth = 0;
+        metrics.maxWidth = contentWidth - 20;
+        CHECK(cmo::BuildLayoutPanel(items, metrics).size.cx == contentWidth);
+
+        metrics.maxWidth = contentWidth + 30;
+        CHECK(cmo::BuildLayoutPanel(items, metrics).size.cx == contentWidth);
+    }
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

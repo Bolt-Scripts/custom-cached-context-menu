@@ -2258,6 +2258,115 @@ int ReadSchemaVersion(const std::wstring& text) {
     return 0;
 }
 
+size_t CountSubstring(const std::wstring& text, const std::wstring& needle) {
+    if (needle.empty()) {
+        return 0;
+    }
+    size_t count = 0;
+    size_t pos = 0;
+    while ((pos = text.find(needle, pos)) != std::wstring::npos) {
+        ++count;
+        pos += needle.size();
+    }
+    return count;
+}
+
+// True when the key appears as an assignment anywhere in the text, active or
+// commented out.
+bool SchemaKeyPresent(const std::wstring& text, const std::wstring& key) {
+    size_t pos = 0;
+    while (pos <= text.size()) {
+        const size_t newline = text.find(L'\n', pos);
+        const size_t lineEnd = newline == std::wstring::npos ? text.size() : newline;
+        std::wstring trimmed = TrimWhitespace(text.substr(pos, lineEnd - pos));
+        pos = lineEnd + 1;
+        if (!trimmed.empty() && (trimmed[0] == L';' || trimmed[0] == L'#')) {
+            trimmed = TrimWhitespace(trimmed.substr(1));
+        }
+        if (trimmed.size() <= key.size() ||
+            _wcsnicmp(trimmed.c_str(), key.c_str(), key.size()) != 0) {
+            continue;
+        }
+        const std::wstring rest = TrimWhitespace(trimmed.substr(key.size()));
+        if (!rest.empty() && rest[0] == L'=') {
+            return true;
+        }
+    }
+    return false;
+}
+
+std::wstring AppendMissingSchemaKeys(const std::wstring& text, int toVersion) {
+    if (ReadSchemaVersion(text) >= toVersion) {
+        return text;
+    }
+
+    std::wstring result = text;
+    std::wstring block;
+    for (const ConfigSchemaEntry& entry : kAppearanceSchema) {
+        if (SchemaKeyPresent(text, entry.key)) {
+            continue;
+        }
+        if (block.empty()) {
+            block += L"\n; --- settings added in schema ";
+            block += std::to_wstring(toVersion);
+            block += L" (uncomment to change) ---\n";
+        }
+        block += L"; ";
+        block += entry.description;
+        block += L" (default: ";
+        block += entry.defaultValue;
+        block += L")\n; ";
+        block += entry.key;
+        block += L" = ";
+        block += entry.defaultValue;
+        block += L"\n";
+    }
+    if (!block.empty()) {
+        result += block;
+    }
+
+    // Rewrite only the schemaVersion line under [meta], or add the section.
+    const std::wstring versionLine =
+        L"schemaVersion = " + std::to_wstring(toVersion);
+    bool inMeta = false;
+    bool replaced = false;
+    size_t pos = 0;
+    while (pos <= result.size()) {
+        const size_t newline = result.find(L'\n', pos);
+        const size_t lineEnd = newline == std::wstring::npos ? result.size() : newline;
+        const std::wstring line = result.substr(pos, lineEnd - pos);
+        const std::wstring trimmed = TrimWhitespace(StripInlineComment(line));
+        if (!trimmed.empty() && trimmed[0] == L'[') {
+            if (trimmed.back() == L']') {
+                const std::wstring name = ToLowerCopy(
+                    TrimWhitespace(trimmed.substr(1, trimmed.size() - 2)));
+                inMeta = (name == L"meta");
+            } else {
+                inMeta = false;
+            }
+        } else if (inMeta && !trimmed.empty() && trimmed[0] != L';' &&
+                   trimmed[0] != L'#') {
+            const size_t equals = trimmed.find(L'=');
+            if (equals != std::wstring::npos &&
+                ToLowerCopy(TrimWhitespace(trimmed.substr(0, equals))) ==
+                    L"schemaversion") {
+                const bool hadCr = !line.empty() && line.back() == L'\r';
+                result.replace(pos, lineEnd - pos,
+                               versionLine + (hadCr ? L"\r" : L""));
+                replaced = true;
+                break;
+            }
+        }
+        pos = lineEnd + 1;
+    }
+    if (!replaced) {
+        result += L"\n[meta]\n";
+        result += versionLine;
+        result += L"\n";
+    }
+    return result;
+}
+
 // ===========================================================================
 // [CMO:RulesEngine] v2 predicates and rule matching.
 // ===========================================================================

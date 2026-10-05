@@ -3271,6 +3271,30 @@ int main() {
         CHECK(config.schemaVersion == 1);
     }
 
+    // v2.2 migration: append missing keys only, rewrite only the version.
+    {
+        const std::wstring original =
+            L"; mine\n[appearance]\nitemHeight = 30\n; blur = true\n"
+            L"[meta]\nschemaVersion = 0\n";
+        const std::wstring migrated = cmo::AppendMissingSchemaKeys(original, 1);
+        CHECK(migrated.find(L"itemHeight = 30") != std::wstring::npos);
+        CHECK(migrated.find(L"; blur = true") != std::wstring::npos);
+        CHECK(migrated.find(L"schemaVersion = 1") != std::wstring::npos);
+        CHECK(migrated.find(L"schemaVersion = 0") == std::wstring::npos);
+        CHECK(migrated.find(L"cornerRadius") != std::wstring::npos);
+        CHECK(cmo::CountSubstring(migrated, L"itemHeight") == 1);
+        CHECK(cmo::CountSubstring(migrated, L"blur = true") == 1);
+        CHECK(migrated.rfind(
+                  L"; mine\n[appearance]\nitemHeight = 30\n; blur = true\n", 0) ==
+              0);
+        const std::wstring noMeta = L"[appearance]\nitemHeight = 30\n";
+        const std::wstring added = cmo::AppendMissingSchemaKeys(noMeta, 1);
+        CHECK(added.find(L"[meta]") != std::wstring::npos);
+        CHECK(added.find(L"schemaVersion = 1") != std::wstring::npos);
+        CHECK(cmo::AppendMissingSchemaKeys(L"[meta]\nschemaVersion = 1\n", 1) ==
+              L"[meta]\nschemaVersion = 1\n");
+    }
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

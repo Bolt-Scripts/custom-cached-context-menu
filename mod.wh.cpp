@@ -2,7 +2,7 @@
 // @id              context-menu-overhaul
 // @name            Context Menu Overhaul
 // @description     Replaces the Explorer context menu with an instantly-opening cached menu, then discovers and caches shell extension items asynchronously.
-// @version         0.6.0
+// @version         0.7.0
 // @include         explorer.exe
 // @architecture    x86-64
 // @compilerOptions -lole32 -lshlwapi -luuid -lcomctl32 -ladvapi32 -lgdi32 -luxtheme -lversion -ld3d11 -ld2d1 -ldwrite -ldcomp -ldxgi
@@ -1254,30 +1254,74 @@ std::wstring ToLowerCopy(const std::wstring& text) {
     return lower;
 }
 
+std::wstring FormatColorRgba(uint32_t argb) {
+    return std::to_wstring((argb >> 16) & 0xFF) + L", " +
+           std::to_wstring((argb >> 8) & 0xFF) + L", " +
+           std::to_wstring(argb & 0xFF) + L", " +
+           std::to_wstring((argb >> 24) & 0xFF);
+}
+
+// Accepts "#RRGGBB"/"#AARRGGBB" or readable "R, G, B" / "R, G, B, A" decimals.
 bool ParseColor(const std::wstring& text, uint32_t& argb) {
     const std::wstring trimmed = TrimWhitespace(text);
-    if (trimmed.size() != 7 && trimmed.size() != 9) {
-        return false;
-    }
-    if (trimmed[0] != L'#') {
-        return false;
-    }
-    uint32_t value = 0;
-    for (size_t i = 1; i < trimmed.size(); ++i) {
-        const wchar_t c = trimmed[i];
-        uint32_t digit = 0;
-        if (c >= L'0' && c <= L'9') {
-            digit = static_cast<uint32_t>(c - L'0');
-        } else if (c >= L'a' && c <= L'f') {
-            digit = 10u + static_cast<uint32_t>(c - L'a');
-        } else if (c >= L'A' && c <= L'F') {
-            digit = 10u + static_cast<uint32_t>(c - L'A');
-        } else {
+    if (!trimmed.empty() && trimmed[0] == L'#') {
+        if (trimmed.size() != 7 && trimmed.size() != 9) {
             return false;
         }
-        value = (value << 4) | digit;
+        uint32_t value = 0;
+        for (size_t i = 1; i < trimmed.size(); ++i) {
+            const wchar_t c = trimmed[i];
+            uint32_t digit = 0;
+            if (c >= L'0' && c <= L'9') {
+                digit = static_cast<uint32_t>(c - L'0');
+            } else if (c >= L'a' && c <= L'f') {
+                digit = 10u + static_cast<uint32_t>(c - L'a');
+            } else if (c >= L'A' && c <= L'F') {
+                digit = 10u + static_cast<uint32_t>(c - L'A');
+            } else {
+                return false;
+            }
+            value = (value << 4) | digit;
+        }
+        argb = trimmed.size() == 7 ? (0xFF000000u | value) : value;
+        return true;
     }
-    argb = trimmed.size() == 7 ? (0xFF000000u | value) : value;
+
+    int values[4] = {0, 0, 0, 255};
+    int count = 0;
+    size_t start = 0;
+    while (start <= trimmed.size() && count < 4) {
+        const size_t comma = trimmed.find(L',', start);
+        const std::wstring part = TrimWhitespace(
+            trimmed.substr(start, comma == std::wstring::npos ? std::wstring::npos
+                                                              : comma - start));
+        if (part.empty()) {
+            return false;
+        }
+        wchar_t* end = nullptr;
+        const long parsed = wcstol(part.c_str(), &end, 10);
+        if (end == part.c_str() || *end != L'\0' || parsed < 0 || parsed > 255) {
+            return false;
+        }
+        values[count++] = static_cast<int>(parsed);
+        if (comma == std::wstring::npos) {
+            break;
+        }
+        if (count == 4) {
+            return false;  // a fifth component follows
+        }
+        start = comma + 1;
+    }
+    if (count != 3 && count != 4) {
+        return false;
+    }
+    if (count == 3) {
+        values[3] = 255;
+    }
+    argb = (static_cast<uint32_t>(values[3]) << 24) |
+           (static_cast<uint32_t>(values[0]) << 16) |
+           (static_cast<uint32_t>(values[1]) << 8) |
+           static_cast<uint32_t>(values[2]);
     return true;
 }
 
@@ -1461,6 +1505,7 @@ constexpr int kConfigSchemaVersion = 1;
 struct ConfigSchemaEntry {
     const wchar_t* section;
     const wchar_t* key;
+    const wchar_t* group;
     SettingType type;
     const wchar_t* defaultValue;
     const wchar_t* validValues;  // Enum/IntList values, else nullptr
@@ -1468,81 +1513,81 @@ struct ConfigSchemaEntry {
     int maxValue;                // Int only
     const wchar_t* description;
     int sinceVersion;
+    bool unset;  // the default means "unset"; emitted commented
 };
 
 const ConfigSchemaEntry kAppearanceSchema[] = {
-    {L"appearance", L"background", SettingType::Color, L"#F01E1E1E", nullptr, 0, 0,
-     L"Panel background color (#AARRGGBB); also the blur tint.", 1},
-    {L"appearance", L"blur", SettingType::Bool, L"true", nullptr, 0, 0,
-     L"Blur the screen behind the menu.", 1},
-    {L"appearance", L"blurstrength", SettingType::Int, L"12", nullptr, 0, 64,
-     L"Blur strength.", 1},
-    {L"appearance", L"cornerradius", SettingType::Int, L"8", nullptr, 0, 256,
-     L"Corner radius in pixels.", 1},
-    {L"appearance", L"border", SettingType::Color, L"#22FFFFFF", nullptr, 0, 0,
-     L"Border color.", 1},
-    {L"appearance", L"borderwidth", SettingType::Int, L"1", nullptr, 0, 64,
-     L"Border width in pixels (0 hides it).", 1},
-    {L"appearance", L"shadow", SettingType::Bool, L"true", nullptr, 0, 0,
-     L"Draw the drop shadow.", 1},
-    {L"appearance", L"shadowsize", SettingType::Int, L"12", nullptr, 0, 64,
-     L"Shadow spread in pixels.", 1},
-    {L"appearance", L"font", SettingType::Font, L"Segoe UI, 9", nullptr, 0, 0,
-     L"Text font face and size.", 1},
-    {L"appearance", L"itemheight", SettingType::Int, L"28", nullptr, 1, 256,
-     L"Item height in pixels.", 1},
-    {L"appearance", L"iconsize", SettingType::Int, L"16", nullptr, 1, 256,
-     L"Icon size in pixels.", 1},
-    {L"appearance", L"padding", SettingType::Int, L"6", nullptr, 0, 256,
-     L"Base padding inside the panel.", 1},
-    {L"appearance", L"separator", SettingType::Color, L"#18FFFFFF", nullptr, 0, 0,
-     L"Separator line color.", 1},
-    {L"appearance", L"hoverbackground", SettingType::Color, L"#14FFFFFF", nullptr, 0,
-     0, L"Hovered item background.", 1},
-    {L"appearance", L"pressedbackground", SettingType::Color, L"#22FFFFFF", nullptr,
-     0, 0, L"Pressed item background.", 1},
-    {L"appearance", L"textcolor", SettingType::Color, L"#FFFFFFFF", nullptr, 0, 0,
-     L"Item text color.", 1},
-    {L"appearance", L"disabledtextcolor", SettingType::Color, L"#66FFFFFF", nullptr,
-     0, 0, L"Disabled item text color.", 1},
-    {L"appearance", L"submenuarrow", SettingType::Color, L"#99FFFFFF", nullptr, 0,
-     0, L"Submenu arrow color.", 1},
-    {L"appearance", L"animation", SettingType::Enum, L"none", L"none|fade|slide", 0,
-     0, L"Menu open/close animation.", 1},
-    {L"appearance", L"animationduration", SettingType::Int, L"120", nullptr, 0,
-     10000, L"Animation duration in milliseconds.", 1},
-    {L"appearance", L"verticalpadding", SettingType::Int, L"4", nullptr, 0, 256,
-     L"Padding above and below the items.", 2},
-    {L"appearance", L"minwidth", SettingType::Int, L"0", nullptr, 0, 4096,
-     L"Minimum panel width (0 = automatic).", 2},
-    {L"appearance", L"maxwidth", SettingType::Int, L"0", nullptr, 0, 4096,
-     L"Maximum panel width (0 = unlimited).", 2},
-    {L"appearance", L"itempadding", SettingType::Int, L"6", nullptr, 0, 256,
-     L"Horizontal inset of item content; defaults to padding.", 2},
-    {L"appearance", L"separatorspacing", SettingType::Int, L"0", nullptr, 0, 256,
-     L"Extra space above and below separators.", 2},
-    {L"appearance", L"markerwidth", SettingType::Int, L"14", nullptr, 0, 256,
-     L"Width of the selection marker column.", 2},
-    {L"appearance", L"fontweight", SettingType::Enum, L"normal",
-     L"normal|semibold|bold", 0, 0, L"Text weight.", 2},
-    {L"appearance", L"fontstyle", SettingType::Enum, L"normal", L"normal|italic", 0,
-     0, L"Text style.", 2},
-    {L"appearance", L"cornerradii", SettingType::IntList, L"2, 4, 6, 8",
-     L"tl,tr,br,bl", 0, 0, L"Per-corner radii; overrides cornerRadius.", 2},
-    {L"appearance", L"shadowopacity", SettingType::Int, L"120", nullptr, 0, 255,
-     L"Shadow alpha (0-255).", 2},
-    {L"appearance", L"shadowblur", SettingType::Int, L"12", nullptr, 0, 64,
-     L"Shadow blur radius in pixels.", 2},
-    {L"appearance", L"marker", SettingType::Enum, L"dot", L"dot|check|bar|none", 0,
-     0, L"Selection marker style.", 2},
-    {L"appearance", L"markercolor", SettingType::Color, L"#FFFFFFFF", nullptr, 0, 0,
-     L"Marker color; defaults to textColor.", 2},
-    {L"appearance", L"headercolor", SettingType::Color, L"#66FFFFFF", nullptr, 0, 0,
-     L"Header text color; defaults to disabledTextColor.", 2},
-    {L"appearance", L"showaccelerators", SettingType::Enum, L"underline",
-     L"underline|strip|raw", 0, 0, L"Mnemonic handling.", 2},
+    {L"appearance", L"background", L"Colors", SettingType::Color, L"#F01E1E1E", nullptr, 0, 0,
+     L"Panel background color; also the blur tint.", 1, false},
+    {L"appearance", L"border", L"Colors", SettingType::Color, L"#22FFFFFF", nullptr, 0, 0,
+     L"Border color.", 1, false},
+    {L"appearance", L"separator", L"Colors", SettingType::Color, L"#18FFFFFF", nullptr, 0, 0,
+     L"Separator line color.", 1, false},
+    {L"appearance", L"hoverBackground", L"Colors", SettingType::Color, L"#14FFFFFF", nullptr, 0, 0,
+     L"Hovered item background.", 1, false},
+    {L"appearance", L"pressedBackground", L"Colors", SettingType::Color, L"#22FFFFFF", nullptr, 0, 0,
+     L"Pressed item background.", 1, false},
+    {L"appearance", L"textColor", L"Colors", SettingType::Color, L"#FFFFFFFF", nullptr, 0, 0,
+     L"Item text color.", 1, false},
+    {L"appearance", L"disabledTextColor", L"Colors", SettingType::Color, L"#66FFFFFF", nullptr, 0, 0,
+     L"Disabled item text color.", 1, false},
+    {L"appearance", L"submenuArrow", L"Colors", SettingType::Color, L"#99FFFFFF", nullptr, 0, 0,
+     L"Submenu arrow color.", 1, false},
+    {L"appearance", L"headerColor", L"Colors", SettingType::Color, L"#66FFFFFF", nullptr, 0, 0,
+     L"Header text color; defaults to disabledTextColor.", 1, true},
+    {L"appearance", L"cornerRadius", L"Layout", SettingType::Int, L"8", nullptr, 0, 256,
+     L"Corner radius in pixels.", 1, false},
+    {L"appearance", L"cornerRadii", L"Layout", SettingType::IntList, L"2, 4, 6, 8", L"tl,tr,br,bl", 0, 0,
+     L"Per-corner radii; overrides cornerRadius.", 1, true},
+    {L"appearance", L"borderWidth", L"Layout", SettingType::Int, L"1", nullptr, 0, 64,
+     L"Border width in pixels (0 hides it).", 1, false},
+    {L"appearance", L"padding", L"Layout", SettingType::Int, L"6", nullptr, 0, 256,
+     L"Base padding inside the panel.", 1, false},
+    {L"appearance", L"itemPadding", L"Layout", SettingType::Int, L"6", nullptr, 0, 256,
+     L"Horizontal inset of item content; defaults to padding.", 1, true},
+    {L"appearance", L"verticalPadding", L"Layout", SettingType::Int, L"4", nullptr, 0, 256,
+     L"Padding above and below the items.", 1, false},
+    {L"appearance", L"itemHeight", L"Layout", SettingType::Int, L"28", nullptr, 1, 256,
+     L"Item height in pixels.", 1, false},
+    {L"appearance", L"iconSize", L"Layout", SettingType::Int, L"16", nullptr, 1, 256,
+     L"Icon size in pixels.", 1, false},
+    {L"appearance", L"minWidth", L"Layout", SettingType::Int, L"0", nullptr, 0, 4096,
+     L"Minimum panel width (0 = automatic).", 1, false},
+    {L"appearance", L"maxWidth", L"Layout", SettingType::Int, L"0", nullptr, 0, 4096,
+     L"Maximum panel width (0 = unlimited).", 1, false},
+    {L"appearance", L"separatorSpacing", L"Layout", SettingType::Int, L"0", nullptr, 0, 256,
+     L"Extra space above and below separators.", 1, false},
+    {L"appearance", L"marker", L"Selection marker", SettingType::Enum, L"dot", L"dot|check|bar|none", 0, 0,
+     L"Selection marker style.", 1, false},
+    {L"appearance", L"markerWidth", L"Selection marker", SettingType::Int, L"14", nullptr, 0, 256,
+     L"Width of the selection marker column.", 1, false},
+    {L"appearance", L"markerColor", L"Selection marker", SettingType::Color, L"#FFFFFFFF", nullptr, 0, 0,
+     L"Marker color; defaults to textColor.", 1, true},
+    {L"appearance", L"font", L"Text", SettingType::Font, L"Segoe UI, 9", nullptr, 0, 0,
+     L"Text font face and size.", 1, false},
+    {L"appearance", L"fontWeight", L"Text", SettingType::Enum, L"normal", L"normal|semibold|bold", 0, 0,
+     L"Text weight.", 1, false},
+    {L"appearance", L"fontStyle", L"Text", SettingType::Enum, L"normal", L"normal|italic", 0, 0,
+     L"Text style.", 1, false},
+    {L"appearance", L"showAccelerators", L"Text", SettingType::Enum, L"underline", L"underline|strip|raw", 0, 0,
+     L"Mnemonic handling.", 1, false},
+    {L"appearance", L"shadow", L"Shadow", SettingType::Bool, L"true", nullptr, 0, 0,
+     L"Draw the drop shadow.", 1, false},
+    {L"appearance", L"shadowSize", L"Shadow", SettingType::Int, L"12", nullptr, 0, 64,
+     L"Shadow spread in pixels.", 1, false},
+    {L"appearance", L"shadowOpacity", L"Shadow", SettingType::Int, L"120", nullptr, 0, 255,
+     L"Shadow alpha (0-255).", 1, false},
+    {L"appearance", L"shadowBlur", L"Shadow", SettingType::Int, L"12", nullptr, 0, 64,
+     L"Shadow blur radius in pixels.", 1, false},
+    {L"appearance", L"blur", L"Effects", SettingType::Bool, L"true", nullptr, 0, 0,
+     L"Blur the screen behind the menu.", 1, false},
+    {L"appearance", L"blurStrength", L"Effects", SettingType::Int, L"12", nullptr, 0, 64,
+     L"Blur strength.", 1, false},
+    {L"appearance", L"animation", L"Effects", SettingType::Enum, L"none", L"none|fade|slide", 0, 0,
+     L"Menu open/close animation.", 1, false},
+    {L"appearance", L"animationDuration", L"Effects", SettingType::Int, L"120", nullptr, 0, 10000,
+     L"Animation duration in milliseconds.", 1, false},
 };
-
 const ConfigSchemaEntry* SchemaFind(const std::wstring& key) {
     for (const ConfigSchemaEntry& entry : kAppearanceSchema) {
         if (_wcsicmp(entry.key, key.c_str()) == 0) {
@@ -1577,162 +1622,134 @@ bool ApplyAppearanceValue(Appearance& appearance, const std::wstring& key,
     if (!SchemaHasKey(key)) {
         return false;
     }
-    if (key == L"background") return ParseColor(value, appearance.background);
-    if (key == L"blur") return ParseBool(value, appearance.blur);
-    if (key == L"blurstrength") {
+    const std::wstring normalized = ToLowerCopy(key);
+    if (normalized == L"background") return ParseColor(value, appearance.background);
+    if (normalized == L"blur") return ParseBool(value, appearance.blur);
+    if (normalized == L"blurstrength") {
         return ParseBoundedInt(value, appearance.blurStrength, 0, 64);
     }
-    if (key == L"cornerradius") {
+    if (normalized == L"cornerradius") {
         return ParseBoundedInt(value, appearance.cornerRadius, 0, 256);
     }
-    if (key == L"border") return ParseColor(value, appearance.border);
-    if (key == L"borderwidth") {
+    if (normalized == L"border") return ParseColor(value, appearance.border);
+    if (normalized == L"borderwidth") {
         return ParseBoundedInt(value, appearance.borderWidth, 0, 64);
     }
-    if (key == L"shadow") return ParseBool(value, appearance.shadow);
-    if (key == L"shadowsize") {
+    if (normalized == L"shadow") return ParseBool(value, appearance.shadow);
+    if (normalized == L"shadowsize") {
         return ParseBoundedInt(value, appearance.shadowSize, 0, 64);
     }
-    if (key == L"font") return ParseFont(value, appearance.fontFace, appearance.fontSize);
-    if (key == L"itemheight") {
+    if (normalized == L"font") return ParseFont(value, appearance.fontFace, appearance.fontSize);
+    if (normalized == L"itemheight") {
         return ParseBoundedInt(value, appearance.itemHeight, 1, 256);
     }
-    if (key == L"iconsize") {
+    if (normalized == L"iconsize") {
         return ParseBoundedInt(value, appearance.iconSize, 1, 256);
     }
-    if (key == L"padding") {
+    if (normalized == L"padding") {
         return ParseBoundedInt(value, appearance.padding, 0, 256);
     }
-    if (key == L"separator") return ParseColor(value, appearance.separator);
-    if (key == L"hoverbackground") return ParseColor(value, appearance.hoverBackground);
-    if (key == L"pressedbackground") return ParseColor(value, appearance.pressedBackground);
-    if (key == L"textcolor") return ParseColor(value, appearance.textColor);
-    if (key == L"disabledtextcolor") return ParseColor(value, appearance.disabledTextColor);
-    if (key == L"submenuarrow") return ParseColor(value, appearance.submenuArrow);
-    if (key == L"animation") return ParseAnimationKind(value, appearance.animation);
-    if (key == L"animationduration") {
+    if (normalized == L"separator") return ParseColor(value, appearance.separator);
+    if (normalized == L"hoverbackground") return ParseColor(value, appearance.hoverBackground);
+    if (normalized == L"pressedbackground") return ParseColor(value, appearance.pressedBackground);
+    if (normalized == L"textcolor") return ParseColor(value, appearance.textColor);
+    if (normalized == L"disabledtextcolor") return ParseColor(value, appearance.disabledTextColor);
+    if (normalized == L"submenuarrow") return ParseColor(value, appearance.submenuArrow);
+    if (normalized == L"animation") return ParseAnimationKind(value, appearance.animation);
+    if (normalized == L"animationduration") {
         return ParseBoundedInt(value, appearance.animationDuration, 0, 10000);
     }
-    if (key == L"verticalpadding") {
+    if (normalized == L"verticalpadding") {
         return ParseBoundedInt(value, appearance.verticalPadding, 0, 256);
     }
-    if (key == L"minwidth") {
+    if (normalized == L"minwidth") {
         return ParseBoundedInt(value, appearance.minWidth, 0, 4096);
     }
-    if (key == L"maxwidth") {
+    if (normalized == L"maxwidth") {
         return ParseBoundedInt(value, appearance.maxWidth, 0, 4096);
     }
-    if (key == L"itempadding") {
+    if (normalized == L"itempadding") {
         return ParseBoundedInt(value, appearance.itemPadding, 0, 256);
     }
-    if (key == L"separatorspacing") {
+    if (normalized == L"separatorspacing") {
         return ParseBoundedInt(value, appearance.separatorSpacing, 0, 256);
     }
-    if (key == L"markerwidth") {
+    if (normalized == L"markerwidth") {
         return ParseBoundedInt(value, appearance.markerWidth, 0, 256);
     }
-    if (key == L"fontweight") {
+    if (normalized == L"fontweight") {
         return ParseFontWeight(value, appearance.fontWeight);
     }
-    if (key == L"fontstyle") {
+    if (normalized == L"fontstyle") {
         return ParseFontStyle(value, appearance.fontStyle);
     }
-    if (key == L"cornerradii") {
+    if (normalized == L"cornerradii") {
         if (!ParseCornerRadii(value, appearance.cornerRadii)) {
             return false;
         }
         appearance.hasCornerRadii = true;
         return true;
     }
-    if (key == L"shadowopacity") {
+    if (normalized == L"shadowopacity") {
         return ParseBoundedInt(value, appearance.shadowOpacity, 0, 255);
     }
-    if (key == L"shadowblur") {
+    if (normalized == L"shadowblur") {
         return ParseBoundedInt(value, appearance.shadowBlur, 0, 64);
     }
-    if (key == L"marker") {
+    if (normalized == L"marker") {
         return ParseMarkerStyle(value, appearance.marker);
     }
-    if (key == L"markercolor") {
+    if (normalized == L"markercolor") {
         if (!ParseColor(value, appearance.markerColor)) {
             return false;
         }
         appearance.hasMarkerColor = true;
         return true;
     }
-    if (key == L"headercolor") {
+    if (normalized == L"headercolor") {
         if (!ParseColor(value, appearance.headerColor)) {
             return false;
         }
         appearance.hasHeaderColor = true;
         return true;
     }
-    if (key == L"showaccelerators") {
+    if (normalized == L"showaccelerators") {
         return ParseAcceleratorMode(value, appearance.acceleratorMode);
     }
     return false;
 }
 
+std::wstring CanonicalizeConfig(const std::wstring& text, int toVersion);
+
 std::wstring GenerateDefaultConfigText() {
-    std::wstring text;
-    text += L"; Context Menu Overhaul configuration (schema ";
-    text += std::to_wstring(kConfigSchemaVersion);
-    text += L")\n";
-    text += L"; UTF-8. Reloaded when a menu opens. Comments start with ';' or '#'.\n";
-    text += L"; Errors are logged as menu.ini:<line>: <message>; the last good\n";
-    text += L"; configuration stays in effect. Uncomment a line to override its default.\n";
-    text += L"\n";
-
-    const wchar_t* kSections[] = {L"appearance", L"appearance.light",
-                                  L"appearance.dark"};
-    for (const wchar_t* section : kSections) {
-        text += L"[";
-        text += section;
-        text += L"]\n";
-        if (wcscmp(section, L"appearance") != 0) {
-            text += L"; Overrides for this theme; keys not listed use [appearance].\n";
-        }
-        for (const ConfigSchemaEntry& entry : kAppearanceSchema) {
-            if (wcscmp(entry.section, L"appearance") != 0) {
-                continue;
-            }
-            text += L"; ";
-            text += entry.description;
-            text += L" (default: ";
-            text += entry.defaultValue;
-            text += L")\n; ";
-            text += entry.key;
-            text += L" = ";
-            text += entry.defaultValue;
-            text += L"\n";
-        }
-        text += L"\n";
+    std::wstring text = CanonicalizeConfig(L"", kConfigSchemaVersion);
+    const std::wstring examples =
+        L"\n; --- Examples (see docs/CONFIG.md) ---\n"
+        L"; [rules]\n"
+        L"; hide = label:\"Cast to Device\"\n"
+        L"; keep = label:Share\n"
+        L"; move = thirdParty -> \"More options\"\n"
+        L";\n"
+        L"; [command \"Open in VS Code\"]\n"
+        L"; command = code.exe \"%1\"\n"
+        L"; workingDir = %dir%\n"
+        L"; match.ext = .cs, .cpp\n"
+        L"; menu = Tools\n"
+        L";\n"
+        L"; [submenu \"Tools\"]\n"
+        L"; icon = @glyph:E712\n"
+        L"; position = top\n"
+        L";\n"
+        L"; [item \"TortoiseSVN*\"]\n"
+        L"; label = SVN\n"
+        L"; icon = C:\\Tools\\svn.ico,0\n"
+        L"; marker = bar\n";
+    const size_t metaPos = text.rfind(L"\n[meta]\n");
+    if (metaPos != std::wstring::npos) {
+        text.insert(metaPos, examples);
+    } else {
+        text += examples;
     }
-
-    text += L"[rules]\n"
-            L"; hide = label:\"Cast to Device\"\n"
-            L"; keep = label:Share\n"
-            L"; move = thirdParty -> \"More options\"\n"
-            L"\n"
-            L"; [command \"Open in VS Code\"]\n"
-            L"; command = code.exe \"%1\"\n"
-            L"; workingDir = %dir%\n"
-            L"; match.ext = .cs, .cpp\n"
-            L"; menu = Tools\n"
-            L"\n"
-            L"; [submenu \"Tools\"]\n"
-            L"; icon = @glyph:E712\n"
-            L"; position = top\n"
-            L"\n"
-            L"; [item \"TortoiseSVN*\"]\n"
-            L"; label = SVN\n"
-            L"; icon = C:\\Tools\\svn.ico,0\n"
-            L"; marker = bar\n"
-            L"\n"
-            L"[meta]\n"
-            L"schemaVersion = ";
-    text += std::to_wstring(kConfigSchemaVersion);
-    text += L"\n";
     return text;
 }
 
@@ -2271,118 +2288,181 @@ size_t CountSubstring(const std::wstring& text, const std::wstring& needle) {
     return count;
 }
 
-// True when the key appears as an assignment anywhere in the text, active or
-// commented out.
-bool SchemaKeyPresent(const std::wstring& text, const std::wstring& key) {
+std::wstring NormalizeAppearanceValue(const ConfigSchemaEntry& entry,
+                                      const std::wstring& value) {
+    if (entry.type == SettingType::Color) {
+        uint32_t argb = 0;
+        if (ParseColor(value, argb)) {
+            return FormatColorRgba(argb);
+        }
+    }
+    return value;
+}
+
+struct CanonicalSource {
+    std::unordered_map<std::wstring, std::wstring> baseValues;
+    std::unordered_map<std::wstring, std::wstring> lightValues;
+    std::unordered_map<std::wstring, std::wstring> darkValues;
+    std::vector<std::wstring> preservedBlocks;
+};
+
+CanonicalSource SplitConfigForCanonical(const std::wstring& text) {
+    CanonicalSource out;
+    std::wstring currentSection;
+    std::wstring currentBlock;
+
+    auto flush = [&]() {
+        if (currentSection.empty()) {
+            return;
+        }
+        const std::wstring lower = ToLowerCopy(currentSection);
+        if (lower == L"appearance" || lower == L"appearance.light" ||
+            lower == L"appearance.dark") {
+            std::unordered_map<std::wstring, std::wstring>* values =
+                lower == L"appearance"        ? &out.baseValues
+                : lower == L"appearance.light" ? &out.lightValues
+                                               : &out.darkValues;
+            size_t pos = 0;
+            while (pos <= currentBlock.size()) {
+                const size_t newline = currentBlock.find(L'\n', pos);
+                const size_t lineEnd = newline == std::wstring::npos
+                                           ? currentBlock.size()
+                                           : newline;
+                const std::wstring line = currentBlock.substr(pos, lineEnd - pos);
+                pos = lineEnd + 1;
+                const std::wstring trimmed = TrimWhitespace(StripInlineComment(line));
+                if (trimmed.empty() || trimmed[0] == L';' || trimmed[0] == L'#') {
+                    continue;
+                }
+                const size_t equals = trimmed.find(L'=');
+                if (equals == std::wstring::npos) {
+                    continue;
+                }
+                (*values)[ToLowerCopy(TrimWhitespace(trimmed.substr(0, equals)))] =
+                    TrimWhitespace(trimmed.substr(equals + 1));
+            }
+        } else if (lower != L"meta") {
+            out.preservedBlocks.push_back(currentBlock);
+        }
+        currentSection.clear();
+        currentBlock.clear();
+    };
+
     size_t pos = 0;
     while (pos <= text.size()) {
         const size_t newline = text.find(L'\n', pos);
         const size_t lineEnd = newline == std::wstring::npos ? text.size() : newline;
-        std::wstring trimmed = TrimWhitespace(text.substr(pos, lineEnd - pos));
+        std::wstring line = text.substr(pos, lineEnd - pos);
         pos = lineEnd + 1;
-        if (!trimmed.empty() && (trimmed[0] == L';' || trimmed[0] == L'#')) {
-            trimmed = TrimWhitespace(trimmed.substr(1));
+        if (!line.empty() && line.back() == L'\r') {
+            line.pop_back();
         }
-        if (trimmed.size() <= key.size() ||
-            _wcsnicmp(trimmed.c_str(), key.c_str(), key.size()) != 0) {
-            continue;
-        }
-        const std::wstring rest = TrimWhitespace(trimmed.substr(key.size()));
-        if (!rest.empty() && rest[0] == L'=') {
-            return true;
-        }
-    }
-    return false;
-}
-
-std::wstring AppendMissingSchemaKeys(const std::wstring& text, int toVersion) {
-    if (ReadSchemaVersion(text) >= toVersion) {
-        return text;
-    }
-
-    std::wstring result = text;
-    std::wstring block;
-    std::wstring lastSection;
-    for (const ConfigSchemaEntry& entry : kAppearanceSchema) {
-        if (SchemaKeyPresent(text, entry.key)) {
-            continue;
-        }
-        if (block.empty()) {
-            block += L"\n; --- settings added in schema ";
-            block += std::to_wstring(toVersion);
-            block += L" (uncomment to change) ---\n";
-        }
-        if (lastSection != entry.section) {
-            block += L"\n[";
-            block += entry.section;
-            block += L"]\n";
-            lastSection = entry.section;
-        }
-        block += L"; ";
-        block += entry.description;
-        block += L" (default: ";
-        block += entry.defaultValue;
-        block += L")\n; ";
-        block += entry.key;
-        block += L" = ";
-        block += entry.defaultValue;
-        block += L"\n";
-    }
-    if (!block.empty()) {
-        result += block;
-    }
-
-    // Rewrite only the schemaVersion line under [meta], or add the section.
-    const std::wstring versionLine =
-        L"schemaVersion = " + std::to_wstring(toVersion);
-    bool inMeta = false;
-    bool replaced = false;
-    size_t metaInsertPos = std::wstring::npos;
-    size_t pos = 0;
-    while (pos <= result.size()) {
-        const size_t newline = result.find(L'\n', pos);
-        const size_t lineEnd = newline == std::wstring::npos ? result.size() : newline;
-        const std::wstring line = result.substr(pos, lineEnd - pos);
         const std::wstring trimmed = TrimWhitespace(StripInlineComment(line));
         if (!trimmed.empty() && trimmed[0] == L'[') {
+            flush();
             if (trimmed.back() == L']') {
-                const std::wstring name = ToLowerCopy(
-                    TrimWhitespace(trimmed.substr(1, trimmed.size() - 2)));
-                inMeta = (name == L"meta");
-                if (inMeta) {
-                    metaInsertPos = lineEnd + 1;
-                }
-            } else {
-                inMeta = false;
+                currentSection =
+                    TrimWhitespace(trimmed.substr(1, trimmed.size() - 2));
+                currentBlock = line + L"\n";
             }
-        } else if (inMeta && !trimmed.empty() && trimmed[0] != L';' &&
-                   trimmed[0] != L'#') {
-            const size_t equals = trimmed.find(L'=');
-            if (equals != std::wstring::npos &&
-                ToLowerCopy(TrimWhitespace(trimmed.substr(0, equals))) ==
-                    L"schemaversion") {
-                const bool hadCr = !line.empty() && line.back() == L'\r';
-                result.replace(pos, lineEnd - pos,
-                               versionLine + (hadCr ? L"\r" : L""));
-                replaced = true;
+            continue;
+        }
+        if (!currentSection.empty()) {
+            currentBlock += line + L"\n";
+        }
+    }
+    flush();
+    return out;
+}
+
+// Rewrites the file into the canonical layout: one [appearance] section with
+// grouped active settings, theme overrides only when set, structured blocks
+// preserved, and a fresh [meta] version.
+std::wstring CanonicalizeConfig(const std::wstring& text, int toVersion) {
+    const CanonicalSource source = SplitConfigForCanonical(text);
+
+    std::wstring out;
+    out += L"; Context Menu Overhaul configuration (schema ";
+    out += std::to_wstring(toVersion);
+    out += L")\n";
+    out += L"; UTF-8. Reloaded when a menu opens. Settings are active; edit the values.\n";
+    out += L"; Colors are R, G, B, A (0-255 each; A optional). ';' starts a comment.\n";
+    out += L"; Errors are logged as menu.ini:<line>: <message>; the last good config stays.\n";
+    out += L"; Updates rewrite this file in this layout and keep your values. Theme overrides\n";
+    out += L"; live in [appearance.light] / [appearance.dark] (see docs/CONFIG.md).\n";
+    out += L"\n[appearance]\n";
+
+    std::wstring lastGroup;
+    for (const ConfigSchemaEntry& entry : kAppearanceSchema) {
+        if (wcscmp(entry.section, L"appearance") != 0) {
+            continue;
+        }
+        if (lastGroup != entry.group) {
+            out += L"\n; --- ";
+            out += entry.group;
+            out += L" ---\n";
+            lastGroup = entry.group;
+        }
+        const auto it = source.baseValues.find(entry.key);
+        const bool hasValue = it != source.baseValues.end();
+        if (entry.unset && !hasValue) {
+            out += L"; ";
+            out += entry.key;
+            out += L" = ";
+            out += entry.defaultValue;
+            out += L"   ; ";
+            out += entry.description;
+            out += L"\n";
+            continue;
+        }
+        out += entry.key;
+        out += L" = ";
+        out += NormalizeAppearanceValue(
+            entry, hasValue ? it->second : std::wstring(entry.defaultValue));
+        out += L"\n";
+    }
+
+    auto emitTheme = [&](const wchar_t* section,
+                         const std::unordered_map<std::wstring, std::wstring>& values) {
+        bool any = false;
+        for (const ConfigSchemaEntry& entry : kAppearanceSchema) {
+            if (values.count(entry.key) != 0) {
+                any = true;
                 break;
             }
         }
-        pos = lineEnd + 1;
-    }
-    if (!replaced) {
-        if (metaInsertPos != std::wstring::npos) {
-            result.insert(metaInsertPos, versionLine + L"\n");
-        } else {
-            result += L"\n[meta]\n";
-            result += versionLine;
-            result += L"\n";
+        if (!any) {
+            return;
         }
+        out += L"\n[";
+        out += section;
+        out += L"]\n";
+        for (const ConfigSchemaEntry& entry : kAppearanceSchema) {
+            const auto it = values.find(entry.key);
+            if (it == values.end()) {
+                continue;
+            }
+            out += entry.key;
+            out += L" = ";
+            out += NormalizeAppearanceValue(entry, it->second);
+            out += L"\n";
+        }
+    };
+    emitTheme(L"appearance.light", source.lightValues);
+    emitTheme(L"appearance.dark", source.darkValues);
+
+    for (const std::wstring& block : source.preservedBlocks) {
+        out += L"\n";
+        out += block;
     }
-    return result;
+    out += L"\n[meta]\nschemaVersion = ";
+    out += std::to_wstring(toVersion);
+    out += L"\n";
+    return out;
 }
 
 // ===========================================================================
+// [CMO:RulesEngine]// ===========================================================================
 // [CMO:RulesEngine] v2 predicates and rule matching.
 // ===========================================================================
 
@@ -3225,7 +3305,7 @@ private:
         }
         if (ReadSchemaVersion(text) < kConfigSchemaVersion) {
             const std::wstring migrated =
-                AppendMissingSchemaKeys(text, kConfigSchemaVersion);
+                CanonicalizeConfig(text, kConfigSchemaVersion);
             WriteConfigFile(path, migrated);
         }
     }

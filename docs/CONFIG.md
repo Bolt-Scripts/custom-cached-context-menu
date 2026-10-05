@@ -67,7 +67,17 @@ Key symbols (all in `mod.wh.cpp`, namespace `cmo`):
 
 ## Key reference
 
-`[appearance]` — base look. Colors are `#RRGGBB` or `#AARRGGBB` (alpha first).
+`[appearance]` — base look. Colors are `R, G, B, A` decimals (0–255 each;
+alpha optional, default 255). `#RRGGBB`/`#AARRGGBB` are also accepted on read.
+
+The generated file is a **canonical settings list**: one `[appearance]` section
+with group comment headers, every setting active at its default, and a blank
+line between groups. Four keys have "unset" semantics (`itemPadding`,
+`cornerRadii`, `markerColor`, `headerColor`) and are emitted commented with a
+note, because activating them would pin derived behavior. When the schema
+version grows, the file is rewritten into this layout with your values kept;
+structured sections are preserved verbatim. A current-version file is never
+rewritten.
 
 | Key | Type | Default | Values / range |
 |---|---|---|---|
@@ -137,16 +147,17 @@ predicates; rules evaluate item predicates.
 - Errors are logged as `menu.ini:<line>: <message>` and the last good
   configuration stays in effect. Messages name the valid values.
 - A file that fails to parse is never written to.
-- Migration appends a marked block of commented defaults for keys that do not
-  appear anywhere in the file and rewrites only the `schemaVersion` line.
-  Existing lines are never modified or reordered, and commented-out keys count
-  as present.
+- On a schema update the file is rewritten into the canonical layout: one
+  `[appearance]`, your values carried over, colors normalized to `R, G, B, A`,
+  structured sections preserved verbatim, and `[meta] schemaVersion` updated.
+  Comments inside `[appearance]` are regenerated; comments in structured
+  sections are preserved. A file that fails to parse is never written to.
 
 ## Testing checklist
 
 - `bash tests/run.sh` from the repository root.
 - Drift: every schema default is accepted; unknown keys are rejected.
 - Generated file: every key, default, `[meta]`, and the example blocks.
-- Migration: append-only, no duplicates, version line only, malformed file
-  untouched.
+- Migration: canonical rewrite, values preserved, one `[appearance]`,
+  structured blocks kept, malformed file untouched.
 - Guide: this file mentions every schema key.

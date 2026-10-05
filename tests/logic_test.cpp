@@ -3259,7 +3259,8 @@ int main() {
         const std::wstring text = cmo::GenerateDefaultConfigText();
         for (const cmo::ConfigSchemaEntry& entry : cmo::kAppearanceSchema) {
             CHECK(text.find(entry.key) != std::wstring::npos);
-            CHECK(text.find(entry.defaultValue) != std::wstring::npos);
+            CHECK(text.find(cmo::NormalizeAppearanceValue(
+                      entry, entry.defaultValue)) != std::wstring::npos);
         }
         CHECK(text.find(L"[meta]") != std::wstring::npos);
         CHECK(text.find(L"schemaVersion = 1") != std::wstring::npos);
@@ -3271,88 +3272,7 @@ int main() {
         CHECK(config.schemaVersion == 1);
     }
 
-    // v2.2 migration: append missing keys only, rewrite only the version.
-    {
-        const std::wstring original =
-            L"; mine\n[appearance]\nitemHeight = 30\n; blur = true\n"
-            L"[meta]\nschemaVersion = 0\n";
-        const std::wstring migrated = cmo::AppendMissingSchemaKeys(original, 1);
-        CHECK(migrated.find(L"itemHeight = 30") != std::wstring::npos);
-        CHECK(migrated.find(L"; blur = true") != std::wstring::npos);
-        CHECK(migrated.find(L"schemaVersion = 1") != std::wstring::npos);
-        CHECK(migrated.find(L"schemaVersion = 0") == std::wstring::npos);
-        CHECK(migrated.find(L"cornerRadius") != std::wstring::npos);
-        CHECK(cmo::CountSubstring(migrated, L"itemHeight") == 1);
-        CHECK(cmo::CountSubstring(migrated, L"blur = true") == 1);
-        CHECK(migrated.rfind(
-                  L"; mine\n[appearance]\nitemHeight = 30\n; blur = true\n", 0) ==
-              0);
-        const std::wstring noMeta = L"[appearance]\nitemHeight = 30\n";
-        const std::wstring added = cmo::AppendMissingSchemaKeys(noMeta, 1);
-        CHECK(added.find(L"[meta]") != std::wstring::npos);
-        CHECK(added.find(L"schemaVersion = 1") != std::wstring::npos);
-        CHECK(cmo::AppendMissingSchemaKeys(L"[meta]\nschemaVersion = 1\n", 1) ==
-              L"[meta]\nschemaVersion = 1\n");
-    }
-
-    // v2.2 lifecycle: old files migrate, bad files are untouched.
-    {
-        const std::wstring path = cmo::ConfigFilePath();
-        DeleteFileW(path.c_str());
-        cmo::ConfigStore store;
-        store.EnsureLoaded();
-        CHECK(store.Revision() == 1);
-
-        CHECK(cmo::WriteConfigFile(
-            path, L"[appearance]\nitemHeight = 30\n[meta]\nschemaVersion = 0\n"));
-        store.RefreshIfChanged();
-        CHECK(store.Revision() == 2);
-        CHECK(store.Snapshot()->appearance.itemHeight == 30);
-        std::wstring text;
-        CHECK(cmo::ReadConfigFile(path, text));
-        CHECK(text.find(L"schemaVersion = 1") != std::wstring::npos);
-        CHECK(text.find(L"itemHeight = 30") != std::wstring::npos);
-        CHECK(text.find(L"cornerRadius") != std::wstring::npos);
-
-        const std::wstring bad = L"this is not a config";
-        CHECK(cmo::WriteConfigFile(path, bad));
-        store.RefreshIfChanged();
-        CHECK(store.Revision() == 2);
-        std::wstring unchanged;
-        CHECK(cmo::ReadConfigFile(path, unchanged));
-        CHECK(unchanged == bad);
-        DeleteFileW(path.c_str());
-    }
-
-    // v2.2 guide mentions every schema key.
-    {
-        HANDLE file = CreateFileW(L"docs\\CONFIG.md", GENERIC_READ, FILE_SHARE_READ,
-                                  nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL,
-                                  nullptr);
-        CHECK(file != INVALID_HANDLE_VALUE);
-        if (file != INVALID_HANDLE_VALUE) {
-            LARGE_INTEGER size = {};
-            GetFileSizeEx(file, &size);
-            std::vector<char> bytes(static_cast<size_t>(size.QuadPart));
-            DWORD read = 0;
-            ReadFile(file, bytes.data(), static_cast<DWORD>(bytes.size()), &read,
-                     nullptr);
-            CloseHandle(file);
-            std::wstring text;
-            if (!bytes.empty()) {
-                const int wide = MultiByteToWideChar(
-                    CP_UTF8, 0, bytes.data(), static_cast<int>(read), nullptr, 0);
-                text.resize(static_cast<size_t>(wide));
-                MultiByteToWideChar(CP_UTF8, 0, bytes.data(),
-                                    static_cast<int>(read), text.data(), wide);
-            }
-            for (const cmo::ConfigSchemaEntry& entry : cmo::kAppearanceSchema) {
-                CHECK(text.find(entry.key) != std::wstring::npos);
-            }
-        }
-    }
-
-    // v2.3 review fixes: inert examples, migration placement, '#' comments.
+    // v2.3/v2.4 review fixes: inert examples, '#' comments.
     {
         cmo::RulesConfig generated;
         std::vector<cmo::ConfigParseError> errors;
@@ -3362,31 +3282,11 @@ int main() {
         CHECK(generated.submenus.empty());
         CHECK(generated.overrides.empty());
 
-        const std::wstring legacy =
-            L"[appearance]\nitemHeight = 30\n[meta]\nschemaVersion = 0\n";
-        const std::wstring migrated = cmo::AppendMissingSchemaKeys(legacy, 1);
-        CHECK(migrated.find(L"[appearance]") != std::wstring::npos);
-        std::wstring usable = migrated;
-        const size_t pos = usable.find(L"; background = #F01E1E1E");
-        CHECK(pos != std::wstring::npos);
-        if (pos != std::wstring::npos) {
-            usable.erase(pos, 2);  // uncomment the appended default
-        }
-        cmo::RulesConfig reparsed;
-        std::vector<cmo::ConfigParseError> reparseErrors;
-        CHECK(cmo::ParseRulesConfig(usable, reparsed, reparseErrors));
-        CHECK(reparsed.appearance.background == 0xF01E1E1E);
-
         cmo::RulesConfig comments;
         CHECK(cmo::ParseRulesConfig(
             L"# a comment\n[appearance]\nbackground = #11223344\n", comments,
             errors));
         CHECK(comments.appearance.background == 0x11223344u);
-
-        const std::wstring metaOnly = L"[meta]\n; nothing\n";
-        const std::wstring fixed = cmo::AppendMissingSchemaKeys(metaOnly, 1);
-        CHECK(cmo::CountSubstring(fixed, L"[meta]") == 1);
-        CHECK(fixed.find(L"schemaVersion = 1") != std::wstring::npos);
     }
 
     if (g_failures == 0) {

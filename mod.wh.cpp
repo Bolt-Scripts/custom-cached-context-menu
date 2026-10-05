@@ -1414,6 +1414,11 @@ bool ParseAcceleratorMode(const std::wstring& text, AcceleratorMode& mode) {
     return false;
 }
 
+bool ParseBoundedInt(const std::wstring& text, int& value, int minValue,
+                     int maxValue) {
+    return ParseIntValue(text, value) && value >= minValue && value <= maxValue;
+}
+
 bool ParseCornerRadii(const std::wstring& value, CornerRadii& radii) {
     int values[4] = {};
     size_t start = 0;
@@ -1423,7 +1428,8 @@ bool ParseCornerRadii(const std::wstring& value, CornerRadii& radii) {
         const std::wstring part = TrimWhitespace(
             value.substr(start, comma == std::wstring::npos ? std::wstring::npos
                                                             : comma - start));
-        if (part.empty() || !ParseIntValue(part, values[count]) || values[count] < 0) {
+        if (part.empty() ||
+            !ParseBoundedInt(part, values[count], 0, 256)) {
             return false;
         }
         ++count;
@@ -1452,28 +1458,28 @@ bool ApplyAppearanceValue(Appearance& appearance, const std::wstring& key,
     if (key == L"background") return ParseColor(value, appearance.background);
     if (key == L"blur") return ParseBool(value, appearance.blur);
     if (key == L"blurstrength") {
-        return ParseIntValue(value, appearance.blurStrength) && appearance.blurStrength >= 0;
+        return ParseBoundedInt(value, appearance.blurStrength, 0, 64);
     }
     if (key == L"cornerradius") {
-        return ParseIntValue(value, appearance.cornerRadius) && appearance.cornerRadius >= 0;
+        return ParseBoundedInt(value, appearance.cornerRadius, 0, 256);
     }
     if (key == L"border") return ParseColor(value, appearance.border);
     if (key == L"borderwidth") {
-        return ParseIntValue(value, appearance.borderWidth) && appearance.borderWidth >= 0;
+        return ParseBoundedInt(value, appearance.borderWidth, 0, 64);
     }
     if (key == L"shadow") return ParseBool(value, appearance.shadow);
     if (key == L"shadowsize") {
-        return ParseIntValue(value, appearance.shadowSize) && appearance.shadowSize >= 0;
+        return ParseBoundedInt(value, appearance.shadowSize, 0, 64);
     }
     if (key == L"font") return ParseFont(value, appearance.fontFace, appearance.fontSize);
     if (key == L"itemheight") {
-        return ParseIntValue(value, appearance.itemHeight) && appearance.itemHeight > 0;
+        return ParseBoundedInt(value, appearance.itemHeight, 1, 256);
     }
     if (key == L"iconsize") {
-        return ParseIntValue(value, appearance.iconSize) && appearance.iconSize > 0;
+        return ParseBoundedInt(value, appearance.iconSize, 1, 256);
     }
     if (key == L"padding") {
-        return ParseIntValue(value, appearance.padding) && appearance.padding >= 0;
+        return ParseBoundedInt(value, appearance.padding, 0, 256);
     }
     if (key == L"separator") return ParseColor(value, appearance.separator);
     if (key == L"hoverbackground") return ParseColor(value, appearance.hoverBackground);
@@ -1483,30 +1489,25 @@ bool ApplyAppearanceValue(Appearance& appearance, const std::wstring& key,
     if (key == L"submenuarrow") return ParseColor(value, appearance.submenuArrow);
     if (key == L"animation") return ParseAnimationKind(value, appearance.animation);
     if (key == L"animationduration") {
-        return ParseIntValue(value, appearance.animationDuration) &&
-               appearance.animationDuration >= 0;
+        return ParseBoundedInt(value, appearance.animationDuration, 0, 10000);
     }
     if (key == L"verticalpadding") {
-        return ParseIntValue(value, appearance.verticalPadding) &&
-               appearance.verticalPadding >= 0;
+        return ParseBoundedInt(value, appearance.verticalPadding, 0, 256);
     }
     if (key == L"minwidth") {
-        return ParseIntValue(value, appearance.minWidth) && appearance.minWidth >= 0;
+        return ParseBoundedInt(value, appearance.minWidth, 0, 4096);
     }
     if (key == L"maxwidth") {
-        return ParseIntValue(value, appearance.maxWidth) && appearance.maxWidth >= 0;
+        return ParseBoundedInt(value, appearance.maxWidth, 0, 4096);
     }
     if (key == L"itempadding") {
-        return ParseIntValue(value, appearance.itemPadding) &&
-               appearance.itemPadding >= 0;
+        return ParseBoundedInt(value, appearance.itemPadding, 0, 256);
     }
     if (key == L"separatorspacing") {
-        return ParseIntValue(value, appearance.separatorSpacing) &&
-               appearance.separatorSpacing >= 0;
+        return ParseBoundedInt(value, appearance.separatorSpacing, 0, 256);
     }
     if (key == L"markerwidth") {
-        return ParseIntValue(value, appearance.markerWidth) &&
-               appearance.markerWidth >= 0;
+        return ParseBoundedInt(value, appearance.markerWidth, 0, 256);
     }
     if (key == L"fontweight") {
         return ParseFontWeight(value, appearance.fontWeight);
@@ -1522,12 +1523,10 @@ bool ApplyAppearanceValue(Appearance& appearance, const std::wstring& key,
         return true;
     }
     if (key == L"shadowopacity") {
-        return ParseIntValue(value, appearance.shadowOpacity) &&
-               appearance.shadowOpacity >= 0 && appearance.shadowOpacity <= 255;
+        return ParseBoundedInt(value, appearance.shadowOpacity, 0, 255);
     }
     if (key == L"shadowblur") {
-        return ParseIntValue(value, appearance.shadowBlur) &&
-               appearance.shadowBlur >= 0;
+        return ParseBoundedInt(value, appearance.shadowBlur, 0, 64);
     }
     if (key == L"marker") {
         return ParseMarkerStyle(value, appearance.marker);
@@ -2817,6 +2816,8 @@ public:
         std::wstring text;
         if (ReadConfigFile(path, text)) {
             ApplyText(text);
+        } else if (GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES) {
+            Wh_Log(L"menu.ini: unable to read or decode the file");
         }
         UpdateStamp(path);
     }
@@ -2848,6 +2849,8 @@ public:
         std::wstring text;
         if (ReadConfigFile(path, text)) {
             ApplyText(text);
+        } else if (GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES) {
+            Wh_Log(L"menu.ini: unable to read or decode the file");
         }
     }
 
@@ -2987,6 +2990,22 @@ struct LayoutMetrics {
     uint32_t headerColor = 0x66FFFFFF;
     AcceleratorMode acceleratorMode = AcceleratorMode::Underline;
 };
+
+DWRITE_FONT_WEIGHT FontWeightToDwrite(FontWeightKind weight) {
+    switch (weight) {
+        case FontWeightKind::Semibold:
+            return DWRITE_FONT_WEIGHT_SEMI_BOLD;
+        case FontWeightKind::Bold:
+            return DWRITE_FONT_WEIGHT_BOLD;
+        default:
+            return DWRITE_FONT_WEIGHT_NORMAL;
+    }
+}
+
+DWRITE_FONT_STYLE FontStyleToDwrite(FontStyleKind style) {
+    return style == FontStyleKind::Italic ? DWRITE_FONT_STYLE_ITALIC
+                                          : DWRITE_FONT_STYLE_NORMAL;
+}
 
 LayoutMetrics ResolveLayoutMetrics(const Appearance& appearance, uint32_t dpi,
                                    bool darkTheme) {
@@ -3141,7 +3160,7 @@ LayoutPanel BuildLayoutPanel(const std::vector<MenuItem>& items,
                              const LayoutMetrics& metrics,
                              TextMeasureFn measure = nullptr) {
     LayoutPanel panel;
-    const int markerLeft = metrics.padding;
+    const int markerLeft = metrics.itemPadding;
     const int iconLeft =
         metrics.padding + metrics.markerWidth + metrics.padding / 2;
     const int textLeft = iconLeft + metrics.iconSize + metrics.padding;
@@ -3155,10 +3174,12 @@ LayoutPanel BuildLayoutPanel(const std::vector<MenuItem>& items,
                 ? metrics.separatorHeight + 2 * metrics.separatorSpacing
                 : metrics.itemHeight;
         if (item.kind != ItemKind::Separator) {
+            const std::wstring& measureLabel =
+                item.displayLabel.empty() ? item.label : item.displayLabel;
             const int textWidth =
-                measure ? measure(item.label.c_str(), item.label.size(), metrics)
-                        : EstimateTextWidth(item.label.c_str(), item.label.size(),
-                                            metrics);
+                measure ? measure(measureLabel.c_str(), measureLabel.size(), metrics)
+                        : EstimateTextWidth(measureLabel.c_str(),
+                                            measureLabel.size(), metrics);
             const int arrowSpace = item.kind == ItemKind::Submenu
                                        ? metrics.submenuArrowWidth
                                        : 0;
@@ -4114,6 +4135,10 @@ bool BuildShadowBitmap(int width, int height, const CornerRadii& radii, int blur
 
     const int maskW = width + 2 * blur;
     const int maskH = height + 2 * blur;
+    if (maskW <= 0 || maskH <= 0 ||
+        static_cast<int64_t>(maskW) * maskH > 16 * 1024 * 1024) {
+        return false;
+    }
     std::vector<uint8_t> mask;
     BuildRoundedRectMaskRadii(maskW, maskH, radii.topLeft + blur,
                               radii.topRight + blur, radii.bottomRight + blur,
@@ -4283,7 +4308,9 @@ private:
             item.label + L'\x1f' + metrics.fontFace + L'\x1f' +
             std::to_wstring(static_cast<int>(metrics.fontSize * 4.0f)) + L'\x1f' +
             std::to_wstring(width) + L'\x1f' +
-            std::to_wstring(static_cast<int>(metrics.acceleratorMode));
+            std::to_wstring(static_cast<int>(metrics.acceleratorMode)) + L'\x1f' +
+            std::to_wstring(static_cast<int>(metrics.fontWeight)) + L'\x1f' +
+            std::to_wstring(static_cast<int>(metrics.fontStyle));
         if (IDWriteTextLayout** cached = text_.Find(key)) {
             return *cached;
         }
@@ -4293,9 +4320,10 @@ private:
 
         IDWriteTextFormat* format = nullptr;
         if (FAILED(dwrite_->CreateTextFormat(
-                metrics.fontFace.c_str(), nullptr, DWRITE_FONT_WEIGHT_NORMAL,
-                DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, metrics.fontSize,
-                L"", &format)) ||
+                metrics.fontFace.c_str(), nullptr,
+                FontWeightToDwrite(metrics.fontWeight),
+                FontStyleToDwrite(metrics.fontStyle),
+                DWRITE_FONT_STRETCH_NORMAL, metrics.fontSize, L"", &format)) ||
             !format) {
             return nullptr;
         }
@@ -4742,7 +4770,7 @@ void DrawPanel(ID2D1DeviceContext* dc, const LayoutPanel& panel,
             if (SUCCEEDED(dc->CreateSolidColorBrush(
                     ColorFromArgb(appearance.hoverBackground), &brush)) &&
                 brush) {
-                const float inset = static_cast<float>(metrics.padding) / 2.0f;
+                const float inset = static_cast<float>(metrics.itemPadding) / 2.0f;
                 const D2D1_RECT_F hoverRect = {
                     static_cast<float>(item.rect.left) + inset,
                     static_cast<float>(item.rect.top) + 1.0f,
@@ -5147,11 +5175,11 @@ int MeasureTextWidthDirectWrite(const wchar_t* label, size_t length,
         return EstimateTextWidth(label, length, metrics);
     }
     IDWriteTextFormat* format = nullptr;
-    if (FAILED(dwrite->CreateTextFormat(metrics.fontFace.c_str(), nullptr,
-                                        DWRITE_FONT_WEIGHT_NORMAL,
-                                        DWRITE_FONT_STYLE_NORMAL,
-                                        DWRITE_FONT_STRETCH_NORMAL,
-                                        metrics.fontSize, L"", &format)) ||
+    if (FAILED(dwrite->CreateTextFormat(
+            metrics.fontFace.c_str(), nullptr,
+            FontWeightToDwrite(metrics.fontWeight),
+            FontStyleToDwrite(metrics.fontStyle), DWRITE_FONT_STRETCH_NORMAL,
+            metrics.fontSize, L"", &format)) ||
         !format) {
         return EstimateTextWidth(label, length, metrics);
     }
@@ -5552,11 +5580,13 @@ LRESULT CustomMenuWindowProc(MenuWindow* window, HWND hwnd, UINT msg,
                         }
                     }
                     if (target && !ours) {
+                        POINT client = screen;
+                        ScreenToClient(target, &client);
                         if (g_settings.debugLogging) {
                             Wh_Log(L"Forwarding WM_RBUTTONUP to %p", target);
                         }
-                        PostMessageW(target, WM_RBUTTONUP, 0,
-                                     MAKELPARAM(screen.x, screen.y));
+                        PostMessageW(target, WM_RBUTTONUP, MK_RBUTTON,
+                                     MAKELPARAM(client.x, client.y));
                     }
                 }
                 session->done = true;
@@ -9219,32 +9249,54 @@ std::optional<uint32_t> FindNativeOffsetInMenu(HMENU menu, UINT idCmdFirst,
     return std::nullopt;
 }
 
+std::vector<std::wstring> BuiltinActionTargets(BuiltinAction action,
+                                               const InvocationContext& ctx) {
+    std::vector<std::wstring> targets = ctx.paths;
+    if (targets.empty() && !ctx.directory.empty()) {
+        targets.push_back(ctx.directory);
+    }
+    if (action == BuiltinAction::Properties && targets.size() > 1) {
+        targets.resize(1);
+    }
+    return targets;
+}
+
 bool InvokeBuiltinAction(const MenuItem& item, const InvocationContext& ctx) {
+    const std::vector<std::wstring> targets =
+        BuiltinActionTargets(item.builtinAction, ctx);
+    if (targets.empty()) {
+        return false;
+    }
     switch (item.builtinAction) {
         case BuiltinAction::CopyPath:
-            return CopyAsPath(ctx.paths);
+            return CopyAsPath(targets);
         case BuiltinAction::OpenNewWindow: {
-            const std::wstring folder =
-                ctx.paths.empty() ? ctx.directory : ctx.paths.front();
-            if (folder.empty()) {
-                return false;
+            bool any = false;
+            for (const std::wstring& folder : targets) {
+                SHELLEXECUTEINFOW info = {};
+                info.cbSize = sizeof(info);
+                info.fMask = SEE_MASK_FLAG_NO_UI;
+                info.hwnd = ctx.owner;
+                info.lpVerb = L"explore";
+                info.lpFile = folder.c_str();
+                info.nShow = SW_SHOWNORMAL;
+                any = ShellExecuteExW(&info) != FALSE || any;
+            }
+            return any;
+        }
+        case BuiltinAction::Properties: {
+            if (SHObjectProperties(ctx.owner, SHOP_FILEPATH, targets.front().c_str(),
+                                   nullptr)) {
+                return true;
             }
             SHELLEXECUTEINFOW info = {};
             info.cbSize = sizeof(info);
             info.fMask = SEE_MASK_FLAG_NO_UI;
             info.hwnd = ctx.owner;
-            info.lpVerb = L"explore";
-            info.lpFile = folder.c_str();
+            info.lpVerb = L"properties";
+            info.lpFile = targets.front().c_str();
             info.nShow = SW_SHOWNORMAL;
             return ShellExecuteExW(&info) != FALSE;
-        }
-        case BuiltinAction::Properties: {
-            if (ctx.paths.empty()) {
-                return false;
-            }
-            SHObjectProperties(ctx.owner, SHOP_FILEPATH, ctx.paths.front().c_str(),
-                               nullptr);
-            return true;
         }
         case BuiltinAction::None:
             return false;
@@ -10922,6 +10974,9 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
                 ctx.clipboardHadData = clipboardHadData;
                 ctx.config = rules;
                 ctx.directory = SelectionDirectory(paths, scope);
+                if (ctx.directory.empty()) {
+                    ctx.directory = GetCurrentFolderPath(owner, kind);
+                }
 
                 InvokeResult result = InvokeResult::Failed;
                 if (item->flags & kModelExtension) {

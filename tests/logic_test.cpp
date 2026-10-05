@@ -3131,6 +3131,74 @@ int main() {
         CHECK(cmo::BuildLayoutPanel(items, metrics).size.cx == contentWidth);
     }
 
+    // v2.1 review fixes: caps, font mapping, itemPadding, label, targets.
+    {
+        cmo::RulesConfig config;
+        std::vector<cmo::ConfigParseError> errors;
+        CHECK(!cmo::ParseRulesConfig(L"[appearance]\nshadowBlur = 20000\n", config,
+                                     errors));
+        CHECK(!cmo::ParseRulesConfig(L"[appearance]\nmaxWidth = 1000000\n", config,
+                                     errors));
+        CHECK(!cmo::ParseRulesConfig(L"[appearance]\nitemHeight = 100000\n", config,
+                                     errors));
+        CHECK(cmo::ParseRulesConfig(
+            L"[appearance]\nshadowBlur = 32\nmaxWidth = 4096\n", config, errors));
+
+        std::vector<uint32_t> pixels;
+        int outW = 0;
+        int outH = 0;
+        cmo::CornerRadii radii{};
+        CHECK(!cmo::BuildShadowBitmap(4000, 4000, radii, 64, 120, 4, pixels, outW,
+                                      outH));
+
+        CHECK(cmo::FontWeightToDwrite(cmo::FontWeightKind::Bold) ==
+              DWRITE_FONT_WEIGHT_BOLD);
+        CHECK(cmo::FontStyleToDwrite(cmo::FontStyleKind::Italic) ==
+              DWRITE_FONT_STYLE_ITALIC);
+        CHECK(cmo::FontWeightToDwrite(cmo::FontWeightKind::Normal) ==
+              DWRITE_FONT_WEIGHT_NORMAL);
+
+        cmo::LayoutMetrics metrics{};
+        metrics.itemHeight = 28;
+        metrics.verticalPadding = 0;
+        metrics.padding = 6;
+        metrics.itemPadding = 10;
+        metrics.markerWidth = 14;
+        metrics.iconSize = 16;
+        cmo::MenuItem item{};
+        item.id = 1;
+        item.kind = cmo::ItemKind::Command;
+        item.action = cmo::ActionKind::ShellVerb;
+        item.label = L"Open";
+        std::vector<cmo::MenuItem> items = {item};
+        cmo::LayoutPanel padded = cmo::BuildLayoutPanel(items, metrics);
+        CHECK(padded.items[0].markerRect.left == 10);
+
+        cmo::LayoutMetrics autoMetrics{};
+        autoMetrics.itemHeight = 28;
+        autoMetrics.verticalPadding = 0;
+        autoMetrics.padding = 6;
+        autoMetrics.markerWidth = 14;
+        autoMetrics.iconSize = 16;
+        cmo::MenuItem longItem = item;
+        longItem.displayLabel = L"TortoiseSVN commit with a very long label";
+        std::vector<cmo::MenuItem> shortItems = {item};
+        std::vector<cmo::MenuItem> longItems = {longItem};
+        CHECK(cmo::BuildLayoutPanel(longItems, autoMetrics).size.cx >
+              cmo::BuildLayoutPanel(shortItems, autoMetrics).size.cx);
+
+        cmo::InvocationContext ctx{};
+        ctx.directory = L"C:\\src";
+        auto targets =
+            cmo::BuiltinActionTargets(cmo::BuiltinAction::OpenNewWindow, ctx);
+        CHECK(targets.size() == 1 && targets[0] == L"C:\\src");
+        ctx.paths = {L"C:\\a", L"C:\\b"};
+        targets = cmo::BuiltinActionTargets(cmo::BuiltinAction::OpenNewWindow, ctx);
+        CHECK(targets.size() == 2);
+        targets = cmo::BuiltinActionTargets(cmo::BuiltinAction::Properties, ctx);
+        CHECK(targets.size() == 1 && targets[0] == L"C:\\a");
+    }
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

@@ -1714,17 +1714,17 @@ std::wstring GenerateDefaultConfigText() {
             L"; keep = label:Share\n"
             L"; move = thirdParty -> \"More options\"\n"
             L"\n"
-            L"[command \"Open in VS Code\"]\n"
+            L"; [command \"Open in VS Code\"]\n"
             L"; command = code.exe \"%1\"\n"
             L"; workingDir = %dir%\n"
             L"; match.ext = .cs, .cpp\n"
             L"; menu = Tools\n"
             L"\n"
-            L"[submenu \"Tools\"]\n"
+            L"; [submenu \"Tools\"]\n"
             L"; icon = @glyph:E712\n"
             L"; position = top\n"
             L"\n"
-            L"[item \"TortoiseSVN*\"]\n"
+            L"; [item \"TortoiseSVN*\"]\n"
             L"; label = SVN\n"
             L"; icon = C:\\Tools\\svn.ico,0\n"
             L"; marker = bar\n"
@@ -2038,7 +2038,7 @@ bool ParseRulesConfig(const std::wstring& text, RulesConfig& out,
         }
 
         const std::wstring trimmed = TrimWhitespace(StripInlineComment(line));
-        if (trimmed.empty() || trimmed[0] == L';') {
+        if (trimmed.empty() || trimmed[0] == L';' || trimmed[0] == L'#') {
             continue;
         }
 
@@ -2302,6 +2302,7 @@ std::wstring AppendMissingSchemaKeys(const std::wstring& text, int toVersion) {
 
     std::wstring result = text;
     std::wstring block;
+    std::wstring lastSection;
     for (const ConfigSchemaEntry& entry : kAppearanceSchema) {
         if (SchemaKeyPresent(text, entry.key)) {
             continue;
@@ -2310,6 +2311,12 @@ std::wstring AppendMissingSchemaKeys(const std::wstring& text, int toVersion) {
             block += L"\n; --- settings added in schema ";
             block += std::to_wstring(toVersion);
             block += L" (uncomment to change) ---\n";
+        }
+        if (lastSection != entry.section) {
+            block += L"\n[";
+            block += entry.section;
+            block += L"]\n";
+            lastSection = entry.section;
         }
         block += L"; ";
         block += entry.description;
@@ -2330,6 +2337,7 @@ std::wstring AppendMissingSchemaKeys(const std::wstring& text, int toVersion) {
         L"schemaVersion = " + std::to_wstring(toVersion);
     bool inMeta = false;
     bool replaced = false;
+    size_t metaInsertPos = std::wstring::npos;
     size_t pos = 0;
     while (pos <= result.size()) {
         const size_t newline = result.find(L'\n', pos);
@@ -2341,6 +2349,9 @@ std::wstring AppendMissingSchemaKeys(const std::wstring& text, int toVersion) {
                 const std::wstring name = ToLowerCopy(
                     TrimWhitespace(trimmed.substr(1, trimmed.size() - 2)));
                 inMeta = (name == L"meta");
+                if (inMeta) {
+                    metaInsertPos = lineEnd + 1;
+                }
             } else {
                 inMeta = false;
             }
@@ -2360,9 +2371,13 @@ std::wstring AppendMissingSchemaKeys(const std::wstring& text, int toVersion) {
         pos = lineEnd + 1;
     }
     if (!replaced) {
-        result += L"\n[meta]\n";
-        result += versionLine;
-        result += L"\n";
+        if (metaInsertPos != std::wstring::npos) {
+            result.insert(metaInsertPos, versionLine + L"\n");
+        } else {
+            result += L"\n[meta]\n";
+            result += versionLine;
+            result += L"\n";
+        }
     }
     return result;
 }
@@ -2854,6 +2869,12 @@ void InsertCustomItems(MenuModel& model, const RulesConfig& config,
     for (size_t i = 0; i < config.commands.size(); ++i) {
         const CustomCommand& command = config.commands[i];
         if (!CommandMatchesContext(command.match, ctx)) {
+            continue;
+        }
+
+        if (command.type == CommandType::Command &&
+            command.action == BuiltinAction::None && command.command.empty()) {
+            // An empty example or accidental command must not become a dead item.
             continue;
         }
 

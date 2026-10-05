@@ -3352,6 +3352,43 @@ int main() {
         }
     }
 
+    // v2.3 review fixes: inert examples, migration placement, '#' comments.
+    {
+        cmo::RulesConfig generated;
+        std::vector<cmo::ConfigParseError> errors;
+        CHECK(cmo::ParseRulesConfig(cmo::GenerateDefaultConfigText(), generated,
+                                    errors));
+        CHECK(generated.commands.empty());
+        CHECK(generated.submenus.empty());
+        CHECK(generated.overrides.empty());
+
+        const std::wstring legacy =
+            L"[appearance]\nitemHeight = 30\n[meta]\nschemaVersion = 0\n";
+        const std::wstring migrated = cmo::AppendMissingSchemaKeys(legacy, 1);
+        CHECK(migrated.find(L"[appearance]") != std::wstring::npos);
+        std::wstring usable = migrated;
+        const size_t pos = usable.find(L"; background = #F01E1E1E");
+        CHECK(pos != std::wstring::npos);
+        if (pos != std::wstring::npos) {
+            usable.erase(pos, 2);  // uncomment the appended default
+        }
+        cmo::RulesConfig reparsed;
+        std::vector<cmo::ConfigParseError> reparseErrors;
+        CHECK(cmo::ParseRulesConfig(usable, reparsed, reparseErrors));
+        CHECK(reparsed.appearance.background == 0xF01E1E1E);
+
+        cmo::RulesConfig comments;
+        CHECK(cmo::ParseRulesConfig(
+            L"# a comment\n[appearance]\nbackground = #11223344\n", comments,
+            errors));
+        CHECK(comments.appearance.background == 0x11223344u);
+
+        const std::wstring metaOnly = L"[meta]\n; nothing\n";
+        const std::wstring fixed = cmo::AppendMissingSchemaKeys(metaOnly, 1);
+        CHECK(cmo::CountSubstring(fixed, L"[meta]") == 1);
+        CHECK(fixed.find(L"schemaVersion = 1") != std::wstring::npos);
+    }
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

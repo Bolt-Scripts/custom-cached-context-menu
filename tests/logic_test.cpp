@@ -3324,6 +3324,34 @@ int main() {
         DeleteFileW(path.c_str());
     }
 
+    // v2.2 guide mentions every schema key.
+    {
+        HANDLE file = CreateFileW(L"docs\\CONFIG.md", GENERIC_READ, FILE_SHARE_READ,
+                                  nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL,
+                                  nullptr);
+        CHECK(file != INVALID_HANDLE_VALUE);
+        if (file != INVALID_HANDLE_VALUE) {
+            LARGE_INTEGER size = {};
+            GetFileSizeEx(file, &size);
+            std::vector<char> bytes(static_cast<size_t>(size.QuadPart));
+            DWORD read = 0;
+            ReadFile(file, bytes.data(), static_cast<DWORD>(bytes.size()), &read,
+                     nullptr);
+            CloseHandle(file);
+            std::wstring text;
+            if (!bytes.empty()) {
+                const int wide = MultiByteToWideChar(
+                    CP_UTF8, 0, bytes.data(), static_cast<int>(read), nullptr, 0);
+                text.resize(static_cast<size_t>(wide));
+                MultiByteToWideChar(CP_UTF8, 0, bytes.data(),
+                                    static_cast<int>(read), text.data(), wide);
+            }
+            for (const cmo::ConfigSchemaEntry& entry : cmo::kAppearanceSchema) {
+                CHECK(text.find(entry.key) != std::wstring::npos);
+            }
+        }
+    }
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

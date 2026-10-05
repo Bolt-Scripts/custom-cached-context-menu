@@ -50,110 +50,15 @@ untouched native menu, including extended verbs.
 ## Menu configuration (`menu.ini`)
 
 In custom mode the menu appearance, item rules, and custom commands are read
-from `menu.ini` in the mod's storage directory (created with commented defaults
-on first run). The file is written as UTF-8 with a BOM; UTF-8 without a BOM and
-UTF-16 (with or without a BOM) are also read. It is checked **when a menu
-opens** — nothing runs in the background. Errors are logged as
-`menu.ini:<line>: <message>` and the last good configuration stays in effect.
-Colors are `#RRGGBB` or `#AARRGGBB`; comments start with `;` (including after a
-value).
+from `menu.ini` in the mod's storage directory. It is created on first run with
+every setting present as a commented default, and it is checked when a menu
+opens — nothing runs in the background. Errors are logged as
+`menu.ini:<line>: <message>` and the last good configuration stays in effect;
+when the schema grows, new settings are appended to your file as commented
+defaults.
 
-```ini
-[appearance]                ; base appearance
-background = #1E1E1EF0      ; also used as the blur tint
-blur = true                 ; blur the screen behind the menu
-cornerRadius = 8            ; or cornerRadii = tl, tr, br, bl
-border = #FFFFFF22
-shadow = true
-shadowOpacity = 120
-shadowBlur = 12
-font = Segoe UI, 9
-fontWeight = normal         ; normal | semibold | bold
-fontStyle = normal          ; normal | italic
-itemHeight = 28
-iconSize = 16
-padding = 6
-verticalPadding = 4
-minWidth = 0                ; 0 = automatic
-maxWidth = 0                ; 0 = unlimited
-marker = dot                ; dot | check | bar | none
-markerColor = #FFFFFF
-markerWidth = 14
-separatorSpacing = 0
-hoverBackground = #FFFFFF14
-textColor = #FFFFFF
-headerColor = #66FFFFFF
-showAccelerators = underline ; underline | strip | raw
-animation = none            ; none | fade | slide
-
-[appearance.light]          ; overrides when light theme is active
-background = #F5F5F5F2
-textColor = #202020
-
-[rules]
-hide = label:"Cast to Device"
-keep = label:Share
-move = thirdParty -> "More options"
-
-[item "TortoiseSVN*"]       ; per-item overrides
-label = SVN
-icon = C:\Tools\svn.ico,0
-marker = bar
-
-[command "Open in VS Code"]
-command = code.exe "%1"
-workingDir = %dir%
-match.ext = .cs, .cpp
-menu = Tools
-
-[command "---"]             ; separator item
-type = separator
-
-[command "Copy path"]       ; built-in actions
-action = copypath           ; run | copypath | opennewwindow | properties
-
-[submenu "Tools"]
-icon = @glyph:E712
-position = top
-```
-
-- **Predicates**: `label:` (glob with `*`, `&`/ellipsis-insensitive), `verb:`,
-  `ext:`, `scope:` (`files`, `folders`, `background`, `desktop`, `drive`),
-  `multi`, `thirdParty`. Combine with `and`.
-- **Rules**: `hide` removes matching items (never the classic-menu fallback),
-  `keep` protects items from `move`, `move` sends matching top-level items into
-  a submenu (created automatically; the built-in "More options" grouping steps
-  aside when move rules exist). Precedence: hide > keep > move.
-- **Commands**: `command`, `workingDir`, `icon`, `menu`, `match.*`, `runAs`
-  (`none`/`admin`), `showWindow`, `separator`, `type`
-  (`command`/`separator`/`header`), `action`
-  (`run`/`copypath`/`opennewwindow`/`properties`). Placeholders: `%1`, `%*`,
-  `%dir%`, plus environment variables. Command `match.*` supports the context
-  predicates (`ext:`, `scope:`, `multi`, `thirdParty`); label/verb predicates
-  apply to rules, not to commands. Rules run before custom items are inserted,
-  so `hide` does not remove custom commands or submenus.
-- **Separators and headers**: `type = separator` draws a line; `type = header`
-  draws a non-selectable section label (colored with `headerColor`). Both honor
-  `menu` and `match.*` and keep their declaration order inside the menu.
-- **Built-in actions**: `action = copypath` copies the selection's paths,
-  `opennewwindow` opens the selected folder (or the current folder) in a new
-  Explorer window, and `properties` shows shell properties. `run` (the default)
-  executes `command`.
-- **Per-item overrides** (`[item "Label glob"]`): `label` changes what is drawn
-  (rules still match the original shell label), `icon` replaces the icon, and
-  `marker` (`dot`/`check`/`bar`/`none`) changes the selection marker. Overrides
-  apply recursively to submenu items; when several sections match, the last one
-  wins per key.
-- **Appearance**: `cornerRadii` sets per-corner radii, `minWidth`/`maxWidth`
-  bound the panel (never narrower than the widest item), `verticalPadding` and
-  `separatorSpacing` tune spacing, `marker`/`markerColor`/`markerWidth` control
-  the selection marker column, `fontWeight`/`fontStyle` style the text, and
-  `shadowOpacity`/`shadowBlur` tune the blurred shadow. `showAccelerators`
-  chooses whether shell mnemonics are underlined (`underline`), stripped
-  (`strip`), or left raw (`raw`).
-- **Submenus**: `icon`, `position` (`top`, `bottom`, `after:"Label"`,
-  `before:"Label"`), `match.*`. Nesting comes from `menu = A/B` (up to 3
-  levels).
+The full key reference, predicate syntax, commands, submenus, and per-item
+overrides are documented in [`docs/CONFIG.md`](docs/CONFIG.md).
 
 ## Known limitations
 

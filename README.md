@@ -54,9 +54,11 @@ from `menu.ini` in the mod's storage directory. It is created on first run as
 a clean settings list — almost every setting active at its default, grouped with
 comment headers, colors as `R, G, B, A` — and it is checked when a menu opens
 (nothing runs in the background). Errors are logged as
-`menu.ini:<line>: <message>` and the last good configuration stays in effect;
-when the schema grows, the file is rewritten into the same layout with your
-values kept.
+`menu.ini:<line>: warning: <message>`; invalid values are clamped or fall back
+to their defaults and never stop the file from loading, and when a warning
+changed a value the file is rewritten so the correction is visible. When the
+schema grows, the file is rewritten into the same layout with your values
+kept.
 
 The full key reference, predicate syntax, commands, submenus, and per-item
 overrides are documented in [`docs/CONFIG.md`](docs/CONFIG.md).

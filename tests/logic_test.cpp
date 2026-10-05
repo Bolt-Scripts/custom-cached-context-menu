@@ -3460,6 +3460,45 @@ int main() {
         }
     }
 
+    // v2.5 review fixes: shadow placement/falloff, theme unset, idempotence.
+    {
+        CHECK(cmo::ShadowMargin(12, 12, 0, 2) == 26);
+        CHECK(cmo::ShadowMargin(64, 64, 32, -32) == 160);
+        CHECK(cmo::ShadowMargin(0, 0, 0, 0) == 0);
+
+        cmo::CornerRadii radii{};
+        std::vector<uint32_t> pixels;
+        int outW = 0;
+        int outH = 0;
+        CHECK(cmo::BuildShadowBitmap(40, 40, radii, 0, 8, 255, 4, pixels, outW,
+                                     outH));
+        const uint32_t center = pixels[(outH / 2) * outW + outW / 2] >> 24;
+        const uint32_t corner = pixels[0] >> 24;
+        CHECK(center > 200);
+        CHECK(corner < 64);  // a blurred shadow fades toward its edge
+
+        const std::wstring themed =
+            L"[appearance]\n[appearance.light]\nitemPadding = nope\n"
+            L"cornerRadii = 1, 2, 3\nmarkerColor = nope\n";
+        const std::wstring canonical = cmo::CanonicalizeConfig(themed, 3);
+        CHECK(canonical.find(L"\nitemPadding = 6\n") == std::wstring::npos);
+        CHECK(canonical.find(L"\ncornerRadii = 2, 4, 6, 8\n") == std::wstring::npos);
+        CHECK(canonical.find(L"\nmarkerColor = 255, 255, 255, 255\n") ==
+              std::wstring::npos);
+
+        const std::wstring messy =
+            L"[appearance]\nitemHeight = 30\n[rules]\n; note\nbadline\n"
+            L"[custom]\nfoo = bar\n[meta]\nschemaVersion = 0\n";
+        const std::wstring once = cmo::CanonicalizeConfig(messy, 3);
+        const std::wstring twice = cmo::CanonicalizeConfig(once, 3);
+        CHECK(once == twice);
+
+        cmo::Appearance appearance{};
+        appearance.blurStrength = 12;
+        CHECK(cmo::ResolveLayoutMetrics(appearance, 96, true).blurPasses == 3);
+        CHECK(cmo::ResolveLayoutMetrics(appearance, 192, true).blurPasses == 6);
+    }
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

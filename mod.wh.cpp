@@ -1607,20 +1607,6 @@ bool SchemaHasKey(const std::wstring& key) {
     return SchemaFind(key) != nullptr;
 }
 
-std::wstring AppearanceErrorFor(const std::wstring& key) {
-    std::wstring message = L"invalid value for '" + key + L"'";
-    const ConfigSchemaEntry* entry = SchemaFind(key);
-    if (entry) {
-        if (entry->validValues) {
-            message += L": expected ";
-            message += entry->validValues;
-        } else if (entry->type == SettingType::Int) {
-            message += L": expected an integer " + std::to_wstring(entry->minValue) +
-                       L"-" + std::to_wstring(entry->maxValue);
-        }
-    }
-    return message;
-}
 
 // Applies one appearance key/value. Known keys always apply something
 // (clamped or default); `warning` is set when the value was adjusted.
@@ -1779,7 +1765,9 @@ bool ApplyAppearanceValue(Appearance& appearance, const std::wstring& key,
             const int clamped = std::clamp(parsed, row->minValue, row->maxValue);
             appearance.itemPadding = clamped;
             warn(L"value " + std::to_wstring(parsed) + L" clamped to " +
-                 std::to_wstring(clamped));
+                 std::to_wstring(clamped) + L" (range " +
+                 std::to_wstring(row->minValue) + L"-" +
+                 std::to_wstring(row->maxValue) + L")");
         } else {
             appearance.itemPadding = parsed;
         }
@@ -2534,6 +2522,12 @@ std::wstring NormalizeAppearanceValue(const ConfigSchemaEntry& entry,
             break;
         }
     }
+    if (entry.type == SettingType::Color) {
+        uint32_t fallback = 0;
+        if (ParseColor(entry.defaultValue, fallback)) {
+            return FormatColorRgba(fallback);
+        }
+    }
     return entry.defaultValue;
 }
 
@@ -2625,7 +2619,8 @@ std::wstring CanonicalizeConfig(const std::wstring& text, int toVersion) {
     out += L")\n";
     out += L"; UTF-8. Reloaded when a menu opens. Settings are active; edit the values.\n";
     out += L"; Colors are R, G, B, A (0-255 each; A optional). ';' starts a comment.\n";
-    out += L"; Errors are logged as menu.ini:<line>: <message>; the last good config stays.\n";
+    out += L"; Errors are logged as menu.ini:<line>: warning: <message>; bad values clamp\n";
+    out += L"; or fall back to their defaults and never stop the file from loading.\n";
     out += L"; Updates rewrite this file in this layout and keep your values. Theme overrides\n";
     out += L"; live in [appearance.light] / [appearance.dark] (see docs/CONFIG.md).\n";
     out += L"\n[appearance]\n";
@@ -2664,27 +2659,28 @@ std::wstring CanonicalizeConfig(const std::wstring& text, int toVersion) {
 
     auto emitTheme = [&](const wchar_t* section,
                          const std::unordered_map<std::wstring, std::wstring>& values) {
-        bool any = false;
-        for (const ConfigSchemaEntry& entry : kAppearanceSchema) {
-            if (values.count(ToLowerCopy(entry.key)) != 0) {
-                any = true;
-                break;
-            }
-        }
-        if (!any) {
-            return;
-        }
-        out += L"\n[";
-        out += section;
-        out += L"]\n";
+        std::vector<const ConfigSchemaEntry*> emitted;
         for (const ConfigSchemaEntry& entry : kAppearanceSchema) {
             const auto it = values.find(ToLowerCopy(entry.key));
             if (it == values.end()) {
                 continue;
             }
-            out += entry.key;
+            if (entry.unset && !AppearanceValueIsValid(entry, it->second)) {
+                continue;  // stay unset rather than pinning a derived default
+            }
+            emitted.push_back(&entry);
+        }
+        if (emitted.empty()) {
+            return;
+        }
+        out += L"\n[";
+        out += section;
+        out += L"]\n";
+        for (const ConfigSchemaEntry* entry : emitted) {
+            out += entry->key;
             out += L" = ";
-            out += NormalizeAppearanceValue(entry, it->second);
+            out += NormalizeAppearanceValue(
+                *entry, values.find(ToLowerCopy(entry->key))->second);
             out += L"\n";
         }
     };
@@ -2692,8 +2688,17 @@ std::wstring CanonicalizeConfig(const std::wstring& text, int toVersion) {
     emitTheme(L"appearance.dark", source.darkValues);
 
     for (const std::wstring& block : source.preservedBlocks) {
+        std::wstring trimmed = block;
+        while (!trimmed.empty() &&
+               (trimmed.back() == L'\n' || trimmed.back() == L'\r')) {
+            trimmed.pop_back();
+        }
+        if (trimmed.empty()) {
+            continue;
+        }
         out += L"\n";
-        out += block;
+        out += trimmed;
+        out += L"\n";
     }
     out += L"\n[meta]\nschemaVersion = ";
     out += std::to_wstring(toVersion);
@@ -3643,6 +3648,16 @@ Appearance ResolveAppearance(const RulesConfig& config, bool darkTheme) {
     return config.hasLightAppearance ? config.lightAppearance : config.appearance;
 }
 
+int BlurPasses(int amount) {
+    return std::clamp(amount / 4, 0, 16);
+}
+
+int ShadowMargin(int spread, int blur, int offsetX, int offsetY) {
+    const int offset =
+        std::max(std::max(offsetX, -offsetX), std::max(offsetY, -offsetY));
+    return std::min(spread + blur + offset, 160);
+}
+
 struct LayoutMetrics {
     int itemHeight = 28;
     int separatorHeight = 7;
@@ -3663,6 +3678,7 @@ struct LayoutMetrics {
     uint32_t submenuArrow = 0x99FFFFFF;
     int shadowOffsetX = 0;
     int shadowOffsetY = 2;
+    int blurPasses = 2;
     int verticalPadding = 4;
     int itemPadding = 6;
     int separatorSpacing = 0;
@@ -3741,6 +3757,7 @@ LayoutMetrics ResolveLayoutMetrics(const Appearance& appearance, uint32_t dpi,
     metrics.shadowBlur = MulDiv(appearance.shadowBlur, scale, 96);
     metrics.shadowOffsetX = MulDiv(appearance.shadowOffsetX, scale, 96);
     metrics.shadowOffsetY = MulDiv(appearance.shadowOffsetY, scale, 96);
+    metrics.blurPasses = BlurPasses(MulDiv(appearance.blurStrength, scale, 96));
     metrics.marker = appearance.marker;
     metrics.markerColor = appearance.hasMarkerColor ? appearance.markerColor
                                                     : appearance.textColor;
@@ -4815,10 +4832,6 @@ void BuildRoundedRectMaskRadii(int width, int height, int topLeft, int topRight,
     }
 }
 
-int BlurPasses(int amount) {
-    return std::clamp(amount / 4, 0, 16);
-}
-
 bool BuildShadowBitmap(int width, int height, const CornerRadii& radii,
                        int spread, int blur, int opacity, int downscale,
                        std::vector<uint32_t>& pixels, int& outW, int& outH) {
@@ -4829,16 +4842,24 @@ bool BuildShadowBitmap(int width, int height, const CornerRadii& radii,
         return false;
     }
 
-    const int maskW = width + 2 * spread;
-    const int maskH = height + 2 * spread;
+    const int silhouetteW = width + 2 * spread;
+    const int silhouetteH = height + 2 * spread;
+    const int maskW = silhouetteW + 2 * blur;
+    const int maskH = silhouetteH + 2 * blur;
     if (maskW <= 0 || maskH <= 0 ||
         static_cast<int64_t>(maskW) * maskH > 16 * 1024 * 1024) {
         return false;
     }
-    std::vector<uint8_t> mask;
-    BuildRoundedRectMaskRadii(maskW, maskH, radii.topLeft + spread,
+    std::vector<uint8_t> silhouette;
+    BuildRoundedRectMaskRadii(silhouetteW, silhouetteH, radii.topLeft + spread,
                               radii.topRight + spread, radii.bottomRight + spread,
-                              radii.bottomLeft + spread, mask);
+                              radii.bottomLeft + spread, silhouette);
+    std::vector<uint8_t> mask(static_cast<size_t>(maskW) * maskH, 0);
+    for (int y = 0; y < silhouetteH; ++y) {
+        memcpy(&mask[static_cast<size_t>(y + blur) * maskW + blur],
+               &silhouette[static_cast<size_t>(y) * silhouetteW],
+               static_cast<size_t>(silhouetteW));
+    }
     std::vector<uint32_t> argb(static_cast<size_t>(maskW) * maskH);
     for (size_t i = 0; i < argb.size(); ++i) {
         const uint32_t alpha =
@@ -5345,14 +5366,16 @@ void DrawPanel(ID2D1DeviceContext* dc, const LayoutPanel& panel,
                     static_cast<UINT32>(shadowW * sizeof(uint32_t)), props,
                     &bitmap)) &&
                 bitmap) {
-                const float maskW =
-                    static_cast<float>(panel.size.cx + 2 * spread);
-                const float maskH =
-                    static_cast<float>(panel.size.cy + 2 * spread);
-                const float left = static_cast<float>(
-                    margin - spread + metrics.shadowOffsetX);
-                const float top = static_cast<float>(
-                    margin - spread + metrics.shadowOffsetY);
+                const float maskW = static_cast<float>(
+                    panel.size.cx + 2 * spread + 2 * blur);
+                const float maskH = static_cast<float>(
+                    panel.size.cy + 2 * spread + 2 * blur);
+                // DrawPanel runs under a translate(margin, margin) transform,
+                // so these are panel-relative coordinates.
+                const float left =
+                    static_cast<float>(-spread - blur + metrics.shadowOffsetX);
+                const float top =
+                    static_cast<float>(-spread - blur + metrics.shadowOffsetY);
                 const D2D1_RECT_F dest = {left, top, left + maskW, top + maskH};
                 dc->DrawBitmap(bitmap, dest, 1.0f, D2D1_INTERPOLATION_MODE_LINEAR);
                 bitmap->Release();
@@ -6181,6 +6204,9 @@ LRESULT CustomMenuWindowProc(MenuWindow* window, HWND hwnd, UINT msg,
     if (!session) {
         return DefWindowProcW(hwnd, msg, wParam, lParam);
     }
+    if (session->done) {
+        return DefWindowProcW(hwnd, msg, wParam, lParam);
+    }
 
     int index = -1;
     for (size_t i = 0; i < session->windows.size(); ++i) {
@@ -6281,13 +6307,16 @@ LRESULT CustomMenuWindowProc(MenuWindow* window, HWND hwnd, UINT msg,
                         }
                     }
                     if (target && !ours) {
-                        // Replay a full click at teardown: Explorer targets
-                        // the item on the button-down, so forwarding only the
-                        // up opens the previous selection's menu.
+                        // Explorer re-targets the item on the button-down, so
+                        // replay it now; the matching up follows at teardown.
+                        POINT client = screen;
+                        ScreenToClient(target, &client);
                         session->pendingTarget = target;
                         session->pendingScreen = screen;
+                        PostMessageW(target, WM_RBUTTONDOWN, MK_RBUTTON,
+                                     MAKELPARAM(client.x, client.y));
                         if (g_settings.debugLogging) {
-                            Wh_Log(L"Queueing a right-click replay for %p",
+                            Wh_Log(L"Replaying the right-click down for %p",
                                    target);
                         }
                     }
@@ -6492,11 +6521,8 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
     MenuWindow* root = g_menuWindowPool.Acquire();
     const int margin =
         appearance.shadow && (metrics.shadowSize > 0 || metrics.shadowBlur > 0)
-            ? std::min(metrics.shadowSize +
-                           std::max(metrics.shadowOffsetX, -metrics.shadowOffsetX) +
-                           std::max(metrics.shadowOffsetY, -metrics.shadowOffsetY) +
-                           metrics.shadowBlur,
-                       32)
+            ? ShadowMargin(metrics.shadowSize, metrics.shadowBlur,
+                           metrics.shadowOffsetX, metrics.shadowOffsetY)
             : 0;
     if (!root || !root->Create(owner, panel.get(), true, margin)) {
         if (root) {
@@ -6577,39 +6603,39 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
         }
         Sleep(static_cast<DWORD>(closing.durationMs));
     }
+    if (GetCapture() == root->Handle()) {
+        ReleaseCapture();
+    }
     if (session.pendingTarget) {
-        // Consume the physical button-up while we still hold capture, then
-        // replay the click to the window under the cursor.
+        // The button-down was already replayed. Releasing capture above lets a
+        // not-yet-delivered button-up reach the target naturally; forward one
+        // that was captured to us before the release.
+        const HWND target = session.pendingTarget;
+        const POINT screen = session.pendingScreen;
         MSG pending = {};
-        const ULONGLONG deadline = GetTickCount64() + 2000;
-        while (GetTickCount64() < deadline) {
-            bool gotUp = false;
+        const ULONGLONG deadline = GetTickCount64() + 100;
+        bool forwarded = false;
+        while (!forwarded && GetTickCount64() < deadline) {
             while (PeekMessageW(&pending, nullptr, 0, 0, PM_REMOVE)) {
-                if (pending.message == WM_RBUTTONUP &&
-                    pending.hwnd == root->Handle()) {
-                    gotUp = true;
-                    continue;
+                if (pending.message == WM_RBUTTONUP) {
+                    POINT client = screen;
+                    ScreenToClient(target, &client);
+                    PostMessageW(target, WM_RBUTTONUP, MK_RBUTTON,
+                                 MAKELPARAM(client.x, client.y));
+                    forwarded = true;
+                    break;
                 }
                 TranslateMessage(&pending);
                 DispatchMessageW(&pending);
             }
-            if (gotUp) {
-                break;
+            if (!forwarded) {
+                Sleep(1);
             }
-            Sleep(1);
         }
-        POINT client = session.pendingScreen;
-        ScreenToClient(session.pendingTarget, &client);
-        PostMessageW(session.pendingTarget, WM_RBUTTONDOWN, MK_RBUTTON,
-                     MAKELPARAM(client.x, client.y));
-        PostMessageW(session.pendingTarget, WM_RBUTTONUP, MK_RBUTTON,
-                     MAKELPARAM(client.x, client.y));
         if (g_settings.debugLogging) {
-            Wh_Log(L"Replayed the right-click to %p", session.pendingTarget);
+            Wh_Log(L"Replayed the right-click to %p (up forwarded: %d)", target,
+                   forwarded ? 1 : 0);
         }
-    }
-    if (GetCapture() == root->Handle()) {
-        ReleaseCapture();
     }
     for (size_t i = session.windows.size(); i > 1; --i) {
         g_menuWindowPool.Release(session.windows[i - 1]);

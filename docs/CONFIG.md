@@ -9,7 +9,7 @@ exactly what to touch when you add something.
 ```
 file bytes
   → DecodeConfigBytes        UTF-8 BOM / UTF-16 BOM / BOM-less UTF-8 / BOM-less UTF-16
-  → ParseRulesConfig         INI parse; line-numbered errors; last good snapshot kept
+  → ParseRulesConfig         INI parse; invalid values clamp/default with warnings
   → ApplyAppearanceValue     schema gate + hand-written setters (Appearance)
   → ConfigStore snapshot     immutable RulesConfig + revision, swapped atomically
   → ResolveAppearance        picks base / light / dark
@@ -151,12 +151,12 @@ predicates; rules evaluate item predicates.
   lines are skipped — each with a line-numbered warning in the log. When a
   warning changed the effective configuration, the file is rewritten so the
   corrected value is visible; otherwise the warning is only logged.
-- A file that fails to parse is never written to.
+- A file that cannot be decoded is never written to; parse issues are warnings.
 - On a schema update the file is rewritten into the canonical layout: one
   `[appearance]`, your values carried over, colors normalized to `R, G, B, A`,
   structured sections preserved verbatim, and `[meta] schemaVersion` updated.
   Comments inside `[appearance]` are regenerated; comments in structured
-  sections are preserved. A file that fails to parse is never written to.
+  sections are preserved. A file that cannot be decoded is never written to.
 
 ## Testing checklist
 

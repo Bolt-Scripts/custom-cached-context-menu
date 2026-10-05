@@ -2549,7 +2549,8 @@ int main() {
     // v2 window style decisions and pool reuse.
     {
         CHECK(cmo::MenuWindowExStyle() ==
-              (WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOREDIRECTIONBITMAP));
+              (WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOREDIRECTIONBITMAP |
+               WS_EX_NOACTIVATE));
         CHECK(cmo::MenuWindowStyle() == WS_POPUP);
         cmo::MenuWindowPool pool;
         cmo::MenuWindow* a = pool.Acquire();

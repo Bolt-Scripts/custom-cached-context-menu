@@ -4892,7 +4892,8 @@ const wchar_t kMenuWindowClass[] = L"ContextMenuOverhaulV2Window";
 DWORD MenuWindowStyle() { return WS_POPUP; }
 
 DWORD MenuWindowExStyle() {
-    return WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOREDIRECTIONBITMAP;
+    return WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOREDIRECTIONBITMAP |
+           WS_EX_NOACTIVATE;
 }
 
 class MenuWindow;
@@ -4949,7 +4950,8 @@ public:
         if (!hwnd_) {
             return;
         }
-        ::ShowWindow(hwnd_, isRoot_ ? SW_SHOW : SW_SHOWNOACTIVATE);
+        // Never activate: the owner keeps its active look, like native menus.
+        ::ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
     }
 
     void Hide() {
@@ -6475,6 +6477,7 @@ struct MenuSession {
     int submenuDelayMs = 150;
     int hoverCandidate = -1;
     int hoverLevel = -1;
+    bool ownsMouseHook = false;
     HWND pendingTarget = nullptr;
     POINT pendingScreen = {};
     bool submenuTimerActive = false;
@@ -6785,6 +6788,35 @@ void OpenSubmenu(MenuSession* session, int index, int itemIndex) {
 }
 
 constexpr UINT_PTR kMenuSubmenuTimerId = 1;
+
+std::vector<RECT> SessionWindowRects(const MenuSession* session);
+
+inline HHOOK g_menuMouseHook = nullptr;
+
+// Observes clicks while a menu is open without capturing the mouse, so hover
+// feedback keeps working everywhere. An outside right-click is let through so
+// the target opens its menu at the new point; other outside clicks are
+// consumed like native menus do.
+LRESULT CALLBACK MenuMouseHookProc(int code, WPARAM wParam, LPARAM lParam) {
+    MenuSession* session = g_menuSession;
+    if (code == HC_ACTION && session && !session->done &&
+        (wParam == WM_LBUTTONDOWN || wParam == WM_RBUTTONDOWN ||
+         wParam == WM_MBUTTONDOWN)) {
+        const auto* info = reinterpret_cast<const MSLLHOOKSTRUCT*>(lParam);
+        const std::vector<RECT> rects = SessionWindowRects(session);
+        if (SessionLevelAtPoint(rects, info->pt) < 0) {
+            session->done = true;
+            if (g_settings.debugLogging) {
+                Wh_Log(L"Outside click closes the session (hook)");
+            }
+            if (wParam == WM_RBUTTONDOWN) {
+                return CallNextHookEx(nullptr, code, wParam, lParam);
+            }
+            return 1;
+        }
+    }
+    return CallNextHookEx(nullptr, code, wParam, lParam);
+}
 
 std::vector<RECT> SessionWindowRects(const MenuSession* session) {
     std::vector<RECT> rects;
@@ -7174,9 +7206,15 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
                      hasBackdrop ? &session.backdrops[0] : nullptr, margin);
     ApplyWindowAnimation(root->CompVisual(), ResolveAnimationSpec(appearance), true);
     root->Show();
-    SetForegroundWindow(root->Handle());
     SetFocus(root->Handle());
-    SetCapture(root->Handle());
+    if (!g_menuMouseHook) {
+        g_menuMouseHook = SetWindowsHookExW(WH_MOUSE_LL, MenuMouseHookProc,
+                                            GetModuleHandleW(nullptr), 0);
+        session.ownsMouseHook = g_menuMouseHook != nullptr;
+        if (!g_menuMouseHook && g_settings.debugLogging) {
+            Wh_Log(L"Failed to install the menu mouse hook");
+        }
+    }
 
     MSG msg = {};
     while (!session.done) {
@@ -7202,46 +7240,21 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
         }
         Sleep(static_cast<DWORD>(closing.durationMs));
     }
-    if (GetCapture() == root->Handle()) {
-        ReleaseCapture();
+    if (session.ownsMouseHook && g_menuMouseHook) {
+        UnhookWindowsHookEx(g_menuMouseHook);
+        g_menuMouseHook = nullptr;
     }
-    if (session.pendingTarget) {
-        // The button-down was already replayed. Releasing capture above lets a
-        // not-yet-delivered button-up reach the target naturally; forward one
-        // that was captured to us before the release.
-        const HWND target = session.pendingTarget;
-        const POINT screen = session.pendingScreen;
-        MSG pending = {};
-        const ULONGLONG deadline = GetTickCount64() + 100;
-        bool forwarded = false;
-        while (!forwarded && GetTickCount64() < deadline) {
-            while (PeekMessageW(&pending, nullptr, 0, 0, PM_REMOVE)) {
-                if (pending.message == WM_RBUTTONUP) {
-                    POINT client = screen;
-                    ScreenToClient(target, &client);
-                    PostMessageW(target, WM_RBUTTONUP, MK_RBUTTON,
-                                 MAKELPARAM(client.x, client.y));
-                    forwarded = true;
-                    break;
-                }
-                TranslateMessage(&pending);
-                DispatchMessageW(&pending);
-            }
-            if (!forwarded) {
-                Sleep(1);
-            }
-        }
-        if (g_settings.debugLogging) {
-            Wh_Log(L"Replayed the right-click to %p (up forwarded: %d)", target,
-                   forwarded ? 1 : 0);
-        }
+    if (owner && IsWindow(owner)) {
+        SetFocus(owner);
     }
     for (size_t i = session.windows.size(); i > 1; --i) {
         g_menuWindowPool.Release(session.windows[i - 1]);
     }
     g_menuWindowPool.Release(root);
-    g_menuWindowMessageHook = nullptr;
-    g_menuSession = nullptr;
+    if (g_menuSession == &session) {
+        g_menuWindowMessageHook = nullptr;
+        g_menuSession = nullptr;
+    }
     if (g_settings.debugLogging) {
         Wh_Log(L"Custom menu session end (chosen=%d)",
                session.result.chosenItemId.has_value() ? 1 : 0);
@@ -12714,8 +12727,9 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
         const MenuMode mode = ResolveMenuMode(
             g_settings.menuMode, g_modeController.ConsecutiveFailures());
         if (mode == MenuMode::Custom) {
-            if (g_menuSession != nullptr) {
-                // A session already owns the mouse; never clobber it.
+            if (g_menuSession != nullptr && !g_menuSession->done) {
+                // A live session owns input; never clobber it. A session that
+                // is already closing may be superseded by this new menu.
                 if (g_settings.debugLogging) {
                     Wh_Log(L"Refusing a second custom menu session");
                 }

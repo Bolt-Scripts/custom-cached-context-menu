@@ -1,4 +1,5 @@
 *.log
+*.dmp
 tests/logic_test.exe
 cmo-test-storage/
 .worktrees/

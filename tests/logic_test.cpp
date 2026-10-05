@@ -3199,6 +3199,25 @@ int main() {
         CHECK(targets.size() == 1 && targets[0] == L"C:\\a");
     }
 
+    // v2.2 warm-up coordination: jitter, mutex name, cache Has.
+    {
+        CHECK(cmo::WarmupJitterMs(0) == 0);
+        CHECK(cmo::WarmupJitterMs(3000) == 3000);
+        CHECK(cmo::WarmupJitterMs(3001) == 0);
+        CHECK(cmo::WarmupJitterMs(123456) >= 0 && cmo::WarmupJitterMs(123456) <= 3000);
+        const std::wstring mutexName = cmo::WarmupMutexName();
+        CHECK(mutexName.rfind(L"Local\\", 0) == 0);
+
+        cmo::Cache cache;
+        cmo::ContextSignature sig{cmo::Scope::Files, L".txt", cmo::Shape::Single,
+                                  cmo::Variant::Normal};
+        CHECK(!cache.Has(sig));
+        cmo::MenuModel model{};
+        model.sig = sig;
+        cache.Put(std::move(model));
+        CHECK(cache.Has(sig));
+    }
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

@@ -6550,6 +6550,11 @@ public:
         return it->second.model;
     }
 
+    bool Has(const ContextSignature& signature) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return entries_.find(signature.Hash()) != entries_.end();
+    }
+
     void Put(MenuModel model) {
         std::lock_guard<std::mutex> lock(mutex_);
         auto it = entries_.find(model.sig.Hash());
@@ -10326,6 +10331,16 @@ IContextMenu* CreateContextMenuForPath(const std::wstring& path, bool background
     return menu;
 }
 
+const wchar_t* WarmupMutexName() {
+    return L"Local\\ContextMenuOverhaulWarmup";
+}
+
+// Small per-process jitter so a cold start with many Explorer processes does
+// not have them all populate at the same instant.
+int WarmupJitterMs(uint32_t seed) {
+    return static_cast<int>(seed % 3001);
+}
+
 class Warmup {
 public:
     void Start() {
@@ -10416,6 +10431,17 @@ private:
             g_settings.warmupDelaySeconds > 0 ? g_settings.warmupDelaySeconds : 0;
         if (WaitForSingleObject(stopEvent_, static_cast<DWORD>(delaySeconds) * 1000) ==
             WAIT_OBJECT_0) {
+            LogEarlyStop();
+            return;
+        }
+
+        const uint32_t seed = static_cast<uint32_t>(GetTickCount64()) ^
+                              (GetCurrentProcessId() * 2654435761u);
+        const int jitter = WarmupJitterMs(seed);
+        if (jitter > 0 &&
+            WaitForSingleObject(stopEvent_, static_cast<DWORD>(jitter)) ==
+                WAIT_OBJECT_0) {
+            LogEarlyStop();
             return;
         }
 
@@ -10441,6 +10467,19 @@ private:
         CreateDirectoryW(storagePath, nullptr);
         CreateDirectoryW(warmupDir.c_str(), nullptr);
 
+        // The shared cache may already hold everything another process warmed.
+        if (g_cache.Size() == 0) {
+            g_cache.Load(CacheFilePath());
+        }
+
+        HANDLE mutex = CreateMutexW(nullptr, FALSE, WarmupMutexName());
+        const bool haveMutex =
+            mutex && WaitForSingleObject(mutex, 10000) == WAIT_OBJECT_0;
+        if (!haveMutex && g_cache.Size() == 0) {
+            // Another process is warming; take whatever it has saved.
+            g_cache.Load(CacheFilePath());
+        }
+
         // Rebuild the SendTo entries off the UI thread (also after handler
         // registry invalidation).
         RebuildSendToChildren();
@@ -10448,63 +10487,113 @@ private:
         const bool comInitialized =
             SUCCEEDED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED));
 
+        int warmed = 0;
+        int skipped = 0;
+        bool completed = true;
         for (const std::wstring& type : types) {
             if (WaitForSingleObject(stopEvent_, 0) == WAIT_OBJECT_0) {
+                completed = false;
                 break;
             }
             WaitForSingleObject(resumeEvent_, INFINITE);
             if (WaitForSingleObject(stopEvent_, 0) == WAIT_OBJECT_0) {
+                completed = false;
                 break;
             }
-            WarmOneType(type, warmupDir);
+            if (WarmOneType(type, warmupDir)) {
+                ++warmed;
+            } else {
+                ++skipped;
+            }
             Sleep(50);
         }
 
         if (comInitialized) {
             CoUninitialize();
         }
+        if (completed && warmed > 0) {
+            g_cache.Save(CacheFilePath());
+        }
         if (g_settings.debugLogging) {
-            Wh_Log(L"Warm-up finished");
+            if (completed) {
+                Wh_Log(L"Warm-up finished (%d warmed, %d already cached)", warmed,
+                       skipped);
+            } else {
+                Wh_Log(L"Warm-up stopped early (%d warmed)", warmed);
+            }
+        }
+        if (haveMutex) {
+            ReleaseMutex(mutex);
+        }
+        if (mutex) {
+            CloseHandle(mutex);
         }
     }
 
-    void WarmOneType(const std::wstring& type, const std::wstring& warmupDir) {
+    static void LogEarlyStop() {
+        if (g_settings.debugLogging) {
+            Wh_Log(L"Warm-up stopped early (0 warmed)");
+        }
+    }
+
+    bool WarmOneType(const std::wstring& type, const std::wstring& warmupDir) {
         if (type == L"*") {
             const std::wstring path = warmupDir + L"\\warmup";
             EnsureScratchFile(path);
-            WarmPath(path, false,
-                     ContextSignature{Scope::Files, L"*", Shape::Single, Variant::Normal});
-        } else if (type == L"Directory") {
+            return WarmPathIfMissing(
+                path, false,
+                ContextSignature{Scope::Files, L"*", Shape::Single, Variant::Normal});
+        }
+        if (type == L"Directory") {
             const std::wstring path = warmupDir + L"\\warmup-folder";
             CreateDirectoryW(path.c_str(), nullptr);
-            WarmPath(path, false, ContextSignature{Scope::Folders, L"*", Shape::Single,
-                                                   Variant::Normal});
-        } else if (type == L"Directory\\Background") {
+            return WarmPathIfMissing(
+                path, false,
+                ContextSignature{Scope::Folders, L"*", Shape::Single, Variant::Normal});
+        }
+        if (type == L"Directory\\Background") {
             const std::wstring path = warmupDir + L"\\warmup-folder";
             CreateDirectoryW(path.c_str(), nullptr);
-            WarmPath(path, true, ContextSignature{Scope::Background, L"*", Shape::Single,
-                                                  Variant::Normal});
-        } else if (type == L"Drive") {
+            return WarmPathIfMissing(
+                path, true, ContextSignature{Scope::Background, L"*", Shape::Single,
+                                             Variant::Normal});
+        }
+        if (type == L"Drive") {
             wchar_t windowsDir[MAX_PATH] = {};
             if (GetWindowsDirectoryW(windowsDir, ARRAYSIZE(windowsDir))) {
                 const std::wstring drive(windowsDir, 3);  // "C:\"
-                WarmPath(drive, false, ContextSignature{Scope::Drive, L"*", Shape::Single,
-                                                        Variant::Normal});
+                return WarmPathIfMissing(
+                    drive, false,
+                    ContextSignature{Scope::Drive, L"*", Shape::Single,
+                                     Variant::Normal});
             }
-        } else if (type == L"Desktop") {
+            return false;
+        }
+        if (type == L"Desktop") {
             wchar_t desktopPath[MAX_PATH] = {};
             if (SUCCEEDED(SHGetFolderPathW(nullptr, CSIDL_DESKTOP, nullptr, 0,
                                            desktopPath))) {
-                WarmPath(desktopPath, false,
-                         ContextSignature{Scope::Desktop, L"*", Shape::Single,
-                                          Variant::Normal});
+                return WarmPathIfMissing(
+                    desktopPath, false,
+                    ContextSignature{Scope::Desktop, L"*", Shape::Single,
+                                     Variant::Normal});
             }
-        } else {
-            const std::wstring path = warmupDir + L"\\warmup" + type;
-            EnsureScratchFile(path);
-            WarmPath(path, false,
-                     ContextSignature{Scope::Files, type, Shape::Single, Variant::Normal});
+            return false;
         }
+        const std::wstring path = warmupDir + L"\\warmup" + type;
+        EnsureScratchFile(path);
+        return WarmPathIfMissing(
+            path, false,
+            ContextSignature{Scope::Files, type, Shape::Single, Variant::Normal});
+    }
+
+    bool WarmPathIfMissing(const std::wstring& path, bool background,
+                           const ContextSignature& signature) {
+        if (g_cache.Has(signature)) {
+            return false;
+        }
+        WarmPath(path, background, signature);
+        return true;
     }
 
     static void EnsureScratchFile(const std::wstring& path) {

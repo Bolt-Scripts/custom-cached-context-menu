@@ -177,7 +177,11 @@ position = top
   background; checked items keep the checkmark gutter. New templates use the
   shell's file-type icons, and the View modes use glyphs.
 - Warm-up models are provisional: they are shown instantly but never overwrite
-  a live model, and are refreshed from the real context on first use.
+  a live model, and are refreshed from the real context on first use. Warm-up
+  runs once per cache state: processes load the shared `menu-cache.bin` instead
+  of re-warming, a session-wide mutex serializes the first cold warm-up across
+  Explorer processes, and the start is jittered so many processes do not
+  populate at once.
 - The first open of an uncached context waits for the shell to populate and
   then shows the full menu — the same first-open cost as the native menu.
   Everything after that is instant, and warm-up keeps common types instant

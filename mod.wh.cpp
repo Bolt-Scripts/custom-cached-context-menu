@@ -1503,7 +1503,7 @@ bool ParseCornerRadii(const std::wstring& value, CornerRadii& radii) {
 enum class SettingType : uint8_t { Bool, Int, Color, Font, Enum, IntList };
 
 // The build's schema version; bump when a row is added.
-constexpr int kConfigSchemaVersion = 3;
+constexpr int kConfigSchemaVersion = 4;
 
 struct ConfigSchemaEntry {
     const wchar_t* section;
@@ -2460,6 +2460,25 @@ bool AppearanceValueIsValid(const ConfigSchemaEntry& entry,
     return false;
 }
 
+std::wstring SchemaValueHint(const ConfigSchemaEntry& entry) {
+    if (entry.validValues) {
+        std::wstring spaced;
+        for (const wchar_t* p = entry.validValues; *p; ++p) {
+            if (*p == L'|') {
+                spaced += L" | ";
+            } else {
+                spaced += *p;
+            }
+        }
+        return spaced;
+    }
+    if (entry.type == SettingType::Int) {
+        return std::to_wstring(entry.minValue) + L"-" +
+               std::to_wstring(entry.maxValue);
+    }
+    return L"";
+}
+
 std::wstring NormalizeAppearanceValue(const ConfigSchemaEntry& entry,
                                       const std::wstring& value) {
     switch (entry.type) {
@@ -2647,6 +2666,11 @@ std::wstring CanonicalizeConfig(const std::wstring& text, int toVersion) {
             out += L" = ";
             out += NormalizeAppearanceValue(entry, entry.defaultValue);
             out += L"   ; unset: ";
+            const std::wstring hint = SchemaValueHint(entry);
+            if (!hint.empty()) {
+                out += hint;
+                out += L" \u2014 ";
+            }
             out += entry.description;
             out += L"\n";
             continue;
@@ -2655,6 +2679,13 @@ std::wstring CanonicalizeConfig(const std::wstring& text, int toVersion) {
         out += L" = ";
         out += NormalizeAppearanceValue(
             entry, hasValue ? it->second : std::wstring(entry.defaultValue));
+        out += L"   ; ";
+        const std::wstring hint = SchemaValueHint(entry);
+        if (!hint.empty()) {
+            out += hint;
+            out += L" \u2014 ";
+        }
+        out += entry.description;
         out += L"\n";
     }
 
@@ -2682,6 +2713,13 @@ std::wstring CanonicalizeConfig(const std::wstring& text, int toVersion) {
             out += L" = ";
             out += NormalizeAppearanceValue(
                 *entry, values.find(ToLowerCopy(entry->key))->second);
+            out += L"   ; ";
+            const std::wstring hint = SchemaValueHint(*entry);
+            if (!hint.empty()) {
+                out += hint;
+                out += L" \u2014 ";
+            }
+            out += entry->description;
             out += L"\n";
         }
     };

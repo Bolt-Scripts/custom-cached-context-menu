@@ -29,6 +29,22 @@ Design document: `docs/superpowers/specs/2026-10-04-context-menu-overhaul-design
 - enableShiftBypass: true
   $name: Shift bypass
   $description: Hold Shift while right-clicking to show the untouched native menu.
+- theme: 0
+  $name: Theme
+  $description: Rewrites the appearance block of menu.ini with a bundled preset (rules and commands are kept). Applied when changed, never on restart.
+  $options:
+  - Custom (menu.ini)
+  - Windows 11 Dark
+  - Windows 11 Light
+  - Windows 10 Dark
+  - Windows 10 Light
+  - Nord
+  - Dracula
+  - Solarized Dark
+  - Gruvbox Dark
+  - One Dark
+  - AMOLED Black
+  - High Contrast
 - menuMode: 0
   $name: Menu mode
   $description: 0 shows the custom-rendered menu (falls back automatically on repeated failures); 1 keeps the classic owner-drawn menu.
@@ -121,6 +137,7 @@ namespace cmo {
 
 struct Settings {
     bool enableShiftBypass = true;
+    int theme = 0;
     int menuMode = 0;
     bool showMoreOptionsItem = true;
     int submenuDelayMs = 150;
@@ -139,6 +156,10 @@ inline Settings g_settings;
 
 // Set in Wh_ModInit; only the UI thread may touch the render device/caches.
 inline DWORD g_uiThreadId = 0;
+
+// Defined in [CMO:Themes]; declared here for the config store.
+std::wstring ApplyTheme(const std::wstring& text, int themeIndex);
+inline int g_lastAppliedTheme = 0;
 
 std::wstring TrimWhitespace(const std::wstring& text) {
     const size_t first = text.find_first_not_of(L" \t\r\n");
@@ -194,6 +215,7 @@ std::vector<std::wstring> ParseAdvancedItems(const std::wstring& text) {
 
 void LoadSettings() {
     g_settings.enableShiftBypass = Wh_GetIntSetting(L"enableShiftBypass") != 0;
+    g_settings.theme = Wh_GetIntSetting(L"theme");
     g_settings.menuMode = Wh_GetIntSetting(L"menuMode");
     g_settings.showMoreOptionsItem = Wh_GetIntSetting(L"showMoreOptionsItem") != 0;
     g_settings.submenuDelayMs = Wh_GetIntSetting(L"submenuDelayMs");
@@ -3450,7 +3472,12 @@ public:
             CreateDirectoryW(path.substr(0, slash).c_str(), nullptr);
         }
         if (GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) {
-            WriteConfigFile(path, GenerateDefaultConfigText());
+            if (g_settings.theme > 0) {
+                WriteConfigFile(path, ApplyTheme(L"", g_settings.theme));
+                g_lastAppliedTheme = g_settings.theme;
+            } else {
+                WriteConfigFile(path, GenerateDefaultConfigText());
+            }
         }
         std::wstring text;
         if (ReadConfigFile(path, text)) {
@@ -4024,6 +4051,26 @@ font = Segoe UI, 10
 )INI"},};
 
 constexpr size_t kThemesCount = ARRAYSIZE(kThemes);
+
+void ApplySelectedTheme(int themeIndex) {
+    if (themeIndex <= 0) {
+        g_lastAppliedTheme = 0;
+        return;
+    }
+    const std::wstring path = ConfigFilePath();
+    if (path.empty()) {
+        return;
+    }
+    std::wstring text;
+    if (!ReadConfigFile(path, text)) {
+        text.clear();
+    }
+    const std::wstring themed = ApplyTheme(text, themeIndex);
+    if (themed != text) {
+        WriteConfigFile(path, themed);
+    }
+    g_lastAppliedTheme = themeIndex;
+}
 
 // Applying a theme appends its snippet and canonicalizes: the theme wins for
 // appearance values while rules/commands/submenus/items are preserved.
@@ -12695,6 +12742,7 @@ BOOL Wh_ModInit() {
     }
 
     cmo::LoadSettings();
+    cmo::g_lastAppliedTheme = cmo::g_settings.theme;
     cmo::g_iconCache.PreloadCoreIcons(GetSystemMetrics(SM_CXSMICON));
 
     const std::wstring cachePath = cmo::CacheFilePath();
@@ -12754,6 +12802,11 @@ void Wh_ModUninit() {
 void Wh_ModSettingsChanged() {
     Wh_Log(L"Context Menu Overhaul settings changed");
     cmo::LoadSettings();
+
+    if (cmo::g_settings.theme != cmo::g_lastAppliedTheme) {
+        cmo::ApplySelectedTheme(cmo::g_settings.theme);
+        cmo::g_configStore.RefreshIfChanged();
+    }
 
     if (cmo::g_settings.clearCache) {
         cmo::g_cache.Clear();

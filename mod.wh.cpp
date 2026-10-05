@@ -3652,7 +3652,11 @@ bool IsThirdPartyItem(const MenuItem& item) {
     if (item.flags & kModelThirdParty) {
         return true;
     }
-    return (item.flags & kModelExtension) != 0 &&
+    // The unknown-verb heuristic applies to command items only: Windows
+    // submenus such as New or Give access to carry no verb and must not be
+    // swept into the advanced submenu.
+    return item.kind == ItemKind::Command &&
+           (item.flags & kModelExtension) != 0 &&
            !IsKnownWindowsVerb(item.canonicalVerb);
 }
 
@@ -8347,6 +8351,7 @@ namespace cmo {
 
 struct PendingCapture {
     IContextMenu* obj = nullptr;
+    HMENU menu = nullptr;  // the menu this population was deferred into
     UINT indexMenu = 0;
     UINT idCmdFirst = 0;
     UINT idCmdLast = 0;
@@ -8391,43 +8396,75 @@ void ReleaseCapture(PendingCapture& capture) {
 class PendingQueue {
 public:
     void Push(PendingCapture capture) {
-        Clear();
-        capture_ = capture;
-        valid_ = true;
+        if (capture.tick == 0) {
+            capture.tick = GetTickCount64();
+        }
+        ExpireOlderThan(GetTickCount64(), 60000);
+        if (captures_.size() >= kMaxCaptures) {
+            ReleaseCapture(captures_.front());
+            captures_.erase(captures_.begin());
+        }
+        captures_.push_back(capture);
     }
 
-    // Moves the pending capture out and transfers ownership of its COM
-    // reference to the caller. Returns false when nothing is pending.
-    bool Take(PendingCapture& out) {
-        if (!valid_) {
+    // Takes the capture whose deferred menu is the one being shown (the nav
+    // pane defers two menus per click); falls back to the newest capture and
+    // releases the rest.
+    bool TakeForMenu(HMENU menu, PendingCapture& out) {
+        if (captures_.empty()) {
             return false;
         }
-        out = capture_;
-        capture_ = {};
-        valid_ = false;
+        size_t index = captures_.size() - 1;
+        for (size_t i = 0; i < captures_.size(); ++i) {
+            if (captures_[i].menu == menu) {
+                index = i;
+                break;
+            }
+        }
+        out = captures_[index];
+        captures_.erase(captures_.begin() + static_cast<std::ptrdiff_t>(index));
+        ClearAll();
         return true;
     }
 
-    void Clear() {
-        if (valid_) {
-            ReleaseCapture(capture_);
+    // Takes the newest capture. Returns false when nothing is pending.
+    bool Take(PendingCapture& out) {
+        if (captures_.empty()) {
+            return false;
         }
-        valid_ = false;
-        capture_ = {};
+        out = captures_.back();
+        captures_.pop_back();
+        ClearAll();
+        return true;
     }
 
-    // Drops a capture older than maxAgeMs; no caller holds it at that point.
+    void Clear() { ClearAll(); }
+
+    // Drops captures older than maxAgeMs; no caller holds them at that point.
     void ExpireOlderThan(ULONGLONG now, ULONGLONG maxAgeMs) {
-        if (valid_ && now - capture_.tick > maxAgeMs) {
-            Clear();
+        for (size_t i = 0; i < captures_.size();) {
+            if (now - captures_[i].tick > maxAgeMs) {
+                ReleaseCapture(captures_[i]);
+                captures_.erase(captures_.begin() + static_cast<std::ptrdiff_t>(i));
+            } else {
+                ++i;
+            }
         }
     }
 
-    bool HasPending() const { return valid_; }
+    bool HasPending() const { return !captures_.empty(); }
 
 private:
-    PendingCapture capture_{};
-    bool valid_ = false;
+    static constexpr size_t kMaxCaptures = 4;
+
+    void ClearAll() {
+        for (PendingCapture& capture : captures_) {
+            ReleaseCapture(capture);
+        }
+        captures_.clear();
+    }
+
+    std::vector<PendingCapture> captures_;
 };
 
 inline thread_local PendingQueue g_pending;
@@ -8462,15 +8499,9 @@ HRESULT STDMETHODCALLTYPE QueryContextMenu_Hook(IContextMenu* pThis, HMENU hmenu
                                          uFlags);
     }
 
-    // A capture that never reached TrackPopupMenu* is stale; release it
-    // before capturing the new one.
-    PendingCapture previous{};
-    if (g_pending.Take(previous)) {
-        ReleaseCapture(previous);
-    }
-
     PendingCapture capture{};
     capture.obj = pThis;
+    capture.menu = hmenu;
     capture.indexMenu = indexMenu;
     capture.idCmdFirst = idCmdFirst;
     capture.idCmdLast = idCmdLast;
@@ -12702,7 +12733,7 @@ BOOL WINAPI TrackPopupMenuEx_Hook(HMENU hMenu, UINT uFlags, int x, int y, HWND h
     ShellViewKind kind = ClassifyOwner(hWnd);
     g_pending.ExpireOlderThan(GetTickCount64(), 60000);
     PendingCapture pending{};
-    const bool hasPending = g_pending.Take(pending);
+    const bool hasPending = g_pending.TakeForMenu(hMenu, pending);
     const bool shiftHeld = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
     const MenuPath path =
         DecidePath(shiftHeld, kind, hasPending, g_settings.enableShiftBypass);
@@ -12736,7 +12767,7 @@ BOOL WINAPI TrackPopupMenu_Hook(HMENU hMenu, UINT uFlags, int x, int y, int nRes
     ShellViewKind kind = ClassifyOwner(hWnd);
     g_pending.ExpireOlderThan(GetTickCount64(), 60000);
     PendingCapture pending{};
-    const bool hasPending = g_pending.Take(pending);
+    const bool hasPending = g_pending.TakeForMenu(hMenu, pending);
     const bool shiftHeld = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
     const MenuPath path =
         DecidePath(shiftHeld, kind, hasPending, g_settings.enableShiftBypass);

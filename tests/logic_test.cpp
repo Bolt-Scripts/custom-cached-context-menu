@@ -3700,6 +3700,36 @@ int main() {
         CHECK(cmo::ThemeIndexFromName(L"nonsense") == 0);
     }
 
+    // v2.7 capture matching and submenu classification.
+    {
+        cmo::PendingQueue queue;
+        cmo::PendingCapture first{};
+        first.menu = reinterpret_cast<HMENU>(1);
+        first.idCmdFirst = 21;
+        queue.Push(first);
+        cmo::PendingCapture second{};
+        second.menu = reinterpret_cast<HMENU>(2);
+        second.idCmdFirst = 22;
+        queue.Push(second);
+        cmo::PendingCapture taken{};
+        CHECK(queue.TakeForMenu(reinterpret_cast<HMENU>(1), taken));
+        CHECK(taken.idCmdFirst == 21);
+        CHECK(!queue.HasPending());
+
+        cmo::MenuItem submenu{};
+        submenu.kind = cmo::ItemKind::Submenu;
+        submenu.action = cmo::ActionKind::Submenu;
+        submenu.label = L"New";
+        submenu.flags = cmo::kModelExtension;
+        CHECK(!cmo::IsThirdPartyItem(submenu));
+        cmo::MenuItem command{};
+        command.kind = cmo::ItemKind::Command;
+        command.action = cmo::ActionKind::ShellVerb;
+        command.canonicalVerb = L"WinRAR.ExtractHere";
+        command.flags = cmo::kModelExtension;
+        CHECK(cmo::IsThirdPartyItem(command));
+    }
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

@@ -3692,6 +3692,14 @@ int main() {
         CHECK(errors.empty());
     }
 
+    // v2.6 theme names map to preset indices.
+    {
+        CHECK(cmo::ThemeIndexFromName(L"Custom (menu.ini)") == 0);
+        CHECK(cmo::ThemeIndexFromName(L"dracula") == 6);
+        CHECK(cmo::ThemeIndexFromName(L"NORD") == 5);
+        CHECK(cmo::ThemeIndexFromName(L"nonsense") == 0);
+    }
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

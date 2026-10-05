@@ -29,22 +29,22 @@ Design document: `docs/superpowers/specs/2026-10-04-context-menu-overhaul-design
 - enableShiftBypass: true
   $name: Shift bypass
   $description: Hold Shift while right-clicking to show the untouched native menu.
-- theme: 0
+- theme: "Custom (menu.ini)"
   $name: Theme
   $description: Rewrites the appearance block of menu.ini with a bundled preset (rules and commands are kept). Applied when changed, never on restart.
   $options:
-  - Custom (menu.ini)
-  - Windows 11 Dark
-  - Windows 11 Light
-  - Windows 10 Dark
-  - Windows 10 Light
-  - Nord
-  - Dracula
-  - Solarized Dark
-  - Gruvbox Dark
-  - One Dark
-  - AMOLED Black
-  - High Contrast
+  - Custom (menu.ini): Use menu.ini as-is
+  - Windows 11 Dark: Fluent dark with translucent blur
+  - Windows 11 Light: Fluent light with translucent blur
+  - Windows 10 Dark: Flat dark, square corners
+  - Windows 10 Light: Flat light, square corners
+  - Nord: Arctic blue-grey palette
+  - Dracula: Purple and green dark palette
+  - Solarized Dark: Low-contrast teal dark palette
+  - Gruvbox Dark: Warm retro dark palette
+  - One Dark: Atom-style dark palette
+  - AMOLED Black: True black, no blur or shadow
+  - High Contrast: White on black, thick border
 - menuMode: 0
   $name: Menu mode
   $description: 0 shows the custom-rendered menu (falls back automatically on repeated failures); 1 keeps the classic owner-drawn menu.
@@ -137,7 +137,8 @@ namespace cmo {
 
 struct Settings {
     bool enableShiftBypass = true;
-    int theme = 0;
+    std::wstring theme = L"Custom (menu.ini)";
+    int themeIndex = 0;
     int menuMode = 0;
     bool showMoreOptionsItem = true;
     int submenuDelayMs = 150;
@@ -159,6 +160,7 @@ inline DWORD g_uiThreadId = 0;
 
 // Defined in [CMO:Themes]; declared here for the config store.
 std::wstring ApplyTheme(const std::wstring& text, int themeIndex);
+int ThemeIndexFromName(const std::wstring& name);
 inline int g_lastAppliedTheme = 0;
 
 std::wstring TrimWhitespace(const std::wstring& text) {
@@ -215,7 +217,10 @@ std::vector<std::wstring> ParseAdvancedItems(const std::wstring& text) {
 
 void LoadSettings() {
     g_settings.enableShiftBypass = Wh_GetIntSetting(L"enableShiftBypass") != 0;
-    g_settings.theme = Wh_GetIntSetting(L"theme");
+    PCWSTR theme = Wh_GetStringSetting(L"theme");
+    g_settings.theme = (theme && theme[0]) ? theme : L"Custom (menu.ini)";
+    Wh_FreeStringSetting(theme);
+    g_settings.themeIndex = ThemeIndexFromName(g_settings.theme);
     g_settings.menuMode = Wh_GetIntSetting(L"menuMode");
     g_settings.showMoreOptionsItem = Wh_GetIntSetting(L"showMoreOptionsItem") != 0;
     g_settings.submenuDelayMs = Wh_GetIntSetting(L"submenuDelayMs");
@@ -3472,9 +3477,9 @@ public:
             CreateDirectoryW(path.substr(0, slash).c_str(), nullptr);
         }
         if (GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) {
-            if (g_settings.theme > 0) {
-                WriteConfigFile(path, ApplyTheme(L"", g_settings.theme));
-                g_lastAppliedTheme = g_settings.theme;
+            if (g_settings.themeIndex > 0) {
+                WriteConfigFile(path, ApplyTheme(L"", g_settings.themeIndex));
+                g_lastAppliedTheme = g_settings.themeIndex;
             } else {
                 WriteConfigFile(path, GenerateDefaultConfigText());
             }
@@ -4055,6 +4060,15 @@ font = Segoe UI, 10
 )INI"},};
 
 constexpr size_t kThemesCount = ARRAYSIZE(kThemes);
+
+int ThemeIndexFromName(const std::wstring& name) {
+    for (size_t i = 0; i < kThemesCount; ++i) {
+        if (_wcsicmp(kThemes[i].name, name.c_str()) == 0) {
+            return static_cast<int>(i);
+        }
+    }
+    return 0;
+}
 
 void ApplySelectedTheme(int themeIndex) {
     if (themeIndex <= 0) {
@@ -12878,7 +12892,7 @@ BOOL Wh_ModInit() {
     }
 
     cmo::LoadSettings();
-    cmo::g_lastAppliedTheme = cmo::g_settings.theme;
+    cmo::g_lastAppliedTheme = cmo::g_settings.themeIndex;
     cmo::g_iconCache.PreloadCoreIcons(GetSystemMetrics(SM_CXSMICON));
 
     const std::wstring cachePath = cmo::CacheFilePath();
@@ -12939,8 +12953,8 @@ void Wh_ModSettingsChanged() {
     Wh_Log(L"Context Menu Overhaul settings changed");
     cmo::LoadSettings();
 
-    if (cmo::g_settings.theme != cmo::g_lastAppliedTheme) {
-        cmo::ApplySelectedTheme(cmo::g_settings.theme);
+    if (cmo::g_settings.themeIndex != cmo::g_lastAppliedTheme) {
+        cmo::ApplySelectedTheme(cmo::g_settings.themeIndex);
         cmo::g_configStore.RefreshIfChanged();
     }
 

@@ -88,7 +88,9 @@ rewritten.
 | border | color | `#22FFFFFF` | border color |
 | borderWidth | int | `1` | 0–64 px (0 hides it) |
 | shadow | bool | `true` | draw the drop shadow |
-| shadowSize | int | `12` | 0–64 px spread |
+| shadowSize | int | `12` | 0–64 px spread (how far the shadow extends) |
+| shadowOffsetX | int | `0` | -32–32 px horizontal offset |
+| shadowOffsetY | int | `2` | -32–32 px vertical offset |
 | font | font | `Segoe UI, 9` | face, size |
 | itemHeight | int | `28` | 1–256 px |
 | iconSize | int | `16` | 1–256 px |
@@ -111,7 +113,7 @@ rewritten.
 | fontStyle | enum | `normal` | normal, italic |
 | cornerRadii | int list | `2, 4, 6, 8` | tl,tr,br,bl; overrides cornerradius |
 | shadowOpacity | int | `120` | 0–255 |
-| shadowBlur | int | `12` | 0–64 px |
+| shadowBlur | int | `12` | 0–64 px softness (blur radius) |
 | marker | enum | `dot` | dot, check, bar, none |
 | markerColor | color | `#FFFFFFFF` | defaults to textcolor |
 | headerColor | color | `#66FFFFFF` | defaults to disabledtextcolor |
@@ -144,8 +146,11 @@ predicates; rules evaluate item predicates.
 
 ## Errors and migration
 
-- Errors are logged as `menu.ini:<line>: <message>` and the last good
-  configuration stays in effect. Messages name the valid values.
+- Invalid values never reject the file: out-of-range numbers are clamped,
+  invalid values fall back to their default, and unknown keys or malformed
+  lines are skipped — each with a line-numbered warning in the log. When a
+  warning changed the effective configuration, the file is rewritten so the
+  corrected value is visible; otherwise the warning is only logged.
 - A file that fails to parse is never written to.
 - On a schema update the file is rewritten into the canonical layout: one
   `[appearance]`, your values carried over, colors normalized to `R, G, B, A`,

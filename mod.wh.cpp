@@ -1139,6 +1139,8 @@ struct Appearance {
     int borderWidth = 1;
     bool shadow = true;
     int shadowSize = 12;
+    int shadowOffsetX = 0;
+    int shadowOffsetY = 2;
     std::wstring fontFace = L"Segoe UI";
     float fontSize = 9.0f;
     int itemHeight = 28;
@@ -1500,7 +1502,7 @@ bool ParseCornerRadii(const std::wstring& value, CornerRadii& radii) {
 enum class SettingType : uint8_t { Bool, Int, Color, Font, Enum, IntList };
 
 // The build's schema version; bump when a row is added.
-constexpr int kConfigSchemaVersion = 2;
+constexpr int kConfigSchemaVersion = 3;
 
 struct ConfigSchemaEntry {
     const wchar_t* section;
@@ -1575,6 +1577,10 @@ const ConfigSchemaEntry kAppearanceSchema[] = {
      L"Draw the drop shadow.", 1, false},
     {L"appearance", L"shadowSize", L"Shadow", SettingType::Int, L"12", nullptr, 0, 64,
      L"Shadow spread in pixels.", 1, false},
+    {L"appearance", L"shadowOffsetX", L"Shadow", SettingType::Int, L"0", nullptr, -32,
+     32, L"Shadow horizontal offset in pixels.", 3, false},
+    {L"appearance", L"shadowOffsetY", L"Shadow", SettingType::Int, L"2", nullptr, -32,
+     32, L"Shadow vertical offset in pixels.", 3, false},
     {L"appearance", L"shadowOpacity", L"Shadow", SettingType::Int, L"120", nullptr, 0, 255,
      L"Shadow alpha (0-255).", 1, false},
     {L"appearance", L"shadowBlur", L"Shadow", SettingType::Int, L"12", nullptr, 0, 64,
@@ -1710,6 +1716,12 @@ bool ApplyAppearanceValue(Appearance& appearance, const std::wstring& key,
     }
     if (normalized == L"shadowsize") {
         return applyInt(appearance.shadowSize, _wtoi(row->defaultValue));
+    }
+    if (normalized == L"shadowoffsetx") {
+        return applyInt(appearance.shadowOffsetX, _wtoi(row->defaultValue));
+    }
+    if (normalized == L"shadowoffsety") {
+        return applyInt(appearance.shadowOffsetY, _wtoi(row->defaultValue));
     }
     if (normalized == L"font") {
         if (!ParseFont(value, appearance.fontFace, appearance.fontSize)) {
@@ -3649,6 +3661,8 @@ struct LayoutMetrics {
     uint32_t pressedBackground = 0x22FFFFFF;
     uint32_t separator = 0x18FFFFFF;
     uint32_t submenuArrow = 0x99FFFFFF;
+    int shadowOffsetX = 0;
+    int shadowOffsetY = 2;
     int verticalPadding = 4;
     int itemPadding = 6;
     int separatorSpacing = 0;
@@ -3725,6 +3739,8 @@ LayoutMetrics ResolveLayoutMetrics(const Appearance& appearance, uint32_t dpi,
     metrics.hasCornerRadii = appearance.hasCornerRadii;
     metrics.shadowOpacity = appearance.shadowOpacity;
     metrics.shadowBlur = MulDiv(appearance.shadowBlur, scale, 96);
+    metrics.shadowOffsetX = MulDiv(appearance.shadowOffsetX, scale, 96);
+    metrics.shadowOffsetY = MulDiv(appearance.shadowOffsetY, scale, 96);
     metrics.marker = appearance.marker;
     metrics.markerColor = appearance.hasMarkerColor ? appearance.markerColor
                                                     : appearance.textColor;
@@ -4799,26 +4815,30 @@ void BuildRoundedRectMaskRadii(int width, int height, int topLeft, int topRight,
     }
 }
 
-bool BuildShadowBitmap(int width, int height, const CornerRadii& radii, int blur,
-                       int opacity, int downscale, std::vector<uint32_t>& pixels,
-                       int& outW, int& outH) {
+int BlurPasses(int amount) {
+    return std::clamp(amount / 4, 0, 16);
+}
+
+bool BuildShadowBitmap(int width, int height, const CornerRadii& radii,
+                       int spread, int blur, int opacity, int downscale,
+                       std::vector<uint32_t>& pixels, int& outW, int& outH) {
     pixels.clear();
     outW = 0;
     outH = 0;
-    if (width <= 0 || height <= 0 || blur < 0 || downscale <= 0) {
+    if (width <= 0 || height <= 0 || spread < 0 || blur < 0 || downscale <= 0) {
         return false;
     }
 
-    const int maskW = width + 2 * blur;
-    const int maskH = height + 2 * blur;
+    const int maskW = width + 2 * spread;
+    const int maskH = height + 2 * spread;
     if (maskW <= 0 || maskH <= 0 ||
         static_cast<int64_t>(maskW) * maskH > 16 * 1024 * 1024) {
         return false;
     }
     std::vector<uint8_t> mask;
-    BuildRoundedRectMaskRadii(maskW, maskH, radii.topLeft + blur,
-                              radii.topRight + blur, radii.bottomRight + blur,
-                              radii.bottomLeft + blur, mask);
+    BuildRoundedRectMaskRadii(maskW, maskH, radii.topLeft + spread,
+                              radii.topRight + spread, radii.bottomRight + spread,
+                              radii.bottomLeft + spread, mask);
     std::vector<uint32_t> argb(static_cast<size_t>(maskW) * maskH);
     for (size_t i = 0; i < argb.size(); ++i) {
         const uint32_t alpha =
@@ -4827,7 +4847,8 @@ bool BuildShadowBitmap(int width, int height, const CornerRadii& radii, int blur
     }
 
     std::vector<uint32_t> blurred;
-    DownscaleAndBlur(argb.data(), maskW, maskH, downscale, 3, blurred, outW, outH);
+    DownscaleAndBlur(argb.data(), maskW, maskH, downscale, BlurPasses(blur),
+                     blurred, outW, outH);
     if (outW <= 0 || outH <= 0) {
         return false;
     }
@@ -4836,9 +4857,9 @@ bool BuildShadowBitmap(int width, int height, const CornerRadii& radii, int blur
 }
 
 constexpr int kBackdropDownscaleFactor = 4;
-constexpr int kBackdropBlurPasses = 2;
 
-bool CaptureBackdrop(const RECT& screenRect, int factor, BackdropBitmap& out) {
+bool CaptureBackdrop(const RECT& screenRect, int factor, int passes,
+                     BackdropBitmap& out) {
     const int width = screenRect.right - screenRect.left;
     const int height = screenRect.bottom - screenRect.top;
     if (width <= 0 || height <= 0) {
@@ -4888,7 +4909,7 @@ bool CaptureBackdrop(const RECT& screenRect, int factor, BackdropBitmap& out) {
         int outH = 0;
         std::vector<uint32_t> blurred;
         DownscaleAndBlur(src.data(), width, height, factor > 0 ? factor : 1,
-                         kBackdropBlurPasses, blurred, outW, outH);
+                         passes, blurred, outW, outH);
         if (outW > 0 && outH > 0) {
             out.pixels = std::move(blurred);
             out.width = outW;
@@ -5298,8 +5319,8 @@ void DrawPanel(ID2D1DeviceContext* dc, const LayoutPanel& panel,
     // Blurred drop shadow drawn in the margin outside the panel.
     if (appearance.shadow && margin > 0 &&
         (metrics.shadowSize > 0 || metrics.shadowBlur > 0)) {
-        const int blur = metrics.shadowBlur > 0 ? metrics.shadowBlur
-                                                : metrics.shadowSize;
+        const int spread = metrics.shadowSize;
+        const int blur = metrics.shadowBlur;
         CornerRadii radii;
         if (metrics.hasCornerRadii) {
             radii = metrics.cornerRadii;
@@ -5310,7 +5331,7 @@ void DrawPanel(ID2D1DeviceContext* dc, const LayoutPanel& panel,
         std::vector<uint32_t> shadowPixels;
         int shadowW = 0;
         int shadowH = 0;
-        if (BuildShadowBitmap(panel.size.cx, panel.size.cy, radii, blur,
+        if (BuildShadowBitmap(panel.size.cx, panel.size.cy, radii, spread, blur,
                               metrics.shadowOpacity, 4, shadowPixels, shadowW,
                               shadowH)) {
             ID2D1Bitmap* bitmap = nullptr;
@@ -5325,13 +5346,14 @@ void DrawPanel(ID2D1DeviceContext* dc, const LayoutPanel& panel,
                     &bitmap)) &&
                 bitmap) {
                 const float maskW =
-                    static_cast<float>(panel.size.cx + 2 * blur);
+                    static_cast<float>(panel.size.cx + 2 * spread);
                 const float maskH =
-                    static_cast<float>(panel.size.cy + 2 * blur);
-                const D2D1_RECT_F dest = {
-                    static_cast<float>(-blur), static_cast<float>(-blur + 2),
-                    static_cast<float>(-blur) + maskW,
-                    static_cast<float>(-blur + 2) + maskH};
+                    static_cast<float>(panel.size.cy + 2 * spread);
+                const float left = static_cast<float>(
+                    margin - spread + metrics.shadowOffsetX);
+                const float top = static_cast<float>(
+                    margin - spread + metrics.shadowOffsetY);
+                const D2D1_RECT_F dest = {left, top, left + maskW, top + maskH};
                 dc->DrawBitmap(bitmap, dest, 1.0f, D2D1_INTERPOLATION_MODE_LINEAR);
                 bitmap->Release();
             }
@@ -6115,8 +6137,9 @@ void OpenSubmenu(MenuSession* session, int index, int itemIndex) {
                               panelTopLeft.x + childPanel.size.cx,
                               panelTopLeft.y + childPanel.size.cy};
     const bool hasBackdrop =
-        session->appearance.blur &&
-        CaptureBackdrop(captureRect, kBackdropDownscaleFactor, backdrop);
+        session->appearance.blur && session->appearance.blurStrength > 0 &&
+        CaptureBackdrop(captureRect, kBackdropDownscaleFactor,
+                        BlurPasses(session->appearance.blurStrength), backdrop);
 
     session->windows.push_back(child);
     session->states.push_back(MenuInputState{});
@@ -6465,7 +6488,11 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
     MenuWindow* root = g_menuWindowPool.Acquire();
     const int margin =
         appearance.shadow && (metrics.shadowSize > 0 || metrics.shadowBlur > 0)
-            ? std::min(std::max(metrics.shadowSize, metrics.shadowBlur), 24)
+            ? std::min(metrics.shadowSize +
+                           std::max(metrics.shadowOffsetX, -metrics.shadowOffsetX) +
+                           std::max(metrics.shadowOffsetY, -metrics.shadowOffsetY) +
+                           metrics.shadowBlur,
+                       32)
             : 0;
     if (!root || !root->Create(owner, panel.get(), true, margin)) {
         if (root) {
@@ -6501,8 +6528,9 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
                               panelPos.x + panel->size.cx,
                               panelPos.y + panel->size.cy};
     const bool hasBackdrop =
-        appearance.blur &&
-        CaptureBackdrop(captureRect, kBackdropDownscaleFactor, backdrop);
+        appearance.blur && appearance.blurStrength > 0 &&
+        CaptureBackdrop(captureRect, kBackdropDownscaleFactor,
+                        BlurPasses(appearance.blurStrength), backdrop);
     session.backdrops.push_back(hasBackdrop ? std::move(backdrop)
                                             : BackdropBitmap{});
 

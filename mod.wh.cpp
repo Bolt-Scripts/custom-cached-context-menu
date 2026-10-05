@@ -6478,8 +6478,6 @@ struct MenuSession {
     int hoverCandidate = -1;
     int hoverLevel = -1;
     bool ownsMouseHook = false;
-    HWND pendingTarget = nullptr;
-    POINT pendingScreen = {};
     bool submenuTimerActive = false;
     bool done = false;
     LayoutMetrics metrics;
@@ -6794,9 +6792,9 @@ std::vector<RECT> SessionWindowRects(const MenuSession* session);
 inline HHOOK g_menuMouseHook = nullptr;
 
 // Observes clicks while a menu is open without capturing the mouse, so hover
-// feedback keeps working everywhere. An outside right-click is let through so
-// the target opens its menu at the new point; other outside clicks are
-// consumed like native menus do.
+// feedback keeps working everywhere. Outside clicks are consumed like native
+// menus do; an outside right-click is replayed to the target so it opens its
+// menu at the new point.
 LRESULT CALLBACK MenuMouseHookProc(int code, WPARAM wParam, LPARAM lParam) {
     MenuSession* session = g_menuSession;
     if (code == HC_ACTION && session && !session->done &&
@@ -6809,8 +6807,34 @@ LRESULT CALLBACK MenuMouseHookProc(int code, WPARAM wParam, LPARAM lParam) {
             if (g_settings.debugLogging) {
                 Wh_Log(L"Outside click closes the session (hook)");
             }
+            // Wake the modal loop first so the session tears down immediately
+            // even though the input event that triggered this is consumed.
+            PostThreadMessageW(GetCurrentThreadId(), WM_NULL, 0, 0);
             if (wParam == WM_RBUTTONDOWN) {
-                return CallNextHookEx(nullptr, code, wParam, lParam);
+                // Consume the real button-down and replay it to the window
+                // under the cursor. The target then sees exactly one down, and
+                // the real button-up reaches the same window after this
+                // session is gone, so the context-menu gesture completes
+                // reliably. Letting the real down through is racy: when it is
+                // the message the modal loop unwinds on, the target never
+                // records the gesture.
+                const HWND target = WindowFromPoint(info->pt);
+                bool ours = false;
+                for (MenuWindow* menuWindow : session->windows) {
+                    if (menuWindow->Handle() == target) {
+                        ours = true;
+                        break;
+                    }
+                }
+                if (target && !ours) {
+                    POINT client = info->pt;
+                    ScreenToClient(target, &client);
+                    PostMessageW(target, WM_RBUTTONDOWN, MK_RBUTTON,
+                                 MAKELPARAM(client.x, client.y));
+                    if (g_settings.debugLogging) {
+                        Wh_Log(L"Replaying the right-click down for %p", target);
+                    }
+                }
             }
             return 1;
         }
@@ -6920,38 +6944,12 @@ LRESULT CustomMenuWindowProc(MenuWindow* window, HWND hwnd, UINT msg,
         }
         case WM_LBUTTONDOWN:
         case WM_RBUTTONDOWN: {
+            // Clicks inside our windows land here; outside clicks are handled
+            // by the low-level hook, which replays right-clicks to the target.
             const std::vector<RECT> rects = SessionWindowRects(session);
             POINT screen = clientPoint;
             ClientToScreen(hwnd, &screen);
             if (SessionLevelAtPoint(rects, screen) < 0) {
-                if (g_settings.debugLogging) {
-                    Wh_Log(L"Outside %s closes the session",
-                           msg == WM_RBUTTONDOWN ? L"right-click" : L"click");
-                }
-                if (msg == WM_RBUTTONDOWN) {
-                    const HWND target = WindowFromPoint(screen);
-                    bool ours = false;
-                    for (MenuWindow* menuWindow : session->windows) {
-                        if (menuWindow->Handle() == target) {
-                            ours = true;
-                            break;
-                        }
-                    }
-                    if (target && !ours) {
-                        // Explorer re-targets the item on the button-down, so
-                        // replay it now; the matching up follows at teardown.
-                        POINT client = screen;
-                        ScreenToClient(target, &client);
-                        session->pendingTarget = target;
-                        session->pendingScreen = screen;
-                        PostMessageW(target, WM_RBUTTONDOWN, MK_RBUTTON,
-                                     MAKELPARAM(client.x, client.y));
-                        if (g_settings.debugLogging) {
-                            Wh_Log(L"Replaying the right-click down for %p",
-                                   target);
-                        }
-                    }
-                }
                 session->done = true;
             }
             return 0;

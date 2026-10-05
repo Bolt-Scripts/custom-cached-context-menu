@@ -6886,28 +6886,28 @@ MenuModel BuildCoreModel(Scope scope, const std::vector<std::wstring>& paths, Sh
         viewMenu.iconRef = L"@glyph:E890";
         viewMenu.children.push_back(makeViewAction(L"Extra large icons", L"viewxlarge",
                                                    ViewAction::ViewExtraLargeIcons,
-                                                   kModelNone, L"@glyph:F0E2", 256));
+                                                   kModelNone, L"@icon:view-xlarge", 256));
         viewMenu.children.push_back(makeViewAction(L"Large icons", L"viewlarge",
                                                    ViewAction::ViewLargeIcons, kModelNone,
-                                                   L"@glyph:F0E2", 96));
+                                                   L"@icon:view-large", 96));
         viewMenu.children.push_back(makeViewAction(L"Medium icons", L"viewmedium",
                                                    ViewAction::ViewMediumIcons, kModelNone,
-                                                   L"@glyph:E8A9", 48));
+                                                   L"@icon:view-medium", 48));
         viewMenu.children.push_back(makeViewAction(L"Small icons", L"viewsmall",
                                                    ViewAction::ViewSmallIcons, kModelNone,
-                                                   L"@glyph:E8A9"));
+                                                   L"@icon:view-small"));
         viewMenu.children.push_back(makeViewAction(L"List", L"viewlist",
                                                    ViewAction::ViewList, kModelNone,
-                                                   L"@glyph:EA37"));
+                                                   L"@icon:view-list"));
         viewMenu.children.push_back(makeViewAction(L"Details", L"viewdetails",
                                                    ViewAction::ViewDetails, kModelNone,
-                                                   L"@glyph:E9D5"));
+                                                   L"@icon:view-details"));
         viewMenu.children.push_back(makeViewAction(L"Tiles", L"viewtiles",
                                                    ViewAction::ViewTiles, kModelNone,
-                                                   L"@glyph:ECA5"));
+                                                   L"@icon:view-tiles"));
         viewMenu.children.push_back(makeViewAction(L"Content", L"viewcontent",
                                                    ViewAction::ViewContent, kModelNone,
-                                                   L"@glyph:E8FD"));
+                                                   L"@icon:view-content"));
         {
             MenuItem separator{};
             separator.id = nextId++;

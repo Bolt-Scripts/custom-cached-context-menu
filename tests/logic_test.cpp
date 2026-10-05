@@ -1975,10 +1975,10 @@ int main() {
         for (const cmo::MenuItem& child : viewMenu ? viewMenu->children
                                                    : std::vector<cmo::MenuItem>{}) {
             if (child.label == L"Large icons") {
-                hasLargeGlyph = child.iconRef == L"@glyph:F0E2";
+                hasLargeGlyph = child.iconRef == L"@icon:view-large";
             }
             if (child.label == L"Details") {
-                hasDetailsGlyph = child.iconRef == L"@glyph:E9D5";
+                hasDetailsGlyph = child.iconRef == L"@icon:view-details";
             }
         }
         CHECK(hasLargeGlyph);
@@ -3514,6 +3514,30 @@ int main() {
         CHECK(cmo::ResolveStockIcon(L"info", id, shellStock) && !shellStock);
         CHECK(cmo::ResolveStockIcon(L"folder", id, shellStock) && shellStock);
         CHECK(!cmo::ResolveStockIcon(L"notastock", id, shellStock));
+    }
+
+    // v2.6 view actions have distinct icons.
+    {
+        cmo::MenuModel model =
+            cmo::BuildCoreModel(cmo::Scope::Background, {}, cmo::Shape::Single);
+        std::vector<std::wstring> viewIcons;
+        for (const cmo::MenuItem& item : model.items) {
+            if (item.kind == cmo::ItemKind::Submenu && !item.children.empty()) {
+                for (const cmo::MenuItem& child : item.children) {
+                    if (child.viewAction !=
+                            static_cast<uint32_t>(cmo::ViewAction::None) &&
+                        !child.iconRef.empty()) {
+                        viewIcons.push_back(child.iconRef);
+                    }
+                }
+            }
+        }
+        for (size_t i = 0; i < viewIcons.size(); ++i) {
+            for (size_t j = i + 1; j < viewIcons.size(); ++j) {
+                CHECK(viewIcons[i] != viewIcons[j]);
+            }
+        }
+        CHECK(viewIcons.size() >= 8);
     }
 
     if (g_failures == 0) {

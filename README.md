@@ -36,6 +36,7 @@ untouched native menu, including extended verbs.
 |---|---|---|
 | Shift bypass | on | Hold Shift while right-clicking for the native menu. |
 | Menu mode | 0 (custom) | 0 = self-rendered menu (automatic fallback to the classic menu after 3 consecutive failures); 1 = classic owner-drawn menu. |
+| Theme | Custom (menu.ini) | Rewrites the appearance block of `menu.ini` with a bundled preset (Windows 11/10 dark and light, Nord, Dracula, Solarized, Gruvbox, One Dark, AMOLED, High Contrast). Applied when changed, never on restart. |
 | Show classic menu item | on | Adds a "Show classic menu" entry at the bottom of the menu. |
 | Warm-up extensions | common list | File types pre-built at Explorer startup. |
 | Warm-up delay | 5 s | Delay before background warm-up starts. |
@@ -43,7 +44,9 @@ untouched native menu, including extended verbs.
 | Debug logging | off | Logs timings and diagnostics. |
 | Instant menu open | on | Temporarily disables system menu animation (fade and slide) while this mod's menu opens, so it appears instantly. Session-only; restored immediately. |
 | Submenu open delay | 150 ms | Hover delay before a submenu opens while the replacement menu is shown; restored afterwards. 0 = instant, -1 = keep the Windows setting. |
-| More options submenu | on | Moves Windows extras and third-party shell extension entries into one submenu. |
+| Move Windows extras | on | Moves the configured Windows extras into the More options submenu. |
+| Move third-party handlers | on | Moves third-party shell extension entries into the More options submenu. |
+| Keep in the main menu | empty | Comma-separated labels or verbs that stay in the main menu instead of moving into the submenu. |
 | More options submenu label | `More options` | Label of that submenu. |
 | Windows items to move | Share, Add to Favorites, … | Comma-separated labels or verbs of Windows items to move into the submenu. |
 
@@ -60,8 +63,13 @@ changed a value the file is rewritten so the correction is visible. When the
 schema grows, the file is rewritten into the same layout with your values
 kept.
 
-The full key reference, predicate syntax, commands, submenus, and per-item
-overrides are documented in [`docs/CONFIG.md`](docs/CONFIG.md).
+The full key reference, predicate syntax, commands, submenus, per-item
+overrides, icon sources, and theme behavior are documented in
+[`docs/CONFIG.md`](docs/CONFIG.md).
+
+Icons accept `@icon:<name>` (a curated symbol library), `@stock:<name>`
+(Windows system icons), `@glyph:XXXX`, `@ext:.pdf`, or a `path,index`
+resource — all with true transparency in the custom renderer.
 
 ## Known limitations
 

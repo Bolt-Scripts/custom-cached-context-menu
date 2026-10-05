@@ -137,6 +137,45 @@ the base section when that theme is active; keys not listed inherit from
   rules; the last matching section wins per key.
 - `[meta]` — `schemaVersion`. Managed automatically; do not hand-edit.
 
+## Icons
+
+Icon values accept, in any `icon` key or core override:
+
+- `@icon:<name>` — a curated symbol library: `copy`, `cut`, `paste`, `delete`,
+  `rename`, `properties`, `refresh`, `open`, `openwith`, `folder`, `file`,
+  `drive`, `network`, `share`, `pin`, `unpin`, `new`, `link`, `terminal`,
+  `run`, `admin`, `search`, `filter`, `check`, `star`, `lock`, `info`,
+  `warning`, `error`, `up`, `down`, `left`, `right`, `more`, `close`,
+  `settings`, `personalize`, `display`, `selectall`, `sort`, `group`, and the
+  view sizes `view-xlarge`, `view-large`, `view-medium`, `view-small`,
+  `view-list`, `view-details`, `view-tiles`, `view-content`.
+- `@stock:<name>` — Windows system icons: `info`, `warning`, `error`,
+  `question`, `shield`, `folder`, `drive`, `network`, `computer`, `desktop`,
+  `documents`, `downloads`, `music`, `pictures`, `videos`, `recycle`.
+- `@glyph:XXXX` — a raw Segoe Fluent/MDL2 codepoint.
+- `@ext:<.ext|folder|drive>` — the shell's type icon.
+- `path,index` — an icon resource from a DLL/EXE/ICO (environment variables
+  expanded).
+
+Custom-rendered icons keep their alpha; the classic menu path composites them
+over the menu background.
+
+## Advanced options
+
+The built-in grouping is controlled by the Windhawk settings: **Move Windows
+extras**, **Move third-party handlers**, and **Keep in the main menu**
+(comma-separated labels or verbs). In `menu.ini`, `keep` rules also protect
+items from the built-in grouping, so `keep = label:"TortoiseSVN*"` keeps that
+handler in the main menu.
+
+## Themes
+
+The **Theme** setting rewrites the appearance block of `menu.ini` with a
+bundled preset, keeping `[rules]`, `[command]`, `[submenu]`, and `[item]`
+sections. It is applied when the setting changes (and when the file is first
+created), never on restart — so edits made after selecting a theme survive.
+Switch to **Custom (menu.ini)** and back to re-apply.
+
 ## Predicates
 
 `label:` (glob with `*`; `&` accelerators and trailing ellipses ignored),

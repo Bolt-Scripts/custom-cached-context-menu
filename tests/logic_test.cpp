@@ -2134,10 +2134,11 @@ int main() {
 
         cmo::RulesConfig bad;
         std::vector<cmo::ConfigParseError> badErrors;
-        CHECK(!cmo::ParseRulesConfig(L"[appearance]\nbackground = nope\n", bad, badErrors));
+        CHECK(cmo::ParseRulesConfig(L"[appearance]\nbackground = nope\n", bad, badErrors));
         CHECK(!badErrors.empty() && badErrors[0].line == 2);
+        CHECK(bad.appearance.background == 0xF01E1E1Eu);
         std::vector<cmo::ConfigParseError> unknownErrors;
-        CHECK(!cmo::ParseRulesConfig(L"[appearance]\nnotAKey = 1\n", bad, unknownErrors));
+        CHECK(cmo::ParseRulesConfig(L"[appearance]\nnotAKey = 1\n", bad, unknownErrors));
         CHECK(!unknownErrors.empty() && unknownErrors[0].line == 2);
     }
 
@@ -2321,9 +2322,9 @@ int main() {
         CHECK(store.ApplyTextForTesting(L"[appearance]\ncornerRadius = 4\n"));
         CHECK(store.Revision() == 1);
         CHECK(store.Snapshot() && store.Snapshot()->appearance.cornerRadius == 4);
-        CHECK(!store.ApplyTextForTesting(L"[appearance]\ncornerRadius = nope\n"));
-        CHECK(store.Revision() == 1);
-        CHECK(store.Snapshot() && store.Snapshot()->appearance.cornerRadius == 4);
+        CHECK(store.ApplyTextForTesting(L"[appearance]\ncornerRadius = nope\n"));
+        CHECK(store.Revision() == 2);
+        CHECK(store.Snapshot() && store.Snapshot()->appearance.cornerRadius == 8);
         CHECK(!cmo::ConfigFilePath().empty());
         CHECK(cmo::ConfigFilePath().find(L"menu.ini") != std::wstring::npos);
     }
@@ -2774,8 +2775,12 @@ int main() {
 
         CHECK(cmo::WriteConfigFile(path, L"[appearance]\ncornerRadius = nope\n"));
         store.RefreshIfChanged();
-        CHECK(store.Revision() == 2);
-        CHECK(store.Snapshot()->appearance.cornerRadius == 7);
+        CHECK(store.Revision() == 3);
+        CHECK(store.Snapshot()->appearance.cornerRadius == 8);
+        std::wstring corrected;
+        CHECK(cmo::ReadConfigFile(path, corrected));
+        CHECK(corrected.find(L"cornerRadius = 8") != std::wstring::npos);
+        CHECK(corrected.find(L"nope") == std::wstring::npos);
         DeleteFileW(path.c_str());
     }
 
@@ -2859,11 +2864,13 @@ int main() {
         CHECK(metrics.headerColor == 0x55667788u);
 
         std::vector<cmo::ConfigParseError> badErrors;
-        CHECK(!cmo::ParseRulesConfig(L"[appearance]\nmarker = zigzag\n", config,
-                                     badErrors));
+        CHECK(cmo::ParseRulesConfig(L"[appearance]\nmarker = zigzag\n", config,
+                                    badErrors));
         CHECK(!badErrors.empty());
-        CHECK(!cmo::ParseRulesConfig(L"[appearance]\ncornerRadii = 1, 2, 3\n", config,
-                                     badErrors));
+        CHECK(config.appearance.marker == cmo::MarkerStyle::Dot);
+        CHECK(cmo::ParseRulesConfig(L"[appearance]\ncornerRadii = 1, 2, 3\n", config,
+                                    badErrors));
+        CHECK(!config.appearance.hasCornerRadii);
     }
 
     // v2.1 per-item overrides: parse, glob, last wins, children.
@@ -2961,8 +2968,11 @@ int main() {
         CHECK(model.items[2].builtinAction == cmo::BuiltinAction::Properties);
 
         std::vector<cmo::ConfigParseError> badErrors;
-        CHECK(!cmo::ParseRulesConfig(L"[command \"X\"]\naction = explode\n", config,
-                                     badErrors));
+        CHECK(cmo::ParseRulesConfig(L"[command \"X\"]\naction = explode\n", config,
+                                    badErrors));
+        CHECK(!badErrors.empty());
+        CHECK(config.commands.size() == 1 &&
+              config.commands[0].action == cmo::BuiltinAction::None);
     }
 
     // v2.1 accelerators: &&, single &, trailing &, ranges.
@@ -3135,12 +3145,16 @@ int main() {
     {
         cmo::RulesConfig config;
         std::vector<cmo::ConfigParseError> errors;
-        CHECK(!cmo::ParseRulesConfig(L"[appearance]\nshadowBlur = 20000\n", config,
-                                     errors));
-        CHECK(!cmo::ParseRulesConfig(L"[appearance]\nmaxWidth = 1000000\n", config,
-                                     errors));
-        CHECK(!cmo::ParseRulesConfig(L"[appearance]\nitemHeight = 100000\n", config,
-                                     errors));
+        CHECK(cmo::ParseRulesConfig(L"[appearance]\nshadowBlur = 20000\n", config,
+                                    errors));
+        CHECK(config.appearance.shadowBlur == 64);
+        CHECK(!errors.empty());
+        CHECK(cmo::ParseRulesConfig(L"[appearance]\nmaxWidth = 1000000\n", config,
+                                    errors));
+        CHECK(config.appearance.maxWidth == 4096);
+        CHECK(cmo::ParseRulesConfig(L"[appearance]\nitemHeight = 100000\n", config,
+                                    errors));
+        CHECK(config.appearance.itemHeight == 256);
         CHECK(cmo::ParseRulesConfig(
             L"[appearance]\nshadowBlur = 32\nmaxWidth = 4096\n", config, errors));
 
@@ -3234,8 +3248,8 @@ int main() {
 
         cmo::RulesConfig config;
         std::vector<cmo::ConfigParseError> errors;
-        CHECK(!cmo::ParseRulesConfig(L"[appearance]\nmarker = zigzag\n", config,
-                                     errors));
+        CHECK(cmo::ParseRulesConfig(L"[appearance]\nmarker = zigzag\n", config,
+                                    errors));
         CHECK(!errors.empty());
         CHECK(errors[0].message.find(L"dot|check|bar|none") != std::wstring::npos);
     }
@@ -3246,7 +3260,7 @@ int main() {
         std::vector<cmo::ConfigParseError> errors;
         CHECK(cmo::ParseRulesConfig(L"[meta]\nschemaVersion = 3\n", config, errors));
         CHECK(config.schemaVersion == 3);
-        CHECK(!cmo::ParseRulesConfig(L"[meta]\nnotAKey = 1\n", config, errors));
+        CHECK(cmo::ParseRulesConfig(L"[meta]\nnotAKey = 1\n", config, errors));
         CHECK(!errors.empty());
 
         CHECK(cmo::ReadSchemaVersion(L"[meta]\nschemaVersion = 2\n") == 2);
@@ -3406,10 +3420,11 @@ int main() {
         const std::wstring bad = L"this is not a config";
         CHECK(cmo::WriteConfigFile(path, bad));
         store.RefreshIfChanged();
-        CHECK(store.Revision() == 2);
-        std::wstring unchanged;
-        CHECK(cmo::ReadConfigFile(path, unchanged));
-        CHECK(unchanged == bad);
+        CHECK(store.Revision() == 3);
+        std::wstring rewritten;
+        CHECK(cmo::ReadConfigFile(path, rewritten));
+        CHECK(rewritten.find(L"[appearance]") != std::wstring::npos);
+        CHECK(rewritten.find(L"schemaVersion = 2") != std::wstring::npos);
         DeleteFileW(path.c_str());
     }
 

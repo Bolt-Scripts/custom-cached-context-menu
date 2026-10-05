@@ -1616,105 +1616,209 @@ std::wstring AppearanceErrorFor(const std::wstring& key) {
     return message;
 }
 
-// Applies one appearance key/value; false means invalid key or value.
+// Applies one appearance key/value. Known keys always apply something
+// (clamped or default); `warning` is set when the value was adjusted.
+// Returns false only for a key with no schema row.
 bool ApplyAppearanceValue(Appearance& appearance, const std::wstring& key,
-                          const std::wstring& value) {
+                          const std::wstring& value,
+                          std::wstring* warning = nullptr) {
     if (!SchemaHasKey(key)) {
         return false;
     }
     const std::wstring normalized = ToLowerCopy(key);
-    if (normalized == L"background") return ParseColor(value, appearance.background);
-    if (normalized == L"blur") return ParseBool(value, appearance.blur);
+    const ConfigSchemaEntry* row = SchemaFind(normalized);
+    auto warn = [&](const std::wstring& message) {
+        if (warning) {
+            *warning = message;
+        }
+    };
+    auto applyInt = [&](int& field, int fallback) {
+        int parsed = 0;
+        if (!ParseIntValue(value, parsed)) {
+            field = fallback;
+            warn(L"invalid integer, using " + std::to_wstring(fallback));
+            return true;
+        }
+        if (parsed < row->minValue || parsed > row->maxValue) {
+            const int clamped = std::clamp(parsed, row->minValue, row->maxValue);
+            field = clamped;
+            warn(L"value " + std::to_wstring(parsed) + L" clamped to " +
+                 std::to_wstring(clamped) + L" (range " +
+                 std::to_wstring(row->minValue) + L"-" +
+                 std::to_wstring(row->maxValue) + L")");
+            return true;
+        }
+        field = parsed;
+        return true;
+    };
+    auto applyBool = [&](bool& field, bool fallback) {
+        bool parsed = false;
+        if (!ParseBool(value, parsed)) {
+            field = fallback;
+            warn(L"invalid boolean, using the default");
+            return true;
+        }
+        field = parsed;
+        return true;
+    };
+    auto applyColor = [&](uint32_t& field, bool* hasFlag) {
+        uint32_t parsed = 0;
+        if (!ParseColor(value, parsed)) {
+            if (hasFlag) {
+                *hasFlag = false;
+                warn(L"invalid color, leaving it unset");
+            } else {
+                uint32_t fallback = 0;
+                ParseColor(row->defaultValue, fallback);
+                field = fallback;
+                warn(L"invalid color, using the default");
+            }
+            return true;
+        }
+        field = parsed;
+        if (hasFlag) {
+            *hasFlag = true;
+        }
+        return true;
+    };
+    auto applyEnum = [&](auto parse, auto& field, const auto& fallback) {
+        if (!parse(value, field)) {
+            field = fallback;
+            warn(std::wstring(L"invalid value, using the default; expected ") +
+                 row->validValues);
+            return true;
+        }
+        return true;
+    };
+
+    if (normalized == L"background") return applyColor(appearance.background, nullptr);
+    if (normalized == L"blur") {
+        return applyBool(appearance.blur, wcscmp(row->defaultValue, L"true") == 0);
+    }
     if (normalized == L"blurstrength") {
-        return ParseBoundedInt(value, appearance.blurStrength, 0, 64);
+        return applyInt(appearance.blurStrength, _wtoi(row->defaultValue));
     }
     if (normalized == L"cornerradius") {
-        return ParseBoundedInt(value, appearance.cornerRadius, 0, 256);
+        return applyInt(appearance.cornerRadius, _wtoi(row->defaultValue));
     }
-    if (normalized == L"border") return ParseColor(value, appearance.border);
+    if (normalized == L"border") return applyColor(appearance.border, nullptr);
     if (normalized == L"borderwidth") {
-        return ParseBoundedInt(value, appearance.borderWidth, 0, 64);
+        return applyInt(appearance.borderWidth, _wtoi(row->defaultValue));
     }
-    if (normalized == L"shadow") return ParseBool(value, appearance.shadow);
+    if (normalized == L"shadow") {
+        return applyBool(appearance.shadow, wcscmp(row->defaultValue, L"true") == 0);
+    }
     if (normalized == L"shadowsize") {
-        return ParseBoundedInt(value, appearance.shadowSize, 0, 64);
+        return applyInt(appearance.shadowSize, _wtoi(row->defaultValue));
     }
-    if (normalized == L"font") return ParseFont(value, appearance.fontFace, appearance.fontSize);
+    if (normalized == L"font") {
+        if (!ParseFont(value, appearance.fontFace, appearance.fontSize)) {
+            ParseFont(row->defaultValue, appearance.fontFace, appearance.fontSize);
+            warn(L"invalid font, using the default");
+        }
+        return true;
+    }
     if (normalized == L"itemheight") {
-        return ParseBoundedInt(value, appearance.itemHeight, 1, 256);
+        return applyInt(appearance.itemHeight, _wtoi(row->defaultValue));
     }
     if (normalized == L"iconsize") {
-        return ParseBoundedInt(value, appearance.iconSize, 1, 256);
+        return applyInt(appearance.iconSize, _wtoi(row->defaultValue));
     }
     if (normalized == L"padding") {
-        return ParseBoundedInt(value, appearance.padding, 0, 256);
+        return applyInt(appearance.padding, _wtoi(row->defaultValue));
     }
-    if (normalized == L"separator") return ParseColor(value, appearance.separator);
-    if (normalized == L"hoverbackground") return ParseColor(value, appearance.hoverBackground);
-    if (normalized == L"pressedbackground") return ParseColor(value, appearance.pressedBackground);
-    if (normalized == L"textcolor") return ParseColor(value, appearance.textColor);
-    if (normalized == L"disabledtextcolor") return ParseColor(value, appearance.disabledTextColor);
-    if (normalized == L"submenuarrow") return ParseColor(value, appearance.submenuArrow);
-    if (normalized == L"animation") return ParseAnimationKind(value, appearance.animation);
+    if (normalized == L"separator") return applyColor(appearance.separator, nullptr);
+    if (normalized == L"hoverbackground") {
+        return applyColor(appearance.hoverBackground, nullptr);
+    }
+    if (normalized == L"pressedbackground") {
+        return applyColor(appearance.pressedBackground, nullptr);
+    }
+    if (normalized == L"textcolor") return applyColor(appearance.textColor, nullptr);
+    if (normalized == L"disabledtextcolor") {
+        return applyColor(appearance.disabledTextColor, nullptr);
+    }
+    if (normalized == L"submenuarrow") {
+        return applyColor(appearance.submenuArrow, nullptr);
+    }
+    if (normalized == L"animation") {
+        AnimationKind fallback = AnimationKind::None;
+        ParseAnimationKind(row->defaultValue, fallback);
+        return applyEnum(ParseAnimationKind, appearance.animation, fallback);
+    }
     if (normalized == L"animationduration") {
-        return ParseBoundedInt(value, appearance.animationDuration, 0, 10000);
+        return applyInt(appearance.animationDuration, _wtoi(row->defaultValue));
     }
     if (normalized == L"verticalpadding") {
-        return ParseBoundedInt(value, appearance.verticalPadding, 0, 256);
+        return applyInt(appearance.verticalPadding, _wtoi(row->defaultValue));
     }
     if (normalized == L"minwidth") {
-        return ParseBoundedInt(value, appearance.minWidth, 0, 4096);
+        return applyInt(appearance.minWidth, _wtoi(row->defaultValue));
     }
     if (normalized == L"maxwidth") {
-        return ParseBoundedInt(value, appearance.maxWidth, 0, 4096);
+        return applyInt(appearance.maxWidth, _wtoi(row->defaultValue));
     }
     if (normalized == L"itempadding") {
-        return ParseBoundedInt(value, appearance.itemPadding, 0, 256);
+        int parsed = 0;
+        if (!ParseIntValue(value, parsed)) {
+            appearance.itemPadding = -1;
+            warn(L"invalid integer, leaving it unset (defaults to padding)");
+        } else if (parsed < row->minValue || parsed > row->maxValue) {
+            const int clamped = std::clamp(parsed, row->minValue, row->maxValue);
+            appearance.itemPadding = clamped;
+            warn(L"value " + std::to_wstring(parsed) + L" clamped to " +
+                 std::to_wstring(clamped));
+        } else {
+            appearance.itemPadding = parsed;
+        }
+        return true;
     }
     if (normalized == L"separatorspacing") {
-        return ParseBoundedInt(value, appearance.separatorSpacing, 0, 256);
+        return applyInt(appearance.separatorSpacing, _wtoi(row->defaultValue));
     }
     if (normalized == L"markerwidth") {
-        return ParseBoundedInt(value, appearance.markerWidth, 0, 256);
+        return applyInt(appearance.markerWidth, _wtoi(row->defaultValue));
     }
     if (normalized == L"fontweight") {
-        return ParseFontWeight(value, appearance.fontWeight);
+        FontWeightKind fallback = FontWeightKind::Normal;
+        ParseFontWeight(row->defaultValue, fallback);
+        return applyEnum(ParseFontWeight, appearance.fontWeight, fallback);
     }
     if (normalized == L"fontstyle") {
-        return ParseFontStyle(value, appearance.fontStyle);
+        FontStyleKind fallback = FontStyleKind::Normal;
+        ParseFontStyle(row->defaultValue, fallback);
+        return applyEnum(ParseFontStyle, appearance.fontStyle, fallback);
     }
     if (normalized == L"cornerradii") {
         if (!ParseCornerRadii(value, appearance.cornerRadii)) {
-            return false;
+            appearance.hasCornerRadii = false;
+            warn(L"invalid radii, leaving them unset; expected tl,tr,br,bl");
+        } else {
+            appearance.hasCornerRadii = true;
         }
-        appearance.hasCornerRadii = true;
         return true;
     }
     if (normalized == L"shadowopacity") {
-        return ParseBoundedInt(value, appearance.shadowOpacity, 0, 255);
+        return applyInt(appearance.shadowOpacity, _wtoi(row->defaultValue));
     }
     if (normalized == L"shadowblur") {
-        return ParseBoundedInt(value, appearance.shadowBlur, 0, 64);
+        return applyInt(appearance.shadowBlur, _wtoi(row->defaultValue));
     }
     if (normalized == L"marker") {
-        return ParseMarkerStyle(value, appearance.marker);
+        MarkerStyle fallback = MarkerStyle::Dot;
+        ParseMarkerStyle(row->defaultValue, fallback);
+        return applyEnum(ParseMarkerStyle, appearance.marker, fallback);
     }
     if (normalized == L"markercolor") {
-        if (!ParseColor(value, appearance.markerColor)) {
-            return false;
-        }
-        appearance.hasMarkerColor = true;
-        return true;
+        return applyColor(appearance.markerColor, &appearance.hasMarkerColor);
     }
     if (normalized == L"headercolor") {
-        if (!ParseColor(value, appearance.headerColor)) {
-            return false;
-        }
-        appearance.hasHeaderColor = true;
-        return true;
+        return applyColor(appearance.headerColor, &appearance.hasHeaderColor);
     }
     if (normalized == L"showaccelerators") {
-        return ParseAcceleratorMode(value, appearance.acceleratorMode);
+        AcceleratorMode fallback = AcceleratorMode::Underline;
+        ParseAcceleratorMode(row->defaultValue, fallback);
+        return applyEnum(ParseAcceleratorMode, appearance.acceleratorMode, fallback);
     }
     return false;
 }
@@ -2141,23 +2245,41 @@ bool ParseRulesConfig(const std::wstring& text, RulesConfig& out,
 
         if (section == Section::Appearance) {
             Appearance scratch = Appearance{};
-            if (!ApplyAppearanceValue(scratch, key, value)) {
-                errors.push_back({lineNumber, AppearanceErrorFor(key)});
+            std::wstring adjustment;
+            if (!ApplyAppearanceValue(scratch, key, value, &adjustment)) {
+                errors.push_back(
+                    {lineNumber, L"unknown key '" + key + L"', ignored"});
             } else {
+                if (!adjustment.empty()) {
+                    errors.push_back(
+                        {lineNumber, L"'" + key + L"': " + adjustment});
+                }
                 baseValues.emplace_back(key, value);
             }
         } else if (section == Section::AppearanceLight) {
             Appearance scratch = Appearance{};
-            if (!ApplyAppearanceValue(scratch, key, value)) {
-                errors.push_back({lineNumber, AppearanceErrorFor(key)});
+            std::wstring adjustment;
+            if (!ApplyAppearanceValue(scratch, key, value, &adjustment)) {
+                errors.push_back(
+                    {lineNumber, L"unknown key '" + key + L"', ignored"});
             } else {
+                if (!adjustment.empty()) {
+                    errors.push_back(
+                        {lineNumber, L"'" + key + L"': " + adjustment});
+                }
                 lightValues.emplace_back(key, value);
             }
         } else if (section == Section::AppearanceDark) {
             Appearance scratch = Appearance{};
-            if (!ApplyAppearanceValue(scratch, key, value)) {
-                errors.push_back({lineNumber, AppearanceErrorFor(key)});
+            std::wstring adjustment;
+            if (!ApplyAppearanceValue(scratch, key, value, &adjustment)) {
+                errors.push_back(
+                    {lineNumber, L"unknown key '" + key + L"', ignored"});
             } else {
+                if (!adjustment.empty()) {
+                    errors.push_back(
+                        {lineNumber, L"'" + key + L"': " + adjustment});
+                }
                 darkValues.emplace_back(key, value);
             }
         } else if (section == Section::Rules) {
@@ -2201,25 +2323,21 @@ bool ParseRulesConfig(const std::wstring& text, RulesConfig& out,
         }
     }
 
-    if (!errors.empty()) {
-        return false;
-    }
-
     for (const auto& pair : baseValues) {
-        ApplyAppearanceValue(config.appearance, pair.first, pair.second);
+        ApplyAppearanceValue(config.appearance, pair.first, pair.second, nullptr);
     }
     config.hasLightAppearance = hasLight;
     if (hasLight) {
         config.lightAppearance = config.appearance;
         for (const auto& pair : lightValues) {
-            ApplyAppearanceValue(config.lightAppearance, pair.first, pair.second);
+            ApplyAppearanceValue(config.lightAppearance, pair.first, pair.second, nullptr);
         }
     }
     config.hasDarkAppearance = hasDark;
     if (hasDark) {
         config.darkAppearance = config.appearance;
         for (const auto& pair : darkValues) {
-            ApplyAppearanceValue(config.darkAppearance, pair.first, pair.second);
+            ApplyAppearanceValue(config.darkAppearance, pair.first, pair.second, nullptr);
         }
     }
 
@@ -2288,15 +2406,123 @@ size_t CountSubstring(const std::wstring& text, const std::wstring& needle) {
     return count;
 }
 
-std::wstring NormalizeAppearanceValue(const ConfigSchemaEntry& entry,
-                                      const std::wstring& value) {
-    if (entry.type == SettingType::Color) {
-        uint32_t argb = 0;
-        if (ParseColor(value, argb)) {
-            return FormatColorRgba(argb);
+std::wstring FormatFontSize(float size) {
+    wchar_t buffer[32] = {};
+    swprintf(buffer, ARRAYSIZE(buffer), L"%.4g", static_cast<double>(size));
+    return buffer;
+}
+
+bool AppearanceValueIsValid(const ConfigSchemaEntry& entry,
+                            const std::wstring& value) {
+    switch (entry.type) {
+        case SettingType::Bool: {
+            bool parsed = false;
+            return ParseBool(value, parsed);
+        }
+        case SettingType::Int: {
+            int parsed = 0;
+            return ParseIntValue(value, parsed);
+        }
+        case SettingType::Color: {
+            uint32_t parsed = 0;
+            return ParseColor(value, parsed);
+        }
+        case SettingType::Font: {
+            std::wstring face;
+            float size = 0;
+            return ParseFont(value, face, size);
+        }
+        case SettingType::Enum: {
+            const std::wstring valid(entry.validValues);
+            size_t start = 0;
+            while (start <= valid.size()) {
+                const size_t bar = valid.find(L'|', start);
+                const std::wstring part =
+                    valid.substr(start, bar == std::wstring::npos
+                                            ? std::wstring::npos
+                                            : bar - start);
+                if (_wcsicmp(part.c_str(), TrimWhitespace(value).c_str()) == 0) {
+                    return true;
+                }
+                if (bar == std::wstring::npos) {
+                    break;
+                }
+                start = bar + 1;
+            }
+            return false;
+        }
+        case SettingType::IntList: {
+            CornerRadii radii;
+            return ParseCornerRadii(value, radii);
         }
     }
-    return value;
+    return false;
+}
+
+std::wstring NormalizeAppearanceValue(const ConfigSchemaEntry& entry,
+                                      const std::wstring& value) {
+    switch (entry.type) {
+        case SettingType::Color: {
+            uint32_t argb = 0;
+            if (ParseColor(value, argb)) {
+                return FormatColorRgba(argb);
+            }
+            break;
+        }
+        case SettingType::Int: {
+            int parsed = 0;
+            if (ParseIntValue(value, parsed)) {
+                return std::to_wstring(
+                    std::clamp(parsed, entry.minValue, entry.maxValue));
+            }
+            break;
+        }
+        case SettingType::Bool: {
+            bool parsed = false;
+            if (ParseBool(value, parsed)) {
+                return parsed ? L"true" : L"false";
+            }
+            break;
+        }
+        case SettingType::Enum: {
+            const std::wstring valid(entry.validValues);
+            size_t start = 0;
+            while (start <= valid.size()) {
+                const size_t bar = valid.find(L'|', start);
+                const std::wstring part =
+                    valid.substr(start, bar == std::wstring::npos
+                                            ? std::wstring::npos
+                                            : bar - start);
+                if (_wcsicmp(part.c_str(), TrimWhitespace(value).c_str()) == 0) {
+                    return part;
+                }
+                if (bar == std::wstring::npos) {
+                    break;
+                }
+                start = bar + 1;
+            }
+            break;
+        }
+        case SettingType::Font: {
+            std::wstring face;
+            float size = 0;
+            if (ParseFont(value, face, size)) {
+                return face + L", " + FormatFontSize(size);
+            }
+            break;
+        }
+        case SettingType::IntList: {
+            CornerRadii radii;
+            if (ParseCornerRadii(value, radii)) {
+                return std::to_wstring(radii.topLeft) + L", " +
+                       std::to_wstring(radii.topRight) + L", " +
+                       std::to_wstring(radii.bottomRight) + L", " +
+                       std::to_wstring(radii.bottomLeft);
+            }
+            break;
+        }
+    }
+    return entry.defaultValue;
 }
 
 struct CanonicalSource {
@@ -2404,7 +2630,9 @@ std::wstring CanonicalizeConfig(const std::wstring& text, int toVersion) {
             lastGroup = entry.group;
         }
         const auto it = source.baseValues.find(ToLowerCopy(entry.key));
-        const bool hasValue = it != source.baseValues.end();
+        const bool hasValue =
+            it != source.baseValues.end() &&
+            (!entry.unset || AppearanceValueIsValid(entry, it->second));
         if (entry.unset && !hasValue) {
             out += L"; ";
             out += entry.key;
@@ -3299,13 +3527,18 @@ public:
 
 private:
     void ApplyAndMigrate(const std::wstring& path, const std::wstring& text) {
-        if (!ApplyText(text)) {
-            return;
-        }
-        if (ReadSchemaVersion(text) < kConfigSchemaVersion) {
-            const std::wstring migrated =
+        std::vector<ConfigParseError> warnings;
+        ApplyText(text, &warnings);
+        const bool older = ReadSchemaVersion(text) < kConfigSchemaVersion;
+        if (older || !warnings.empty()) {
+            // Rewrite only when it changes the file: corrected values become
+            // visible, while unparseable structured content is preserved
+            // without rewrite churn.
+            const std::wstring canonical =
                 CanonicalizeConfig(text, kConfigSchemaVersion);
-            WriteConfigFile(path, migrated);
+            if (canonical != text) {
+                WriteConfigFile(path, canonical);
+            }
         }
     }
 
@@ -3322,14 +3555,17 @@ private:
         stampTimeHigh_ = attributes.ftLastWriteTime.dwHighDateTime;
     }
 
-    bool ApplyText(const std::wstring& text) {
+    bool ApplyText(const std::wstring& text,
+                   std::vector<ConfigParseError>* outWarnings = nullptr) {
         RulesConfig parsed;
-        std::vector<ConfigParseError> errors;
-        if (!ParseRulesConfig(text, parsed, errors)) {
-            for (const ConfigParseError& error : errors) {
-                Wh_Log(L"menu.ini:%d: %s", error.line, error.message.c_str());
-            }
-            return false;
+        std::vector<ConfigParseError> warnings;
+        ParseRulesConfig(text, parsed, warnings);
+        for (const ConfigParseError& warning : warnings) {
+            Wh_Log(L"menu.ini:%d: warning: %s", warning.line,
+                   warning.message.c_str());
+        }
+        if (outWarnings) {
+            *outWarnings = warnings;
         }
         uint64_t previousRevision = 0;
         {

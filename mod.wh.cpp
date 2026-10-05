@@ -12077,8 +12077,16 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
             if (capturedMenu) {
                 ReplayInto(capture.obj, capturedMenu, capture.indexMenu,
                            capture.idCmdFirst, capture.idCmdLast, capture.flags);
+                // The normal discovery initializes the menu so dynamic labels
+                // and submenus are populated; the captured path must do the
+                // same or those items are pruned as unreadable.
+                if (!capture.menuInitialized) {
+                    InitializeMenuRecursive(capture, capturedMenu, 0);
+                    capture.menuInitialized = true;
+                }
                 model = BuildModelFromHMenu(capturedMenu, capture.idCmdFirst,
                                             signature, capture.obj);
+                ApplyRegistryIcons(model.items, signature);
                 DestroyMenu(capturedMenu);
             }
         } else {

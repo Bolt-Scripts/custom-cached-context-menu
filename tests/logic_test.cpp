@@ -3218,6 +3218,28 @@ int main() {
         CHECK(cache.Has(sig));
     }
 
+    // v2.2 config schema: every default accepted, unknown keys rejected,
+    // error text names the valid values.
+    {
+        CHECK(cmo::kConfigSchemaVersion >= 1);
+        for (const cmo::ConfigSchemaEntry& entry : cmo::kAppearanceSchema) {
+            cmo::Appearance appearance{};
+            CHECK(cmo::ApplyAppearanceValue(appearance, entry.key,
+                                            entry.defaultValue));
+        }
+        cmo::Appearance appearance{};
+        CHECK(!cmo::ApplyAppearanceValue(appearance, L"notAKey", L"1"));
+        CHECK(cmo::SchemaFind(L"ITEMHEIGHT") != nullptr);
+        CHECK(cmo::SchemaFind(L"notakey") == nullptr);
+
+        cmo::RulesConfig config;
+        std::vector<cmo::ConfigParseError> errors;
+        CHECK(!cmo::ParseRulesConfig(L"[appearance]\nmarker = zigzag\n", config,
+                                     errors));
+        CHECK(!errors.empty());
+        CHECK(errors[0].message.find(L"dot|check|bar|none") != std::wstring::npos);
+    }
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

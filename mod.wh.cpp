@@ -1452,9 +1452,130 @@ bool ParseCornerRadii(const std::wstring& value, CornerRadii& radii) {
     return true;
 }
 
+enum class SettingType : uint8_t { Bool, Int, Color, Font, Enum, IntList };
+
+// The build's schema version; bump when a row is added.
+constexpr int kConfigSchemaVersion = 1;
+
+struct ConfigSchemaEntry {
+    const wchar_t* section;
+    const wchar_t* key;
+    SettingType type;
+    const wchar_t* defaultValue;
+    const wchar_t* validValues;  // Enum/IntList values, else nullptr
+    int minValue;                // Int only
+    int maxValue;                // Int only
+    const wchar_t* description;
+    int sinceVersion;
+};
+
+const ConfigSchemaEntry kAppearanceSchema[] = {
+    {L"appearance", L"background", SettingType::Color, L"#F01E1E1E", nullptr, 0, 0,
+     L"Panel background color (#AARRGGBB); also the blur tint.", 1},
+    {L"appearance", L"blur", SettingType::Bool, L"true", nullptr, 0, 0,
+     L"Blur the screen behind the menu.", 1},
+    {L"appearance", L"blurstrength", SettingType::Int, L"12", nullptr, 0, 64,
+     L"Blur strength.", 1},
+    {L"appearance", L"cornerradius", SettingType::Int, L"8", nullptr, 0, 256,
+     L"Corner radius in pixels.", 1},
+    {L"appearance", L"border", SettingType::Color, L"#22FFFFFF", nullptr, 0, 0,
+     L"Border color.", 1},
+    {L"appearance", L"borderwidth", SettingType::Int, L"1", nullptr, 0, 64,
+     L"Border width in pixels (0 hides it).", 1},
+    {L"appearance", L"shadow", SettingType::Bool, L"true", nullptr, 0, 0,
+     L"Draw the drop shadow.", 1},
+    {L"appearance", L"shadowsize", SettingType::Int, L"12", nullptr, 0, 64,
+     L"Shadow spread in pixels.", 1},
+    {L"appearance", L"font", SettingType::Font, L"Segoe UI, 9", nullptr, 0, 0,
+     L"Text font face and size.", 1},
+    {L"appearance", L"itemheight", SettingType::Int, L"28", nullptr, 1, 256,
+     L"Item height in pixels.", 1},
+    {L"appearance", L"iconsize", SettingType::Int, L"16", nullptr, 1, 256,
+     L"Icon size in pixels.", 1},
+    {L"appearance", L"padding", SettingType::Int, L"6", nullptr, 0, 256,
+     L"Base padding inside the panel.", 1},
+    {L"appearance", L"separator", SettingType::Color, L"#18FFFFFF", nullptr, 0, 0,
+     L"Separator line color.", 1},
+    {L"appearance", L"hoverbackground", SettingType::Color, L"#14FFFFFF", nullptr, 0,
+     0, L"Hovered item background.", 1},
+    {L"appearance", L"pressedbackground", SettingType::Color, L"#22FFFFFF", nullptr,
+     0, 0, L"Pressed item background.", 1},
+    {L"appearance", L"textcolor", SettingType::Color, L"#FFFFFFFF", nullptr, 0, 0,
+     L"Item text color.", 1},
+    {L"appearance", L"disabledtextcolor", SettingType::Color, L"#66FFFFFF", nullptr,
+     0, 0, L"Disabled item text color.", 1},
+    {L"appearance", L"submenuarrow", SettingType::Color, L"#99FFFFFF", nullptr, 0,
+     0, L"Submenu arrow color.", 1},
+    {L"appearance", L"animation", SettingType::Enum, L"none", L"none|fade|slide", 0,
+     0, L"Menu open/close animation.", 1},
+    {L"appearance", L"animationduration", SettingType::Int, L"120", nullptr, 0,
+     10000, L"Animation duration in milliseconds.", 1},
+    {L"appearance", L"verticalpadding", SettingType::Int, L"4", nullptr, 0, 256,
+     L"Padding above and below the items.", 2},
+    {L"appearance", L"minwidth", SettingType::Int, L"0", nullptr, 0, 4096,
+     L"Minimum panel width (0 = automatic).", 2},
+    {L"appearance", L"maxwidth", SettingType::Int, L"0", nullptr, 0, 4096,
+     L"Maximum panel width (0 = unlimited).", 2},
+    {L"appearance", L"itempadding", SettingType::Int, L"6", nullptr, 0, 256,
+     L"Horizontal inset of item content; defaults to padding.", 2},
+    {L"appearance", L"separatorspacing", SettingType::Int, L"0", nullptr, 0, 256,
+     L"Extra space above and below separators.", 2},
+    {L"appearance", L"markerwidth", SettingType::Int, L"14", nullptr, 0, 256,
+     L"Width of the selection marker column.", 2},
+    {L"appearance", L"fontweight", SettingType::Enum, L"normal",
+     L"normal|semibold|bold", 0, 0, L"Text weight.", 2},
+    {L"appearance", L"fontstyle", SettingType::Enum, L"normal", L"normal|italic", 0,
+     0, L"Text style.", 2},
+    {L"appearance", L"cornerradii", SettingType::IntList, L"2, 4, 6, 8",
+     L"tl,tr,br,bl", 0, 0, L"Per-corner radii; overrides cornerRadius.", 2},
+    {L"appearance", L"shadowopacity", SettingType::Int, L"120", nullptr, 0, 255,
+     L"Shadow alpha (0-255).", 2},
+    {L"appearance", L"shadowblur", SettingType::Int, L"12", nullptr, 0, 64,
+     L"Shadow blur radius in pixels.", 2},
+    {L"appearance", L"marker", SettingType::Enum, L"dot", L"dot|check|bar|none", 0,
+     0, L"Selection marker style.", 2},
+    {L"appearance", L"markercolor", SettingType::Color, L"#FFFFFFFF", nullptr, 0, 0,
+     L"Marker color; defaults to textColor.", 2},
+    {L"appearance", L"headercolor", SettingType::Color, L"#66FFFFFF", nullptr, 0, 0,
+     L"Header text color; defaults to disabledTextColor.", 2},
+    {L"appearance", L"showaccelerators", SettingType::Enum, L"underline",
+     L"underline|strip|raw", 0, 0, L"Mnemonic handling.", 2},
+};
+
+const ConfigSchemaEntry* SchemaFind(const std::wstring& key) {
+    for (const ConfigSchemaEntry& entry : kAppearanceSchema) {
+        if (_wcsicmp(entry.key, key.c_str()) == 0) {
+            return &entry;
+        }
+    }
+    return nullptr;
+}
+
+bool SchemaHasKey(const std::wstring& key) {
+    return SchemaFind(key) != nullptr;
+}
+
+std::wstring AppearanceErrorFor(const std::wstring& key) {
+    std::wstring message = L"invalid value for '" + key + L"'";
+    const ConfigSchemaEntry* entry = SchemaFind(key);
+    if (entry) {
+        if (entry->validValues) {
+            message += L": expected ";
+            message += entry->validValues;
+        } else if (entry->type == SettingType::Int) {
+            message += L": expected an integer " + std::to_wstring(entry->minValue) +
+                       L"-" + std::to_wstring(entry->maxValue);
+        }
+    }
+    return message;
+}
+
 // Applies one appearance key/value; false means invalid key or value.
 bool ApplyAppearanceValue(Appearance& appearance, const std::wstring& key,
                           const std::wstring& value) {
+    if (!SchemaHasKey(key)) {
+        return false;
+    }
     if (key == L"background") return ParseColor(value, appearance.background);
     if (key == L"blur") return ParseBool(value, appearance.blur);
     if (key == L"blurstrength") {
@@ -1964,21 +2085,21 @@ bool ParseRulesConfig(const std::wstring& text, RulesConfig& out,
         if (section == Section::Appearance) {
             Appearance scratch = Appearance{};
             if (!ApplyAppearanceValue(scratch, key, value)) {
-                errors.push_back({lineNumber, L"invalid value for '" + key + L"'"});
+                errors.push_back({lineNumber, AppearanceErrorFor(key)});
             } else {
                 baseValues.emplace_back(key, value);
             }
         } else if (section == Section::AppearanceLight) {
             Appearance scratch = Appearance{};
             if (!ApplyAppearanceValue(scratch, key, value)) {
-                errors.push_back({lineNumber, L"invalid value for '" + key + L"'"});
+                errors.push_back({lineNumber, AppearanceErrorFor(key)});
             } else {
                 lightValues.emplace_back(key, value);
             }
         } else if (section == Section::AppearanceDark) {
             Appearance scratch = Appearance{};
             if (!ApplyAppearanceValue(scratch, key, value)) {
-                errors.push_back({lineNumber, L"invalid value for '" + key + L"'"});
+                errors.push_back({lineNumber, AppearanceErrorFor(key)});
             } else {
                 darkValues.emplace_back(key, value);
             }

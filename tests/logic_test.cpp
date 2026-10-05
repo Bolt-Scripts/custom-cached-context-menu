@@ -3240,6 +3240,20 @@ int main() {
         CHECK(errors[0].message.find(L"dot|check|bar|none") != std::wstring::npos);
     }
 
+    // v2.2 [meta]: parse the version and read it from raw text.
+    {
+        cmo::RulesConfig config;
+        std::vector<cmo::ConfigParseError> errors;
+        CHECK(cmo::ParseRulesConfig(L"[meta]\nschemaVersion = 3\n", config, errors));
+        CHECK(config.schemaVersion == 3);
+        CHECK(!cmo::ParseRulesConfig(L"[meta]\nnotAKey = 1\n", config, errors));
+        CHECK(!errors.empty());
+
+        CHECK(cmo::ReadSchemaVersion(L"[meta]\nschemaVersion = 2\n") == 2);
+        CHECK(cmo::ReadSchemaVersion(L"[appearance]\nitemHeight = 28\n") == 0);
+        CHECK(cmo::ReadSchemaVersion(L"[meta]\nschemaVersion = x\n") == 0);
+    }
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

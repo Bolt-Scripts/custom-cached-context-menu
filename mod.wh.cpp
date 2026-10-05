@@ -1244,6 +1244,7 @@ struct RulesConfig {
     std::vector<CustomCommand> commands;
     std::vector<CustomSubmenu> submenus;
     std::vector<ItemOverride> overrides;
+    int schemaVersion = 0;
     uint64_t revision = 0;
 };
 
@@ -1971,6 +1972,7 @@ bool ParseRulesConfig(const std::wstring& text, RulesConfig& out,
         Command,
         Submenu,
         Item,
+        Meta,
         Ignored,
     };
     Section section = Section::None;
@@ -2055,6 +2057,8 @@ bool ParseRulesConfig(const std::wstring& text, RulesConfig& out,
                         static_cast<int>(config.overrides.size()) - 1;
                     section = Section::Item;
                 }
+            } else if (name == L"meta") {
+                section = Section::Meta;
             } else if (name.rfind(L"submenu ", 0) == 0) {
                 const std::wstring submenuName = ExtractQuoted(rawName.substr(8));
                 if (submenuName.empty()) {
@@ -2127,6 +2131,16 @@ bool ParseRulesConfig(const std::wstring& text, RulesConfig& out,
                 errors.push_back({lineNumber,
                                   L"invalid item value for '" + key + L"'"});
             }
+        } else if (section == Section::Meta) {
+            if (key == L"schemaversion") {
+                if (!ParseBoundedInt(value, config.schemaVersion, 0, 1000)) {
+                    errors.push_back(
+                        {lineNumber, L"invalid value for 'schemaVersion'"});
+                }
+            } else {
+                errors.push_back(
+                    {lineNumber, L"unknown key '" + key + L"' in [meta]"});
+            }
         } else if (section == Section::Ignored) {
             // Intentionally ignored.
         } else {
@@ -2158,6 +2172,54 @@ bool ParseRulesConfig(const std::wstring& text, RulesConfig& out,
 
     out = std::move(config);
     return true;
+}
+
+int ReadSchemaVersion(const std::wstring& text) {
+    bool inMeta = false;
+    size_t pos = 0;
+    while (pos <= text.size()) {
+        const size_t newline = text.find(L'\n', pos);
+        std::wstring line =
+            text.substr(pos, newline == std::wstring::npos ? std::wstring::npos
+                                                           : newline - pos);
+        pos = newline == std::wstring::npos ? text.size() + 1 : newline + 1;
+        if (!line.empty() && line.back() == L'\r') {
+            line.pop_back();
+        }
+        const std::wstring trimmed = TrimWhitespace(StripInlineComment(line));
+        if (trimmed.empty() || trimmed[0] == L';') {
+            continue;
+        }
+        if (trimmed[0] == L'[') {
+            if (trimmed.back() != L']') {
+                inMeta = false;
+                continue;
+            }
+            const std::wstring name = ToLowerCopy(
+                TrimWhitespace(trimmed.substr(1, trimmed.size() - 2)));
+            inMeta = (name == L"meta");
+            continue;
+        }
+        if (!inMeta) {
+            continue;
+        }
+        const size_t equals = trimmed.find(L'=');
+        if (equals == std::wstring::npos) {
+            continue;
+        }
+        const std::wstring key =
+            ToLowerCopy(TrimWhitespace(trimmed.substr(0, equals)));
+        if (key != L"schemaversion") {
+            continue;
+        }
+        int version = 0;
+        if (ParseBoundedInt(TrimWhitespace(trimmed.substr(equals + 1)), version, 0,
+                            1000)) {
+            return version;
+        }
+        return 0;
+    }
+    return 0;
 }
 
 // ===========================================================================

@@ -3655,6 +3655,30 @@ int main() {
         CHECK(winrarTop);
     }
 
+    // v2.6 themes apply, preserve structure, and are idempotent.
+    {
+        const std::wstring base =
+            L"[appearance]\nbackground = 1, 1, 1, 255\n[rules]\n"
+            L"hide = label:\"Cast to Device\"\n";
+        const std::wstring themed = cmo::ApplyTheme(base, 1);
+        CHECK(themed != base);
+        CHECK(themed.find(L"hide = label:\"Cast to Device\"") != std::wstring::npos);
+        cmo::RulesConfig parsed;
+        std::vector<cmo::ConfigParseError> errors;
+        CHECK(cmo::ParseRulesConfig(themed, parsed, errors));
+        CHECK(errors.empty());
+        CHECK(cmo::ApplyTheme(themed, 1) == themed);  // idempotent
+        CHECK(cmo::ApplyTheme(base, 0) == base);      // custom leaves it alone
+
+        for (size_t i = 1; i < cmo::kThemesCount; ++i) {
+            const std::wstring applied = cmo::ApplyTheme(base, static_cast<int>(i));
+            cmo::RulesConfig config;
+            std::vector<cmo::ConfigParseError> presetErrors;
+            CHECK(cmo::ParseRulesConfig(applied, config, presetErrors));
+            CHECK(presetErrors.empty());
+        }
+    }
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

@@ -3823,6 +3823,221 @@ std::wstring IconRefGlyph(const std::wstring& iconRef) {
 }
 
 // ===========================================================================
+// [CMO:Themes] Bundled appearance presets.
+// ===========================================================================
+
+struct ThemePreset {
+    const wchar_t* name;
+    const wchar_t* snippet;
+};
+
+const ThemePreset kThemes[] = {    {L"Custom (menu.ini)", L""},    {L"Windows 11 Dark",
+     LR"INI([appearance]
+background = 32, 32, 32, 242
+border = 255, 255, 255, 34
+separator = 255, 255, 255, 24
+hoverBackground = 255, 255, 255, 20
+pressedBackground = 255, 255, 255, 34
+textColor = 255, 255, 255, 255
+disabledTextColor = 255, 255, 255, 102
+submenuArrow = 255, 255, 255, 153
+headerColor = 255, 255, 255, 102
+markerColor = 96, 165, 250, 255
+cornerRadius = 8
+shadowOpacity = 120
+shadowBlur = 12
+animation = fade
+[appearance.light]
+background = 243, 243, 243, 242
+border = 0, 0, 0, 22
+separator = 0, 0, 0, 18
+hoverBackground = 0, 0, 0, 12
+pressedBackground = 0, 0, 0, 20
+textColor = 32, 32, 32, 255
+disabledTextColor = 96, 96, 96, 255
+submenuArrow = 0, 0, 0, 120
+headerColor = 96, 96, 96, 255
+markerColor = 0, 120, 212, 255
+)INI"},    {L"Windows 11 Light",
+     LR"INI([appearance]
+background = 243, 243, 243, 242
+border = 0, 0, 0, 22
+separator = 0, 0, 0, 18
+hoverBackground = 0, 0, 0, 12
+pressedBackground = 0, 0, 0, 20
+textColor = 32, 32, 32, 255
+disabledTextColor = 96, 96, 96, 255
+submenuArrow = 0, 0, 0, 120
+headerColor = 96, 96, 96, 255
+markerColor = 0, 120, 212, 255
+cornerRadius = 8
+shadowOpacity = 90
+shadowBlur = 12
+animation = fade
+[appearance.dark]
+background = 32, 32, 32, 242
+border = 255, 255, 255, 34
+separator = 255, 255, 255, 24
+hoverBackground = 255, 255, 255, 20
+pressedBackground = 255, 255, 255, 34
+textColor = 255, 255, 255, 255
+disabledTextColor = 255, 255, 255, 102
+submenuArrow = 255, 255, 255, 153
+headerColor = 255, 255, 255, 102
+markerColor = 96, 165, 250, 255
+)INI"},    {L"Windows 10 Dark",
+     LR"INI([appearance]
+background = 31, 31, 31, 255
+border = 70, 70, 70, 255
+separator = 70, 70, 70, 255
+hoverBackground = 51, 51, 51, 255
+pressedBackground = 70, 70, 70, 255
+textColor = 255, 255, 255, 255
+disabledTextColor = 130, 130, 130, 255
+submenuArrow = 200, 200, 200, 255
+headerColor = 130, 130, 130, 255
+markerColor = 0, 153, 255, 255
+cornerRadius = 0
+shadow = false
+blur = false
+animation = none
+)INI"},    {L"Windows 10 Light",
+     LR"INI([appearance]
+background = 240, 240, 240, 255
+border = 160, 160, 160, 255
+separator = 200, 200, 200, 255
+hoverBackground = 220, 220, 220, 255
+pressedBackground = 200, 200, 200, 255
+textColor = 0, 0, 0, 255
+disabledTextColor = 120, 120, 120, 255
+submenuArrow = 60, 60, 60, 255
+headerColor = 120, 120, 120, 255
+markerColor = 0, 102, 204, 255
+cornerRadius = 0
+shadow = false
+blur = false
+animation = none
+)INI"},    {L"Nord",
+     LR"INI([appearance]
+background = 46, 52, 64, 242
+border = 76, 86, 106, 255
+separator = 76, 86, 106, 180
+hoverBackground = 59, 66, 82, 255
+pressedBackground = 76, 86, 106, 255
+textColor = 216, 222, 233, 255
+disabledTextColor = 143, 188, 187, 140
+submenuArrow = 216, 222, 233, 170
+headerColor = 143, 188, 187, 255
+markerColor = 136, 192, 208, 255
+cornerRadius = 6
+shadowOpacity = 130
+)INI"},    {L"Dracula",
+     LR"INI([appearance]
+background = 40, 42, 54, 242
+border = 68, 71, 90, 255
+separator = 68, 71, 90, 180
+hoverBackground = 68, 71, 90, 255
+pressedBackground = 98, 114, 164, 255
+textColor = 248, 248, 242, 255
+disabledTextColor = 98, 114, 164, 180
+submenuArrow = 189, 147, 249, 255
+headerColor = 139, 233, 253, 255
+markerColor = 80, 250, 123, 255
+cornerRadius = 6
+shadowOpacity = 130
+)INI"},    {L"Solarized Dark",
+     LR"INI([appearance]
+background = 0, 43, 54, 242
+border = 7, 54, 66, 255
+separator = 88, 110, 117, 160
+hoverBackground = 7, 54, 66, 255
+pressedBackground = 88, 110, 117, 255
+textColor = 147, 161, 161, 255
+disabledTextColor = 88, 110, 117, 180
+submenuArrow = 131, 148, 150, 255
+headerColor = 38, 139, 210, 255
+markerColor = 181, 137, 0, 255
+cornerRadius = 4
+shadowOpacity = 140
+)INI"},    {L"Gruvbox Dark",
+     LR"INI([appearance]
+background = 40, 40, 40, 242
+border = 80, 73, 69, 255
+separator = 80, 73, 69, 180
+hoverBackground = 60, 56, 54, 255
+pressedBackground = 80, 73, 69, 255
+textColor = 235, 219, 178, 255
+disabledTextColor = 146, 131, 116, 180
+submenuArrow = 213, 196, 161, 255
+headerColor = 215, 153, 33, 255
+markerColor = 215, 153, 33, 255
+cornerRadius = 6
+shadowOpacity = 130
+)INI"},    {L"One Dark",
+     LR"INI([appearance]
+background = 40, 44, 52, 242
+border = 62, 68, 81, 255
+separator = 62, 68, 81, 180
+hoverBackground = 50, 56, 66, 255
+pressedBackground = 62, 68, 81, 255
+textColor = 171, 178, 191, 255
+disabledTextColor = 92, 99, 112, 200
+submenuArrow = 152, 160, 174, 255
+headerColor = 97, 175, 239, 255
+markerColor = 97, 175, 239, 255
+cornerRadius = 6
+shadowOpacity = 130
+)INI"},    {L"AMOLED Black",
+     LR"INI([appearance]
+background = 0, 0, 0, 252
+border = 40, 40, 40, 255
+separator = 40, 40, 40, 180
+hoverBackground = 30, 30, 30, 255
+pressedBackground = 45, 45, 45, 255
+textColor = 255, 255, 255, 255
+disabledTextColor = 110, 110, 110, 255
+submenuArrow = 180, 180, 180, 255
+headerColor = 150, 150, 150, 255
+markerColor = 0, 200, 255, 255
+cornerRadius = 8
+shadow = false
+shadowOpacity = 0
+blur = false
+)INI"},    {L"High Contrast",
+     LR"INI([appearance]
+background = 0, 0, 0, 255
+border = 255, 255, 255, 255
+borderWidth = 2
+separator = 255, 255, 255, 200
+hoverBackground = 255, 255, 255, 40
+pressedBackground = 255, 255, 255, 80
+textColor = 255, 255, 255, 255
+disabledTextColor = 180, 180, 180, 255
+submenuArrow = 255, 255, 255, 255
+headerColor = 255, 255, 255, 255
+markerColor = 255, 255, 0, 255
+cornerRadius = 0
+shadow = false
+blur = false
+animation = none
+font = Segoe UI, 10
+)INI"},};
+
+constexpr size_t kThemesCount = ARRAYSIZE(kThemes);
+
+// Applying a theme appends its snippet and canonicalizes: the theme wins for
+// appearance values while rules/commands/submenus/items are preserved.
+std::wstring ApplyTheme(const std::wstring& text, int themeIndex) {
+    if (themeIndex <= 0 || themeIndex >= static_cast<int>(kThemesCount)) {
+        return text;
+    }
+    std::wstring combined = text;
+    combined += L"\n";
+    combined += kThemes[themeIndex].snippet;
+    return CanonicalizeConfig(combined, kConfigSchemaVersion);
+}
+
+// ===========================================================================
 // [CMO:Layout] Appearance resolution, metrics, and render-ready layout.
 // ===========================================================================
 

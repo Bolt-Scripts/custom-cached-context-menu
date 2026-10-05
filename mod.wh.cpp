@@ -53,9 +53,15 @@ Design document: `docs/superpowers/specs/2026-10-04-context-menu-overhaul-design
 - instantMenuFade: true
   $name: Instant menu open
   $description: Temporarily disables system menu animation (fade and slide) while this mod's menu opens, so it appears instantly. Session-only; the previous setting is restored immediately.
-- advancedSubmenu: true
-  $name: More options submenu
-  $description: Move Windows extras and third-party shell extension entries into a submenu.
+- advancedSubmenuWindows: true
+  $name: Move Windows extras
+  $description: Move the configured Windows extras into the More options submenu.
+- advancedSubmenuThirdParty: true
+  $name: Move third-party handlers
+  $description: Move third-party shell extension entries into the More options submenu.
+- advancedSubmenuExclude: ""
+  $name: Keep in the main menu
+  $description: Comma-separated third-party labels or verbs that stay in the main menu instead of moving into the submenu.
 - advancedSubmenuLabel: More options
   $name: More options submenu label
   $description: Label of the submenu that collects extra items.
@@ -122,9 +128,11 @@ struct Settings {
     bool clearCache = false;
     bool debugLogging = false;
     bool instantMenuFade = true;
-    bool advancedSubmenu = true;
+    bool advancedSubmenuWindows = true;
+    bool advancedSubmenuThirdParty = true;
     std::wstring advancedSubmenuLabel = L"More options";
     std::vector<std::wstring> advancedSubmenuItems;
+    std::vector<std::wstring> advancedSubmenuExclude;
 };
 
 inline Settings g_settings;
@@ -193,7 +201,10 @@ void LoadSettings() {
     g_settings.clearCache = Wh_GetIntSetting(L"clearCache") != 0;
     g_settings.debugLogging = Wh_GetIntSetting(L"debugLogging") != 0;
     g_settings.instantMenuFade = Wh_GetIntSetting(L"instantMenuFade") != 0;
-    g_settings.advancedSubmenu = Wh_GetIntSetting(L"advancedSubmenu") != 0;
+    g_settings.advancedSubmenuWindows =
+        Wh_GetIntSetting(L"advancedSubmenuWindows") != 0;
+    g_settings.advancedSubmenuThirdParty =
+        Wh_GetIntSetting(L"advancedSubmenuThirdParty") != 0;
 
     PCWSTR advancedLabel = Wh_GetStringSetting(L"advancedSubmenuLabel");
     g_settings.advancedSubmenuLabel =
@@ -204,6 +215,11 @@ void LoadSettings() {
     g_settings.advancedSubmenuItems =
         ParseAdvancedItems(advancedItems ? advancedItems : L"");
     Wh_FreeStringSetting(advancedItems);
+
+    PCWSTR advancedExclude = Wh_GetStringSetting(L"advancedSubmenuExclude");
+    g_settings.advancedSubmenuExclude =
+        ParseAdvancedItems(advancedExclude ? advancedExclude : L"");
+    Wh_FreeStringSetting(advancedExclude);
 }
 
 }  // namespace cmo
@@ -481,28 +497,6 @@ bool IsKnownWindowsVerb(const std::wstring& verb) {
     return false;
 }
 
-// Advanced items are third-party handler entries plus configured Windows
-// extras. Core commands and the native fallback never move.
-bool IsAdvancedItem(const MenuItem& item) {
-    if (item.kind == ItemKind::Separator || item.action == ActionKind::Fallback) {
-        return false;
-    }
-    // An explicit setting entry always wins.
-    for (const std::wstring& token : g_settings.advancedSubmenuItems) {
-        if (LabelsMatchIgnoreCase(item.label, token) ||
-            EqualsIgnoreCase(item.canonicalVerb, token)) {
-            return true;
-        }
-    }
-    if (item.flags & kModelThirdParty) {
-        return true;
-    }
-    // Discovered items with a verb Windows does not use come from third-party
-    // handlers, regardless of how they are registered.
-    return (item.flags & kModelExtension) != 0 &&
-           !IsKnownWindowsVerb(item.canonicalVerb);
-}
-
 // Windows extras (configured list or a known Windows verb) sort above
 // third-party handlers inside the More options submenu.
 bool IsBuiltinExtra(const MenuItem& item) {
@@ -534,73 +528,6 @@ void CollapseSeparators(std::vector<MenuItem>& items) {
 
 // Moves advanced items into one submenu placed just above the native fallback
 // entry. Runs at open time so the setting applies without a rediscovery.
-void ReorganizeAdvancedItems(std::vector<MenuItem>& items) {
-    if (!g_settings.advancedSubmenu || g_settings.advancedSubmenuLabel.empty()) {
-        return;
-    }
-
-    std::vector<MenuItem> advanced;
-    std::vector<MenuItem> kept;
-    kept.reserve(items.size());
-    for (MenuItem& item : items) {
-        if (IsAdvancedItem(item)) {
-            advanced.push_back(std::move(item));
-        } else {
-            kept.push_back(std::move(item));
-        }
-    }
-    if (g_settings.debugLogging) {
-        for (const MenuItem& item : advanced) {
-            Wh_Log(L"More options: moved '%s' (verb '%s')", item.label.c_str(),
-                   item.canonicalVerb.c_str());
-        }
-        for (const MenuItem& item : kept) {
-            if (item.kind != ItemKind::Separator &&
-                item.action != ActionKind::Fallback &&
-                (item.flags & kModelExtension)) {
-                Wh_Log(L"More options: kept '%s' (verb '%s')", item.label.c_str(),
-                       item.canonicalVerb.c_str());
-            }
-        }
-    }
-    if (advanced.empty()) {
-        return;
-    }
-
-    // Built-in Windows extras first, third-party handlers last; both groups
-    // keep the shell's relative order. One separator splits the groups.
-    const auto customStart =
-        std::stable_partition(advanced.begin(), advanced.end(), IsBuiltinExtra);
-    if (customStart != advanced.begin() && customStart != advanced.end()) {
-        MenuItem separator{};
-        separator.id = 0xF001;
-        separator.kind = ItemKind::Separator;
-        advanced.insert(customStart, std::move(separator));
-    }
-
-    MenuItem submenu{};
-    submenu.id = 0xF000;
-    submenu.kind = ItemKind::Submenu;
-    submenu.action = ActionKind::Submenu;
-    submenu.label = g_settings.advancedSubmenuLabel;
-    submenu.iconRef = L"@glyph:E712";
-    submenu.children = std::move(advanced);
-
-    size_t insertAt = kept.size();
-    for (size_t i = 0; i < kept.size(); ++i) {
-        if (kept[i].action == ActionKind::Fallback) {
-            insertAt = i;
-            break;
-        }
-    }
-    while (insertAt > 0 && kept[insertAt - 1].kind == ItemKind::Separator) {
-        --insertAt;
-    }
-    kept.insert(kept.begin() + static_cast<std::ptrdiff_t>(insertAt),
-                std::move(submenu));
-    CollapseSeparators(kept);
-    items = std::move(kept);
-}
 
 // ===========================================================================
 // [CMO:NewMenu] The New submenu is built from ShellNew templates.
@@ -3674,6 +3601,128 @@ RulesApplication ApplyRulesConfigToModel(MenuModel& model,
     ApplyItemOverrides(model.items, config, ctx);
     InsertCustomItems(model, config, ctx);
     return application;
+}
+
+struct AdvancedGroupingOptions {
+    bool moveWindows = true;
+    bool moveThirdParty = true;
+    std::wstring label = L"More options";
+    std::vector<std::wstring> windowsItems;
+    std::vector<std::wstring> exclude;
+    const RulesConfig* rules = nullptr;
+    ItemContext ctx;
+};
+
+bool IsThirdPartyItem(const MenuItem& item) {
+    if (item.kind == ItemKind::Separator || item.action == ActionKind::Fallback) {
+        return false;
+    }
+    if (item.flags & kModelThirdParty) {
+        return true;
+    }
+    return (item.flags & kModelExtension) != 0 &&
+           !IsKnownWindowsVerb(item.canonicalVerb);
+}
+
+bool MatchesAnyToken(const MenuItem& item,
+                     const std::vector<std::wstring>& tokens) {
+    for (const std::wstring& token : tokens) {
+        if (LabelsMatchIgnoreCase(item.label, token) ||
+            EqualsIgnoreCase(item.canonicalVerb, token)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool IsKeptByRules(const MenuItem& item,
+                   const AdvancedGroupingOptions& options) {
+    if (!options.rules) {
+        return false;
+    }
+    for (const Rule& rule : options.rules->rules) {
+        if (rule.kind == RuleKind::Keep &&
+            PredicateExprMatches(rule.match, item, options.ctx)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void ReorganizeAdvancedItems(std::vector<MenuItem>& items,
+                             const AdvancedGroupingOptions& options) {
+    if ((!options.moveWindows && !options.moveThirdParty) ||
+        options.label.empty()) {
+        return;
+    }
+
+    std::vector<MenuItem> advanced;
+    std::vector<MenuItem> kept;
+    kept.reserve(items.size());
+    for (MenuItem& item : items) {
+        const bool windowsExtra =
+            options.moveWindows && MatchesAnyToken(item, options.windowsItems);
+        const bool thirdParty =
+            options.moveThirdParty && IsThirdPartyItem(item);
+        const bool protectedItem =
+            MatchesAnyToken(item, options.exclude) ||
+            IsKeptByRules(item, options);
+        if ((windowsExtra || thirdParty) && !protectedItem) {
+            advanced.push_back(std::move(item));
+        } else {
+            kept.push_back(std::move(item));
+        }
+    }
+    if (g_settings.debugLogging) {
+        for (const MenuItem& item : advanced) {
+            Wh_Log(L"More options: moved '%s' (verb '%s')", item.label.c_str(),
+                   item.canonicalVerb.c_str());
+        }
+        for (const MenuItem& item : kept) {
+            if (item.kind != ItemKind::Separator &&
+                item.action != ActionKind::Fallback &&
+                (item.flags & kModelExtension)) {
+                Wh_Log(L"More options: kept '%s' (verb '%s')", item.label.c_str(),
+                       item.canonicalVerb.c_str());
+            }
+        }
+    }
+    if (advanced.empty()) {
+        items = std::move(kept);
+        return;
+    }
+
+    const auto customStart =
+        std::stable_partition(advanced.begin(), advanced.end(), IsBuiltinExtra);
+    if (customStart != advanced.begin() && customStart != advanced.end()) {
+        MenuItem separator{};
+        separator.id = 0xF001;
+        separator.kind = ItemKind::Separator;
+        advanced.insert(customStart, std::move(separator));
+    }
+
+    MenuItem submenu{};
+    submenu.id = 0xF000;
+    submenu.kind = ItemKind::Submenu;
+    submenu.action = ActionKind::Submenu;
+    submenu.label = options.label;
+    submenu.iconRef = L"@glyph:E712";
+    submenu.children = std::move(advanced);
+
+    size_t insertAt = kept.size();
+    for (size_t i = 0; i < kept.size(); ++i) {
+        if (kept[i].action == ActionKind::Fallback) {
+            insertAt = i;
+            break;
+        }
+    }
+    while (insertAt > 0 && kept[insertAt - 1].kind == ItemKind::Separator) {
+        --insertAt;
+    }
+    kept.insert(kept.begin() + static_cast<std::ptrdiff_t>(insertAt),
+                std::move(submenu));
+    CollapseSeparators(kept);
+    items = std::move(kept);
 }
 
 // ===========================================================================
@@ -12065,13 +12114,13 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
 
         g_configStore.EnsureLoaded();
         g_configStore.RefreshIfChanged();
+        ItemContext itemCtx{};
+        itemCtx.scope = scope;
+        itemCtx.shape = shape;
+        itemCtx.paths = paths;
         std::shared_ptr<const RulesConfig> rules = g_configStore.Snapshot();
         bool hasMoveRules = false;
         if (rules) {
-            ItemContext itemCtx{};
-            itemCtx.scope = scope;
-            itemCtx.shape = shape;
-            itemCtx.paths = paths;
             hasMoveRules =
                 ApplyRulesConfigToModel(model, *rules, itemCtx).hasMoveRules;
         }
@@ -12096,7 +12145,15 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
         }
 
         if (!hasMoveRules) {
-            ReorganizeAdvancedItems(model.items);
+            AdvancedGroupingOptions grouping;
+            grouping.moveWindows = g_settings.advancedSubmenuWindows;
+            grouping.moveThirdParty = g_settings.advancedSubmenuThirdParty;
+            grouping.label = g_settings.advancedSubmenuLabel;
+            grouping.windowsItems = g_settings.advancedSubmenuItems;
+            grouping.exclude = g_settings.advancedSubmenuExclude;
+            grouping.rules = rules ? rules.get() : nullptr;
+            grouping.ctx = itemCtx;
+            ReorganizeAdvancedItems(model.items, grouping);
         }
 
         if (scope == Scope::Background || scope == Scope::Desktop) {

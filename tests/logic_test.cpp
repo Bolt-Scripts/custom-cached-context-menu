@@ -1431,10 +1431,23 @@ int main() {
     // into one submenu placed above the native fallback, with separators
     // collapsed. Disabled or empty cases leave the menu untouched.
     {
-        const bool previousEnabled = cmo::g_settings.advancedSubmenu;
+        const bool previousWindows = cmo::g_settings.advancedSubmenuWindows;
+        const bool previousThirdParty = cmo::g_settings.advancedSubmenuThirdParty;
         const std::wstring previousLabel = cmo::g_settings.advancedSubmenuLabel;
         const std::vector<std::wstring> previousItems =
             cmo::g_settings.advancedSubmenuItems;
+        const std::vector<std::wstring> previousExclude =
+            cmo::g_settings.advancedSubmenuExclude;
+
+        auto reorganize = [](std::vector<cmo::MenuItem>& items) {
+            cmo::AdvancedGroupingOptions options;
+            options.moveWindows = cmo::g_settings.advancedSubmenuWindows;
+            options.moveThirdParty = cmo::g_settings.advancedSubmenuThirdParty;
+            options.label = cmo::g_settings.advancedSubmenuLabel;
+            options.windowsItems = cmo::g_settings.advancedSubmenuItems;
+            options.exclude = cmo::g_settings.advancedSubmenuExclude;
+            cmo::ReorganizeAdvancedItems(items, options);
+        };
 
         CHECK(cmo::ParseAdvancedItems(L" Pin to Start ,, Open in Terminal ,").size() ==
               2);
@@ -1476,20 +1489,22 @@ int main() {
             return model;
         };
 
-        cmo::g_settings.advancedSubmenu = false;
+        cmo::g_settings.advancedSubmenuWindows = false;
+        cmo::g_settings.advancedSubmenuThirdParty = false;
         cmo::g_settings.advancedSubmenuLabel = L"Advanced";
         cmo::g_settings.advancedSubmenuItems =
             cmo::ParseAdvancedItems(L"Pin to Start, Open in Terminal");
         {
             cmo::MenuModel untouched = buildMenu();
-            cmo::ReorganizeAdvancedItems(untouched.items);
+            reorganize(untouched.items);
             CHECK(untouched.items.size() == 7);
         }
 
-        cmo::g_settings.advancedSubmenu = true;
+        cmo::g_settings.advancedSubmenuWindows = true;
+        cmo::g_settings.advancedSubmenuThirdParty = true;
         {
             cmo::MenuModel model = buildMenu();
-            cmo::ReorganizeAdvancedItems(model.items);
+            reorganize(model.items);
             // Open, separator, Share, Advanced, separator, fallback.
             CHECK(model.items.size() == 6);
             CHECK(model.items.back().action == cmo::ActionKind::Fallback);
@@ -1526,16 +1541,18 @@ int main() {
         {
             cmo::MenuModel model = buildMenu();
             model.items.erase(model.items.begin() + 2);
-            cmo::ReorganizeAdvancedItems(model.items);
+            reorganize(model.items);
             CHECK(model.items.size() == 6);
             for (const cmo::MenuItem& item : model.items) {
                 CHECK(item.label != L"Advanced");
             }
         }
 
-        cmo::g_settings.advancedSubmenu = previousEnabled;
+        cmo::g_settings.advancedSubmenuWindows = previousWindows;
+        cmo::g_settings.advancedSubmenuThirdParty = previousThirdParty;
         cmo::g_settings.advancedSubmenuLabel = previousLabel;
         cmo::g_settings.advancedSubmenuItems = previousItems;
+        cmo::g_settings.advancedSubmenuExclude = previousExclude;
     }
 
     // Ampersand accelerators and trailing ellipses are normalized before
@@ -1546,14 +1563,21 @@ int main() {
         CHECK(cmo::NormalizeMenuLabel(L"Open wit&h...") == L"Open with");
         CHECK(cmo::NormalizeMenuLabel(L"Smith && Sons") == L"Smith & Sons");
 
-        const bool previousEnabled = cmo::g_settings.advancedSubmenu;
+        const bool previousWindows = cmo::g_settings.advancedSubmenuWindows;
+        const bool previousThirdParty = cmo::g_settings.advancedSubmenuThirdParty;
         const std::wstring previousLabel = cmo::g_settings.advancedSubmenuLabel;
         const std::vector<std::wstring> previousItems =
             cmo::g_settings.advancedSubmenuItems;
-        cmo::g_settings.advancedSubmenu = true;
+        cmo::g_settings.advancedSubmenuWindows = true;
+        cmo::g_settings.advancedSubmenuThirdParty = true;
         cmo::g_settings.advancedSubmenuLabel = L"More options";
         cmo::g_settings.advancedSubmenuItems =
             cmo::ParseAdvancedItems(L"Add to Favorites, Open with");
+
+        auto isAdvanced = [](const cmo::MenuItem& item) {
+            return cmo::MatchesAnyToken(item, cmo::g_settings.advancedSubmenuItems) ||
+                   cmo::IsThirdPartyItem(item);
+        };
 
         auto extensionCommand = [](uint32_t id, const wchar_t* label,
                                    const wchar_t* verb) {
@@ -1567,18 +1591,19 @@ int main() {
             return item;
         };
 
-        CHECK(cmo::IsAdvancedItem(
+        CHECK(isAdvanced(
             extensionCommand(1, L"Add to &Favorites", L"pintohomefile")));
-        CHECK(cmo::IsAdvancedItem(extensionCommand(2, L"Open wit&h...", L"openas")));
+        CHECK(isAdvanced(extensionCommand(2, L"Open wit&h...", L"openas")));
         // Unknown verbs are third-party handlers.
-        CHECK(cmo::IsAdvancedItem(
+        CHECK(isAdvanced(
             extensionCommand(3, L"Extract Here", L"WinRAR.ExtractHere")));
-        CHECK(cmo::IsAdvancedItem(extensionCommand(4, L"Scan with Malwarebytes", L"")));
+        CHECK(isAdvanced(extensionCommand(4, L"Scan with Malwarebytes", L"")));
         // Known Windows verbs stay unless listed.
-        CHECK(!cmo::IsAdvancedItem(extensionCommand(5, L"Print", L"Print")));
-        CHECK(!cmo::IsAdvancedItem(extensionCommand(6, L"Cu&t", L"cut")));
+        CHECK(!isAdvanced(extensionCommand(5, L"Print", L"Print")));
+        CHECK(!isAdvanced(extensionCommand(6, L"Cu&t", L"cut")));
 
-        cmo::g_settings.advancedSubmenu = previousEnabled;
+        cmo::g_settings.advancedSubmenuWindows = previousWindows;
+        cmo::g_settings.advancedSubmenuThirdParty = previousThirdParty;
         cmo::g_settings.advancedSubmenuLabel = previousLabel;
         cmo::g_settings.advancedSubmenuItems = previousItems;
     }
@@ -1587,14 +1612,26 @@ int main() {
     // each group keeping the shell's relative order, with one separator
     // between them only when both groups exist.
     {
-        const bool previousEnabled = cmo::g_settings.advancedSubmenu;
+        const bool previousWindows = cmo::g_settings.advancedSubmenuWindows;
+        const bool previousThirdParty = cmo::g_settings.advancedSubmenuThirdParty;
         const std::wstring previousLabel = cmo::g_settings.advancedSubmenuLabel;
         const std::vector<std::wstring> previousItems =
             cmo::g_settings.advancedSubmenuItems;
-        cmo::g_settings.advancedSubmenu = true;
+        cmo::g_settings.advancedSubmenuWindows = true;
+        cmo::g_settings.advancedSubmenuThirdParty = true;
         cmo::g_settings.advancedSubmenuLabel = L"More options";
         cmo::g_settings.advancedSubmenuItems =
             cmo::ParseAdvancedItems(L"Share, Add to Favorites");
+
+        auto reorganize = [](std::vector<cmo::MenuItem>& items) {
+            cmo::AdvancedGroupingOptions options;
+            options.moveWindows = cmo::g_settings.advancedSubmenuWindows;
+            options.moveThirdParty = cmo::g_settings.advancedSubmenuThirdParty;
+            options.label = cmo::g_settings.advancedSubmenuLabel;
+            options.windowsItems = cmo::g_settings.advancedSubmenuItems;
+            options.exclude = cmo::g_settings.advancedSubmenuExclude;
+            cmo::ReorganizeAdvancedItems(items, options);
+        };
 
         auto advancedItem = [](uint32_t id, const wchar_t* label,
                                const wchar_t* verb, uint32_t flags) {
@@ -1616,7 +1653,7 @@ int main() {
         menu.push_back(advancedItem(4, L"Add to &Favorites", L"pintohomefile", 0));
         menu.push_back(advancedItem(5, L"TortoiseSVN", L"", cmo::kModelThirdParty));
 
-        cmo::ReorganizeAdvancedItems(menu);
+        reorganize(menu);
 
         const cmo::MenuItem* submenu = nullptr;
         for (const cmo::MenuItem& menuItem : menu) {
@@ -1639,7 +1676,7 @@ int main() {
         std::vector<cmo::MenuItem> customOnly;
         customOnly.push_back(advancedItem(1, L"WinRAR", L"", cmo::kModelThirdParty));
         customOnly.push_back(advancedItem(2, L"TortoiseSVN", L"", cmo::kModelThirdParty));
-        cmo::ReorganizeAdvancedItems(customOnly);
+        reorganize(customOnly);
         for (const cmo::MenuItem& menuItem : customOnly) {
             if (menuItem.kind == cmo::ItemKind::Submenu) {
                 CHECK(menuItem.children.size() == 2);
@@ -1651,7 +1688,7 @@ int main() {
         builtinOnly.push_back(advancedItem(1, L"Share", L"Windows.ModernShare", 0));
         builtinOnly.push_back(
             advancedItem(2, L"Add to &Favorites", L"pintohomefile", 0));
-        cmo::ReorganizeAdvancedItems(builtinOnly);
+        reorganize(builtinOnly);
         for (const cmo::MenuItem& menuItem : builtinOnly) {
             if (menuItem.kind == cmo::ItemKind::Submenu) {
                 CHECK(menuItem.children.size() == 2);
@@ -1659,7 +1696,8 @@ int main() {
             }
         }
 
-        cmo::g_settings.advancedSubmenu = previousEnabled;
+        cmo::g_settings.advancedSubmenuWindows = previousWindows;
+        cmo::g_settings.advancedSubmenuThirdParty = previousThirdParty;
         cmo::g_settings.advancedSubmenuLabel = previousLabel;
         cmo::g_settings.advancedSubmenuItems = previousItems;
     }
@@ -3547,6 +3585,74 @@ int main() {
         CHECK(text.find(L"1-256") != std::wstring::npos);
         CHECK(text.find(L"dot | check | bar | none") != std::wstring::npos);
         CHECK(text.find(L"schemaVersion = 4") != std::wstring::npos);
+    }
+
+    // v2.6 advanced grouping: toggles, exclude, keep.
+    {
+        auto makeItem = [](uint32_t id, const wchar_t* label, uint32_t flags) {
+            cmo::MenuItem item{};
+            item.id = id;
+            item.kind = cmo::ItemKind::Command;
+            item.action = cmo::ActionKind::ShellVerb;
+            item.label = label;
+            item.flags = flags;
+            return item;
+        };
+        auto build = [&makeItem] {
+            std::vector<cmo::MenuItem> items;
+            items.push_back(makeItem(1, L"Share", 0));
+            items.push_back(makeItem(2, L"WinRAR", cmo::kModelThirdParty));
+            cmo::MenuItem fallback = makeItem(3, L"Show classic menu", 0);
+            fallback.action = cmo::ActionKind::Fallback;
+            items.push_back(fallback);
+            return items;
+        };
+        auto hasSubmenu = [](const std::vector<cmo::MenuItem>& items) {
+            for (const cmo::MenuItem& item : items) {
+                if (item.kind == cmo::ItemKind::Submenu) return true;
+            }
+            return false;
+        };
+
+        cmo::AdvancedGroupingOptions both;
+        both.moveWindows = true;
+        both.moveThirdParty = true;
+        both.windowsItems = {L"Share"};
+        std::vector<cmo::MenuItem> items = build();
+        cmo::ReorganizeAdvancedItems(items, both);
+        CHECK(hasSubmenu(items));
+
+        cmo::AdvancedGroupingOptions thirdOff;
+        thirdOff.moveWindows = true;
+        thirdOff.moveThirdParty = false;
+        thirdOff.windowsItems = {L"Share"};
+        items = build();
+        cmo::ReorganizeAdvancedItems(items, thirdOff);
+        CHECK(items.size() == 3);  // Share moved, WinRAR stayed
+
+        cmo::AdvancedGroupingOptions excluded;
+        excluded.exclude = {L"WinRAR"};
+        items = build();
+        cmo::ReorganizeAdvancedItems(items, excluded);
+        bool winrarTop = false;
+        for (const cmo::MenuItem& item : items) {
+            if (item.label == L"WinRAR") winrarTop = true;
+        }
+        CHECK(winrarTop);
+
+        cmo::RulesConfig config;
+        std::vector<cmo::ConfigParseError> errors;
+        CHECK(cmo::ParseRulesConfig(L"[rules]\nkeep = label:WinRAR\n", config,
+                                    errors));
+        cmo::AdvancedGroupingOptions kept;
+        kept.rules = &config;
+        items = build();
+        cmo::ReorganizeAdvancedItems(items, kept);
+        winrarTop = false;
+        for (const cmo::MenuItem& item : items) {
+            if (item.label == L"WinRAR") winrarTop = true;
+        }
+        CHECK(winrarTop);
     }
 
     if (g_failures == 0) {

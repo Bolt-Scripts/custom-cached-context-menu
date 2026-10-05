@@ -3295,6 +3295,35 @@ int main() {
               L"[meta]\nschemaVersion = 1\n");
     }
 
+    // v2.2 lifecycle: old files migrate, bad files are untouched.
+    {
+        const std::wstring path = cmo::ConfigFilePath();
+        DeleteFileW(path.c_str());
+        cmo::ConfigStore store;
+        store.EnsureLoaded();
+        CHECK(store.Revision() == 1);
+
+        CHECK(cmo::WriteConfigFile(
+            path, L"[appearance]\nitemHeight = 30\n[meta]\nschemaVersion = 0\n"));
+        store.RefreshIfChanged();
+        CHECK(store.Revision() == 2);
+        CHECK(store.Snapshot()->appearance.itemHeight == 30);
+        std::wstring text;
+        CHECK(cmo::ReadConfigFile(path, text));
+        CHECK(text.find(L"schemaVersion = 1") != std::wstring::npos);
+        CHECK(text.find(L"itemHeight = 30") != std::wstring::npos);
+        CHECK(text.find(L"cornerRadius") != std::wstring::npos);
+
+        const std::wstring bad = L"this is not a config";
+        CHECK(cmo::WriteConfigFile(path, bad));
+        store.RefreshIfChanged();
+        CHECK(store.Revision() == 2);
+        std::wstring unchanged;
+        CHECK(cmo::ReadConfigFile(path, unchanged));
+        CHECK(unchanged == bad);
+        DeleteFileW(path.c_str());
+    }
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

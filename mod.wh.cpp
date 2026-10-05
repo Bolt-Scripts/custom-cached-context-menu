@@ -3143,7 +3143,7 @@ public:
         }
         std::wstring text;
         if (ReadConfigFile(path, text)) {
-            ApplyText(text);
+            ApplyAndMigrate(path, text);
         } else if (GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES) {
             Wh_Log(L"menu.ini: unable to read or decode the file");
         }
@@ -3176,10 +3176,11 @@ public:
 
         std::wstring text;
         if (ReadConfigFile(path, text)) {
-            ApplyText(text);
+            ApplyAndMigrate(path, text);
         } else if (GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES) {
             Wh_Log(L"menu.ini: unable to read or decode the file");
         }
+        UpdateStamp(path);
     }
 
     std::shared_ptr<const RulesConfig> Snapshot() const {
@@ -3197,6 +3198,17 @@ public:
     }
 
 private:
+    void ApplyAndMigrate(const std::wstring& path, const std::wstring& text) {
+        if (!ApplyText(text)) {
+            return;
+        }
+        if (ReadSchemaVersion(text) < kConfigSchemaVersion) {
+            const std::wstring migrated =
+                AppendMissingSchemaKeys(text, kConfigSchemaVersion);
+            WriteConfigFile(path, migrated);
+        }
+    }
+
     void UpdateStamp(const std::wstring& path) {
         WIN32_FILE_ATTRIBUTE_DATA attributes = {};
         if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &attributes)) {

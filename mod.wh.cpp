@@ -85,6 +85,7 @@ Design document: `docs/superpowers/specs/2026-10-04-context-menu-overhaul-design
 #include <dxgi1_2.h>
 
 #include <commctrl.h>
+#include <commoncontrols.h>
 #include <tlhelp32.h>
 #include <windhawk_utils.h>
 
@@ -3879,11 +3880,15 @@ struct InvocationDescriptor {
 
 struct LayoutItemResources {
     IDWriteTextLayout* text = nullptr;
+    IDWriteTextLayout* glyph = nullptr;
     ID2D1Bitmap* icon = nullptr;
 
     ~LayoutItemResources() {
         if (text) {
             text->Release();
+        }
+        if (glyph) {
+            glyph->Release();
         }
         if (icon) {
             icon->Release();
@@ -5054,12 +5059,16 @@ D2D1_COLOR_F ColorFromArgb(uint32_t argb) {
 // Defined after IconCache below (declaration order); content caches call it.
 HBITMAP GetIconBitmapForMenu(const std::wstring& iconRef,
                              const std::vector<uint8_t>& iconPixels, int sizePx);
+HBITMAP GetAlphaIconBitmapForMenu(const std::wstring& iconRef,
+                                  const std::vector<uint8_t>& iconPixels,
+                                  int sizePx);
 
 class ContentCaches {
 public:
     ContentCaches() {
         text_.SetMaxEntries(256);
         icons_.SetMaxEntries(256);
+        glyphs_.SetMaxEntries(128);
     }
 
     void SetDevice(ID2D1DeviceContext* dc, IDWriteFactory* dwrite) {
@@ -5084,6 +5093,11 @@ public:
                 bitmap->Release();
             }
         });
+        glyphs_.Clear([](IDWriteTextLayout* layout) {
+            if (layout) {
+                layout->Release();
+            }
+        });
         dc_ = nullptr;
     }
 
@@ -5098,10 +5112,15 @@ private:
             }
             auto resources = std::make_shared<LayoutItemResources>();
             resources->text = GetOrCreateText(item, metrics);
-            resources->icon = GetOrCreateIcon(item, metrics);
+            resources->glyph = GetOrCreateGlyph(item, metrics);
+            resources->icon =
+                resources->glyph ? nullptr : GetOrCreateIcon(item, metrics);
             // The cache owns one reference; each item's resources own their own.
             if (resources->text) {
                 resources->text->AddRef();
+            }
+            if (resources->glyph) {
+                resources->glyph->AddRef();
             }
             if (resources->icon) {
                 resources->icon->AddRef();
@@ -5180,6 +5199,73 @@ private:
         return layout;
     }
 
+    IDWriteTextFormat* CreateIconTextFormat(float size) {
+        if (!dwrite_) {
+            return nullptr;
+        }
+        static const wchar_t* kFamilies[] = {L"Segoe Fluent Icons",
+                                             L"Segoe MDL2 Assets"};
+        IDWriteFontCollection* collection = nullptr;
+        dwrite_->GetSystemFontCollection(&collection, FALSE);
+        for (const wchar_t* family : kFamilies) {
+            BOOL exists = FALSE;
+            UINT32 index = 0;
+            if (collection &&
+                SUCCEEDED(collection->FindFamilyName(family, &index, &exists)) &&
+                exists) {
+                IDWriteTextFormat* format = nullptr;
+                if (SUCCEEDED(dwrite_->CreateTextFormat(
+                        family, nullptr, DWRITE_FONT_WEIGHT_NORMAL,
+                        DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, size,
+                        L"", &format)) &&
+                    format) {
+                    collection->Release();
+                    return format;
+                }
+            }
+        }
+        if (collection) {
+            collection->Release();
+        }
+        return nullptr;
+    }
+
+    IDWriteTextLayout* GetOrCreateGlyph(const LayoutItem& item,
+                                        const LayoutMetrics& metrics) {
+        const std::wstring codepoint = IconRefGlyph(item.iconRef);
+        if (codepoint.empty() || !dwrite_) {
+            return nullptr;
+        }
+        const std::wstring key = L"g#" + codepoint + L"#" +
+                                 std::to_wstring(metrics.iconSize);
+        if (IDWriteTextLayout** cached = glyphs_.Find(key)) {
+            return *cached;
+        }
+        IDWriteTextFormat* format =
+            CreateIconTextFormat(static_cast<float>(metrics.iconSize));
+        if (!format) {
+            return nullptr;
+        }
+        const wchar_t character =
+            static_cast<wchar_t>(wcstoul(codepoint.c_str(), nullptr, 16));
+        const wchar_t text[2] = {character, 0};
+        IDWriteTextLayout* layout = nullptr;
+        dwrite_->CreateTextLayout(text, 1, format,
+                                  static_cast<float>(metrics.iconSize),
+                                  static_cast<float>(metrics.iconSize), &layout);
+        format->Release();
+        if (layout) {
+            layout->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+            layout->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+            glyphs_.Insert(key, layout, [](IDWriteTextLayout* value) {
+                if (value) {
+                    value->Release();
+                }
+            });
+        }
+        return layout;
+    }
+
     ID2D1Bitmap* GetOrCreateIcon(const LayoutItem& item,
                                  const LayoutMetrics& metrics) {
         if (item.iconRef.empty() && item.iconPixels.empty()) {
@@ -5201,8 +5287,8 @@ private:
         if (!dc_) {
             return nullptr;
         }
-        HBITMAP hbitmap = GetIconBitmapForMenu(item.iconRef, item.iconPixels,
-                                               metrics.iconSize);
+        HBITMAP hbitmap = GetAlphaIconBitmapForMenu(item.iconRef, item.iconPixels,
+                                                    metrics.iconSize);
         if (!hbitmap) {
             return nullptr;
         }
@@ -5261,6 +5347,7 @@ private:
     IDWriteFactory* dwrite_ = nullptr;
     LruMap<IDWriteTextLayout*> text_;
     LruMap<ID2D1Bitmap*> icons_;
+    LruMap<IDWriteTextLayout*> glyphs_;
 };
 
 inline ContentCaches g_contentCaches;
@@ -5609,6 +5696,21 @@ void DrawPanel(ID2D1DeviceContext* dc, const LayoutPanel& panel,
                 DrawMarkerBar(dc, item.markerRect, metrics.markerColor);
             } else {
                 DrawCheckmark(dc, item.markerRect, metrics.markerColor);
+            }
+        }
+
+        if (item.resources && item.resources->glyph) {
+            ID2D1SolidColorBrush* glyphBrush = nullptr;
+            const uint32_t color = hovered ? item.hoverTextColor : item.textColor;
+            if (SUCCEEDED(dc->CreateSolidColorBrush(ColorFromArgb(color),
+                                                    &glyphBrush)) &&
+                glyphBrush) {
+                dc->DrawTextLayout(
+                    D2D1_POINT_2F{static_cast<float>(item.iconRect.left),
+                                  static_cast<float>(item.iconRect.top)},
+                    item.resources->glyph, glyphBrush,
+                    D2D1_DRAW_TEXT_OPTIONS_CLIP);
+                glyphBrush->Release();
             }
         }
 
@@ -10439,6 +10541,9 @@ bool ParseIconRef(std::wstring_view ref, std::wstring& path, int& index) {
 //   "@folder"     - the stock folder icon
 //   "@glyph:XXXX" - an icon-font glyph rendered to a bitmap
 //   anything else - a shell icon reference for ParseIconRef
+const GUID kIidIImageList = {
+    0x46eb5926, 0x582e, 0x4017, {0x9f, 0xdf, 0xe8, 0x99, 0x8d, 0xaa, 0x09, 0x50}};
+
 class IconCache {
 public:
     ~IconCache() { Clear(); }
@@ -10460,6 +10565,75 @@ public:
             return nullptr;
         }
         return BitmapFromRef(iconRef, sizePx);
+    }
+
+    // Custom-renderer entry point: true-alpha bitmap (no compositing).
+    HBITMAP GetAlphaBitmapFor(const std::wstring& iconRef,
+                              const std::vector<uint8_t>& iconPixels, int sizePx) {
+        if (!iconPixels.empty()) {
+            return BitmapFromPixels(iconPixels, sizePx);
+        }
+        if (iconRef.empty()) {
+            return nullptr;
+        }
+        const std::wstring key = L"a#" + iconRef + L"#" + std::to_wstring(sizePx);
+        auto it = bitmaps_.find(key);
+        if (it != bitmaps_.end()) {
+            return it->second;
+        }
+        HBITMAP bitmap = nullptr;
+        if (iconRef.rfind(L"@stock:", 0) == 0) {
+            int id = 0;
+            bool shellStock = false;
+            if (ResolveStockIcon(iconRef.substr(7), id, shellStock)) {
+                if (shellStock) {
+                    SHSTOCKICONINFO info = {};
+                    info.cbSize = sizeof(info);
+                    if (SUCCEEDED(SHGetStockIconInfo(
+                            static_cast<SHSTOCKICONID>(id),
+                            SHGSI_ICON | SHGSI_LARGEICON, &info)) &&
+                        info.hIcon) {
+                        bitmap = AlphaBitmapFromIcon(info.hIcon, sizePx);
+                        DestroyIcon(info.hIcon);
+                    }
+                } else {
+                    HICON icon = LoadIconW(nullptr, MAKEINTRESOURCEW(id));
+                    if (icon) {
+                        bitmap = AlphaBitmapFromIcon(icon, sizePx);
+                    }
+                }
+            }
+        } else if (iconRef.rfind(L"@ext:", 0) == 0) {
+            const std::wstring spec = iconRef.substr(5);
+            const bool isFolder = _wcsicmp(spec.c_str(), L"folder") == 0;
+            SHFILEINFOW info = {};
+            if (SHGetFileInfoW(isFolder ? L"folder" : spec.c_str(),
+                               isFolder ? FILE_ATTRIBUTE_DIRECTORY
+                                        : FILE_ATTRIBUTE_NORMAL,
+                               &info, sizeof(info),
+                               SHGFI_USEFILEATTRIBUTES | SHGFI_SYSICONINDEX)) {
+                IImageList* list = nullptr;
+                if (SUCCEEDED(SHGetImageList(SHIL_LARGE, kIidIImageList,
+                                             reinterpret_cast<void**>(&list))) &&
+                    list) {
+                    HICON icon = nullptr;
+                    if (SUCCEEDED(list->GetIcon(info.iIcon, ILD_TRANSPARENT,
+                                                &icon)) &&
+                        icon) {
+                        bitmap = AlphaBitmapFromIcon(icon, sizePx);
+                        DestroyIcon(icon);
+                    }
+                    list->Release();
+                }
+            }
+        } else {
+            HICON icon = GetIcon(iconRef, sizePx);
+            if (icon) {
+                bitmap = AlphaBitmapFromIcon(icon, sizePx);
+            }
+        }
+        bitmaps_[key] = bitmap;
+        return bitmap;
     }
 
     // The owner window whose theme determines the menu background color.
@@ -10618,6 +10792,27 @@ private:
             HBRUSH backgroundBrush = CreateSolidBrush(MenuBackgroundColor(themeOwner_));
             FillRect(memory, &rect, backgroundBrush);
             DeleteObject(backgroundBrush);
+            DrawIconEx(memory, 0, 0, icon, sizePx, sizePx, 0, nullptr, DI_NORMAL);
+            SelectObject(memory, old);
+        }
+        DeleteDC(memory);
+        ReleaseDC(nullptr, screen);
+        return bitmap;
+    }
+
+    // Renders an icon onto a transparent 32bpp DIB for the custom renderer.
+    HBITMAP AlphaBitmapFromIcon(HICON icon, int sizePx) {
+        HDC screen = GetDC(nullptr);
+        HDC memory = CreateCompatibleDC(screen);
+        BITMAPV5HEADER header = {};
+        FillBitmapHeader(header, sizePx, sizePx);
+        void* bits = nullptr;
+        HBITMAP bitmap = CreateDIBSection(
+            screen, reinterpret_cast<BITMAPINFO*>(&header), DIB_RGB_COLORS, &bits,
+            nullptr, 0);
+        if (bitmap && bits) {
+            memset(bits, 0, static_cast<size_t>(sizePx) * sizePx * 4);
+            HGDIOBJ old = SelectObject(memory, bitmap);
             DrawIconEx(memory, 0, 0, icon, sizePx, sizePx, 0, nullptr, DI_NORMAL);
             SelectObject(memory, old);
         }
@@ -10866,6 +11061,12 @@ inline IconCache g_iconCache;
 HBITMAP GetIconBitmapForMenu(const std::wstring& iconRef,
                              const std::vector<uint8_t>& iconPixels, int sizePx) {
     return g_iconCache.GetBitmapFor(iconRef, iconPixels, sizePx);
+}
+
+HBITMAP GetAlphaIconBitmapForMenu(const std::wstring& iconRef,
+                                  const std::vector<uint8_t>& iconPixels,
+                                  int sizePx) {
+    return g_iconCache.GetAlphaBitmapFor(iconRef, iconPixels, sizePx);
 }
 
 class NativeMenuView {

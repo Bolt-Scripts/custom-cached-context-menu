@@ -3679,6 +3679,19 @@ int main() {
         }
     }
 
+    // v2.6 theme switch replaces stale light/dark overrides.
+    {
+        const std::wstring base = L"[appearance]\nitemHeight = 28\n";
+        const std::wstring light = cmo::ApplyTheme(base, 2);  // Windows 11 Light
+        CHECK(light.find(L"\n[appearance.dark]\n") != std::wstring::npos);
+        const std::wstring dracula = cmo::ApplyTheme(light, 6);  // Dracula
+        CHECK(dracula.find(L"\n[appearance.dark]\n") == std::wstring::npos);
+        cmo::RulesConfig parsed;
+        std::vector<cmo::ConfigParseError> errors;
+        CHECK(cmo::ParseRulesConfig(dracula, parsed, errors));
+        CHECK(errors.empty());
+    }
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

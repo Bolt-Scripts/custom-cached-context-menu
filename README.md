@@ -103,7 +103,7 @@ resource — all with true transparency in the custom renderer.
   Everything after that is instant, and warm-up keeps common types instant
   from the start. (An instant placeholder menu was tried, but the shell's
   population blocks the UI thread and left it blank.)
-- With the **More options submenu** on, discovered items whose verb is not a
+- With **Move third-party handlers** on, discovered items whose verb is not a
   known Windows verb (i.e. third-party shell extensions, however they are
   registered) and the configured Windows extras are grouped into one submenu
   just above the native fallback; separators left dangling are collapsed.

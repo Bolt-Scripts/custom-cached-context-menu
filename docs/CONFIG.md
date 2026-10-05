@@ -153,7 +153,7 @@ Icon values accept, in any `icon` key or core override:
   `question`, `shield`, `folder`, `drive`, `network`, `computer`, `desktop`,
   `documents`, `downloads`, `music`, `pictures`, `videos`, `recycle`.
 - `@glyph:XXXX` — a raw Segoe Fluent/MDL2 codepoint.
-- `@ext:<.ext|folder|drive>` — the shell's type icon.
+- `@ext:<.ext|folder>` — the shell's type icon.
 - `path,index` — an icon resource from a DLL/EXE/ICO (environment variables
   expanded).
 

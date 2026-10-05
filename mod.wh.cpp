@@ -3687,10 +3687,14 @@ void ReorganizeAdvancedItems(std::vector<MenuItem>& items,
     std::vector<MenuItem> kept;
     kept.reserve(items.size());
     for (MenuItem& item : items) {
+        const bool selectable =
+            item.kind != ItemKind::Separator &&
+            item.action != ActionKind::Fallback;
         const bool windowsExtra =
-            options.moveWindows && MatchesAnyToken(item, options.windowsItems);
+            options.moveWindows && selectable &&
+            MatchesAnyToken(item, options.windowsItems);
         const bool thirdParty =
-            options.moveThirdParty && IsThirdPartyItem(item);
+            options.moveThirdParty && selectable && IsThirdPartyItem(item);
         const bool protectedItem =
             MatchesAnyToken(item, options.exclude) ||
             IsKeptByRules(item, options);
@@ -4072,13 +4076,41 @@ void ApplySelectedTheme(int themeIndex) {
     g_lastAppliedTheme = themeIndex;
 }
 
+// Removes [appearance.light]/[.dark] blocks so a new theme cannot inherit a
+// previous theme's overrides.
+std::wstring StripThemeSections(const std::wstring& text) {
+    std::wstring out;
+    bool skipping = false;
+    size_t pos = 0;
+    while (pos <= text.size()) {
+        const size_t newline = text.find(L'\n', pos);
+        const size_t lineEnd = newline == std::wstring::npos ? text.size() : newline;
+        const std::wstring line = text.substr(pos, lineEnd - pos);
+        pos = lineEnd + 1;
+        const std::wstring trimmed = TrimWhitespace(StripInlineComment(line));
+        if (!trimmed.empty() && trimmed[0] == L'[') {
+            std::wstring name;
+            if (trimmed.back() == L']') {
+                name = ToLowerCopy(
+                    TrimWhitespace(trimmed.substr(1, trimmed.size() - 2)));
+            }
+            skipping = name == L"appearance.light" || name == L"appearance.dark";
+        }
+        if (!skipping) {
+            out += line;
+            out += L"\n";
+        }
+    }
+    return out;
+}
+
 // Applying a theme appends its snippet and canonicalizes: the theme wins for
 // appearance values while rules/commands/submenus/items are preserved.
 std::wstring ApplyTheme(const std::wstring& text, int themeIndex) {
     if (themeIndex <= 0 || themeIndex >= static_cast<int>(kThemesCount)) {
         return text;
     }
-    std::wstring combined = text;
+    std::wstring combined = StripThemeSections(text);
     combined += L"\n";
     combined += kThemes[themeIndex].snippet;
     return CanonicalizeConfig(combined, kConfigSchemaVersion);
@@ -5683,7 +5715,8 @@ private:
         const D2D1_SIZE_U size = {static_cast<UINT32>(width),
                                   static_cast<UINT32>(height)};
         const D2D1_BITMAP_PROPERTIES props = {
-            {DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE}, 96.0f, 96.0f};
+            {DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED}, 96.0f,
+            96.0f};
         if (FAILED(dc_->CreateBitmap(size, pixels.data(),
                                      static_cast<UINT32>(width * sizeof(uint32_t)),
                                      props, &bitmap))) {
@@ -10920,7 +10953,23 @@ public:
     HBITMAP GetAlphaBitmapFor(const std::wstring& iconRef,
                               const std::vector<uint8_t>& iconPixels, int sizePx) {
         if (!iconPixels.empty()) {
-            return BitmapFromPixels(iconPixels, sizePx);
+            const std::wstring key =
+                L"a#px#" + std::to_wstring(HashBytes(iconPixels)) + L"#" +
+                std::to_wstring(sizePx);
+            auto it = bitmaps_.find(key);
+            if (it != bitmaps_.end()) {
+                return it->second;
+            }
+            const int side = static_cast<int>(
+                std::sqrt(static_cast<double>(iconPixels.size()) / 4.0));
+            HBITMAP bitmap = side > 0 &&
+                                     static_cast<size_t>(side) * side * 4 ==
+                                         iconPixels.size()
+                                 ? AlphaBitmapFromBgra(iconPixels, side, side,
+                                                       sizePx)
+                                 : nullptr;
+            bitmaps_[key] = bitmap;
+            return bitmap;
         }
         if (iconRef.empty()) {
             return nullptr;
@@ -11037,12 +11086,36 @@ private:
                 bitmap = BitmapFromIcon(info.hIcon, sizePx);
                 DestroyIcon(info.hIcon);
             }
-        } else if (ref.rfind(L"@glyph:", 0) == 0) {
+        } else if (!IconRefGlyph(ref).empty()) {
+            const std::wstring glyph = IconRefGlyph(ref);
             const wchar_t codepoint =
-                static_cast<wchar_t>(wcstoul(ref.c_str() + 7, nullptr, 16));
+                static_cast<wchar_t>(wcstoul(glyph.c_str(), nullptr, 16));
             std::vector<uint8_t> pixels;
             if (GlyphPixels(codepoint, sizePx, pixels)) {
                 bitmap = OpaqueBitmapFromBgra(pixels, sizePx, sizePx, sizePx);
+            }
+        } else if (ref.rfind(L"@stock:", 0) == 0) {
+            int id = 0;
+            bool shellStock = false;
+            if (ResolveStockIcon(ref.substr(7), id, shellStock)) {
+                HICON icon = nullptr;
+                if (shellStock) {
+                    SHSTOCKICONINFO info = {};
+                    info.cbSize = sizeof(info);
+                    if (SUCCEEDED(SHGetStockIconInfo(
+                            static_cast<SHSTOCKICONID>(id),
+                            SHGSI_ICON | SHGSI_SMALLICON, &info))) {
+                        icon = info.hIcon;
+                    }
+                } else {
+                    icon = LoadIconW(nullptr, MAKEINTRESOURCEW(id));
+                }
+                if (icon) {
+                    bitmap = BitmapFromIcon(icon, sizePx);
+                    if (shellStock) {
+                        DestroyIcon(icon);
+                    }
+                }
             }
         } else {
             HICON icon = GetIcon(ref, sizePx);
@@ -11164,6 +11237,72 @@ private:
             HGDIOBJ old = SelectObject(memory, bitmap);
             DrawIconEx(memory, 0, 0, icon, sizePx, sizePx, 0, nullptr, DI_NORMAL);
             SelectObject(memory, old);
+
+            auto* pixels = static_cast<uint32_t*>(bits);
+            const size_t count = static_cast<size_t>(sizePx) * sizePx;
+            bool hasAlpha = false;
+            for (size_t i = 0; i < count; ++i) {
+                if ((pixels[i] >> 24) != 0) {
+                    hasAlpha = true;
+                    break;
+                }
+            }
+            if (!hasAlpha) {
+                // Legacy icons carry no alpha; the AND mask left RGB 0 outside
+                // the shape, so opaque pixels form the silhouette.
+                for (size_t i = 0; i < count; ++i) {
+                    if ((pixels[i] & 0x00FFFFFF) != 0) {
+                        pixels[i] |= 0xFF000000u;
+                    }
+                }
+            } else {
+                // AlphaBlend wrote premultiplied color; keep it consistent.
+                for (size_t i = 0; i < count; ++i) {
+                    const uint32_t alpha = pixels[i] >> 24;
+                    if (alpha == 0 || alpha == 255) {
+                        continue;
+                    }
+                    const uint32_t r = ((pixels[i] >> 16) & 0xFF) * alpha / 255;
+                    const uint32_t g = ((pixels[i] >> 8) & 0xFF) * alpha / 255;
+                    const uint32_t b = (pixels[i] & 0xFF) * alpha / 255;
+                    pixels[i] = (alpha << 24) | (r << 16) | (g << 8) | b;
+                }
+            }
+        }
+        DeleteDC(memory);
+        ReleaseDC(nullptr, screen);
+        return bitmap;
+    }
+
+    // Straight-alpha BGRA pixels to a premultiplied bitmap, no background.
+    HBITMAP AlphaBitmapFromBgra(const std::vector<uint8_t>& pixels, int width,
+                                int height, int sizePx) {
+        HDC screen = GetDC(nullptr);
+        HDC memory = CreateCompatibleDC(screen);
+        BITMAPV5HEADER header = {};
+        FillBitmapHeader(header, sizePx, sizePx);
+        void* bits = nullptr;
+        HBITMAP bitmap = CreateDIBSection(
+            screen, reinterpret_cast<BITMAPINFO*>(&header), DIB_RGB_COLORS, &bits,
+            nullptr, 0);
+        if (bitmap && bits) {
+            auto* target = static_cast<uint32_t*>(bits);
+            const size_t count = static_cast<size_t>(sizePx) * sizePx;
+            for (size_t i = 0; i < count; ++i) {
+                target[i] = 0;
+            }
+            for (int y = 0; y < height && y < sizePx; ++y) {
+                for (int x = 0; x < width && x < sizePx; ++x) {
+                    const uint32_t pixel = reinterpret_cast<const uint32_t*>(
+                        pixels.data())[static_cast<size_t>(y) * width + x];
+                    const uint32_t alpha = pixel >> 24;
+                    const uint32_t r = ((pixel >> 16) & 0xFF) * alpha / 255;
+                    const uint32_t g = ((pixel >> 8) & 0xFF) * alpha / 255;
+                    const uint32_t b = (pixel & 0xFF) * alpha / 255;
+                    target[static_cast<size_t>(y) * sizePx + x] =
+                        (alpha << 24) | (r << 16) | (g << 8) | b;
+                }
+            }
         }
         DeleteDC(memory);
         ReleaseDC(nullptr, screen);
@@ -12335,21 +12474,18 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
         bool needsDiscovery = false;
         MenuModel model;
         if (capturedMenuContext) {
-            HMENU capturedMenu = CreatePopupMenu();
-            if (capturedMenu) {
-                ReplayInto(capture.obj, capturedMenu, capture.indexMenu,
-                           capture.idCmdFirst, capture.idCmdLast, capture.flags);
-                // The normal discovery initializes the menu so dynamic labels
-                // and submenus are populated; the captured path must do the
-                // same or those items are pruned as unreadable.
+            // Populate the retained menu (also QIs IContextMenu2/3) and
+            // initialize it, exactly like the normal discovery path; otherwise
+            // dynamic labels and submenus are empty and get pruned.
+            if (EnsureContextPopulated(capture)) {
                 if (!capture.menuInitialized) {
-                    InitializeMenuRecursive(capture, capturedMenu, 0);
+                    InitializeMenuRecursive(capture, capture.populatedMenu, 0);
                     capture.menuInitialized = true;
                 }
-                model = BuildModelFromHMenu(capturedMenu, capture.idCmdFirst,
-                                            signature, capture.obj);
+                model = BuildModelFromHMenu(capture.populatedMenu,
+                                            capture.idCmdFirst, signature,
+                                            capture.obj);
                 ApplyRegistryIcons(model.items, signature);
-                DestroyMenu(capturedMenu);
             }
         } else {
             cached = g_cache.Find(signature);

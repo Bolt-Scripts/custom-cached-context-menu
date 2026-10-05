@@ -51,7 +51,7 @@ untouched native menu, including extended verbs.
 
 In custom mode the menu appearance, item rules, and custom commands are read
 from `menu.ini` in the mod's storage directory. It is created on first run as
-a clean settings list — every setting active at its default, grouped with
+a clean settings list — almost every setting active at its default, grouped with
 comment headers, colors as `R, G, B, A` — and it is checked when a menu opens
 (nothing runs in the background). Errors are logged as
 `menu.ini:<line>: <message>` and the last good configuration stays in effect;

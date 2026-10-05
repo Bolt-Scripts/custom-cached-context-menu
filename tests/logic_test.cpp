@@ -3263,13 +3263,13 @@ int main() {
                       entry, entry.defaultValue)) != std::wstring::npos);
         }
         CHECK(text.find(L"[meta]") != std::wstring::npos);
-        CHECK(text.find(L"schemaVersion = 1") != std::wstring::npos);
+        CHECK(text.find(L"schemaVersion = 2") != std::wstring::npos);
         CHECK(text.find(L"[rules]") != std::wstring::npos);
         CHECK(text.find(L"[command ") != std::wstring::npos);
         cmo::RulesConfig config;
         std::vector<cmo::ConfigParseError> errors;
         CHECK(cmo::ParseRulesConfig(text, config, errors));
-        CHECK(config.schemaVersion == 1);
+        CHECK(config.schemaVersion == 2);
     }
 
     // v2.3/v2.4 review fixes: inert examples, '#' comments.
@@ -3287,6 +3287,158 @@ int main() {
             L"# a comment\n[appearance]\nbackground = #11223344\n", comments,
             errors));
         CHECK(comments.appearance.background == 0x11223344u);
+    }
+
+    // v2.4 readable colors: R, G, B, A decimals; hex still accepted.
+    {
+        uint32_t color = 0;
+        CHECK(cmo::ParseColor(L"30, 30, 30, 240", color) && color == 0xF01E1E1Eu);
+        CHECK(cmo::ParseColor(L"255, 0, 128", color) && color == 0xFFFF0080u);
+        CHECK(cmo::ParseColor(L" 1 , 2 , 3 , 4 ", color) && color == 0x04010203u);
+        CHECK(!cmo::ParseColor(L"256, 0, 0, 0", color));
+        CHECK(!cmo::ParseColor(L"1, 2", color));
+        CHECK(!cmo::ParseColor(L"1, 2, 3, 4, 5", color));
+        CHECK(cmo::ParseColor(L"#11223344", color) && color == 0x11223344u);
+        CHECK(cmo::FormatColorRgba(0xF01E1E1E) == L"30, 30, 30, 240");
+        CHECK(cmo::FormatColorRgba(0xFFFF0080) == L"255, 0, 128, 255");
+    }
+
+    // v2.4 canonical config: active defaults, groups, one appearance section.
+    {
+        const std::wstring text = cmo::GenerateDefaultConfigText();
+        CHECK(cmo::CountSubstring(text, L"[appearance]") == 1);
+        CHECK(text.find(L"; --- Colors ---") != std::wstring::npos);
+        CHECK(text.find(L"; --- Layout ---") != std::wstring::npos);
+        CHECK(text.find(L"background = 30, 30, 30, 240") != std::wstring::npos);
+        CHECK(text.find(L"; background") == std::wstring::npos);
+        CHECK(text.find(L"itemHeight = 28") != std::wstring::npos);
+        CHECK(text.find(L"; itemPadding = 6") != std::wstring::npos);
+        CHECK(text.find(L"unset") != std::wstring::npos);
+        cmo::RulesConfig config;
+        std::vector<cmo::ConfigParseError> errors;
+        CHECK(cmo::ParseRulesConfig(text, config, errors));
+        CHECK(config.appearance.itemHeight == 28);
+        CHECK(config.appearance.background == 0xF01E1E1Eu);
+        CHECK(config.commands.empty());
+        CHECK(config.submenus.empty());
+        CHECK(config.overrides.empty());
+
+        const std::wstring legacy =
+            L"; my notes\n[appearance]\nitemHeight = 30\n[appearance]\n"
+            L"background = #11223344\n[rules]\n; my rule\n"
+            L"hide = label:\"Cast to Device\"\n[meta]\nschemaVersion = 0\n";
+        const std::wstring canonical = cmo::CanonicalizeConfig(legacy, 2);
+        CHECK(cmo::CountSubstring(canonical, L"[appearance]") == 1);
+        CHECK(canonical.find(L"itemHeight = 30") != std::wstring::npos);
+        CHECK(canonical.find(L"background = 34, 51, 68, 17") != std::wstring::npos);
+        CHECK(canonical.find(L"hide = label:\"Cast to Device\"") != std::wstring::npos);
+        CHECK(canonical.find(L"; my rule") != std::wstring::npos);
+        CHECK(canonical.find(L"schemaVersion = 2") != std::wstring::npos);
+        cmo::RulesConfig reparsed;
+        CHECK(cmo::ParseRulesConfig(canonical, reparsed, errors));
+        CHECK(reparsed.appearance.itemHeight == 30);
+        CHECK(reparsed.rules.size() == 1);
+    }
+
+    // v2.4 round-trip: every schema key's custom value survives.
+    {
+        auto testValue = [](const cmo::ConfigSchemaEntry& entry) -> std::wstring {
+            switch (entry.type) {
+                case cmo::SettingType::Bool:
+                    return wcscmp(entry.defaultValue, L"true") == 0 ? L"false"
+                                                                    : L"true";
+                case cmo::SettingType::Int:
+                    return std::to_wstring(_wtoi(entry.defaultValue) + 1);
+                case cmo::SettingType::Color:
+                    return L"1, 2, 3, 4";
+                case cmo::SettingType::Font:
+                    return L"Arial, 10";
+                case cmo::SettingType::IntList:
+                    return L"1, 2, 3, 4";
+                case cmo::SettingType::Enum: {
+                    const std::wstring values(entry.validValues);
+                    const size_t bar = values.rfind(L'|');
+                    return bar == std::wstring::npos ? values : values.substr(bar + 1);
+                }
+            }
+            return L"";
+        };
+        std::wstring custom = L"[appearance]\n";
+        for (const cmo::ConfigSchemaEntry& entry : cmo::kAppearanceSchema) {
+            custom += entry.key;
+            custom += L" = ";
+            custom += testValue(entry);
+            custom += L"\n";
+        }
+        const std::wstring canonical = cmo::CanonicalizeConfig(custom, 2);
+        for (const cmo::ConfigSchemaEntry& entry : cmo::kAppearanceSchema) {
+            const std::wstring expected =
+                std::wstring(entry.key) + L" = " +
+                cmo::NormalizeAppearanceValue(entry, testValue(entry));
+            CHECK(canonical.find(expected) != std::wstring::npos);
+        }
+        const std::wstring themed =
+            L"[appearance]\nitemHeight = 28\n[appearance.light]\nitemHeight = 40\n";
+        const std::wstring themeCanonical = cmo::CanonicalizeConfig(themed, 2);
+        CHECK(themeCanonical.find(L"[appearance.light]") != std::wstring::npos);
+        CHECK(themeCanonical.find(L"itemHeight = 40") != std::wstring::npos);
+    }
+
+    // v2.4 lifecycle: old files canonicalize, bad files are untouched.
+    {
+        const std::wstring path = cmo::ConfigFilePath();
+        DeleteFileW(path.c_str());
+        cmo::ConfigStore store;
+        store.EnsureLoaded();
+        CHECK(store.Revision() == 1);
+
+        CHECK(cmo::WriteConfigFile(
+            path, L"[appearance]\nitemHeight = 30\n[meta]\nschemaVersion = 0\n"));
+        store.RefreshIfChanged();
+        CHECK(store.Revision() == 2);
+        CHECK(store.Snapshot()->appearance.itemHeight == 30);
+        std::wstring text;
+        CHECK(cmo::ReadConfigFile(path, text));
+        CHECK(text.find(L"schemaVersion = 2") != std::wstring::npos);
+        CHECK(text.find(L"itemHeight = 30") != std::wstring::npos);
+        CHECK(text.find(L"; itemPadding = 6") != std::wstring::npos);
+
+        const std::wstring bad = L"this is not a config";
+        CHECK(cmo::WriteConfigFile(path, bad));
+        store.RefreshIfChanged();
+        CHECK(store.Revision() == 2);
+        std::wstring unchanged;
+        CHECK(cmo::ReadConfigFile(path, unchanged));
+        CHECK(unchanged == bad);
+        DeleteFileW(path.c_str());
+    }
+
+    // v2.4 guide mentions every schema key.
+    {
+        HANDLE file = CreateFileW(L"docs\\CONFIG.md", GENERIC_READ, FILE_SHARE_READ,
+                                  nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL,
+                                  nullptr);
+        CHECK(file != INVALID_HANDLE_VALUE);
+        if (file != INVALID_HANDLE_VALUE) {
+            LARGE_INTEGER size = {};
+            GetFileSizeEx(file, &size);
+            std::vector<char> bytes(static_cast<size_t>(size.QuadPart));
+            DWORD read = 0;
+            ReadFile(file, bytes.data(), static_cast<DWORD>(bytes.size()), &read,
+                     nullptr);
+            CloseHandle(file);
+            std::wstring text;
+            if (!bytes.empty()) {
+                const int wide = MultiByteToWideChar(
+                    CP_UTF8, 0, bytes.data(), static_cast<int>(read), nullptr, 0);
+                text.resize(static_cast<size_t>(wide));
+                MultiByteToWideChar(CP_UTF8, 0, bytes.data(),
+                                    static_cast<int>(read), text.data(), wide);
+            }
+            for (const cmo::ConfigSchemaEntry& entry : cmo::kAppearanceSchema) {
+                CHECK(text.find(entry.key) != std::wstring::npos);
+            }
+        }
     }
 
     if (g_failures == 0) {

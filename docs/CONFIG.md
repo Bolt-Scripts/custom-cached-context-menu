@@ -21,7 +21,7 @@ Lifecycle: `ConfigStore::EnsureLoaded` runs on the first menu open and creates
 `menu.ini` from `GenerateDefaultConfigText` when missing; `RefreshIfChanged`
 re-reads only when the file's size or last-write time changed. Nothing runs
 while menus are closed. After a successful parse, a file older than
-`kConfigSchemaVersion` is migrated with `AppendMissingSchemaKeys`.
+`kConfigSchemaVersion` is rewritten with `CanonicalizeConfig`.
 
 Key symbols (all in `mod.wh.cpp`, namespace `cmo`):
 
@@ -29,7 +29,7 @@ Key symbols (all in `mod.wh.cpp`, namespace `cmo`):
   settings.
 - `ApplyAppearanceValue` — the setters; the schema gate rejects unknown keys.
 - `GenerateDefaultConfigText` — first-run file, built from the schema.
-- `ReadSchemaVersion` / `AppendMissingSchemaKeys` — migration.
+- `ReadSchemaVersion` / `CanonicalizeConfig` — canonical rewrite on schema updates.
 - `RulesConfig` — the parsed snapshot (`appearance`, `rules`, `commands`,
   `submenus`, `overrides`, `schemaVersion`, `revision`).
 - `ResolveAppearance` / `ResolveLayoutMetrics` — theme and DPI view.
@@ -39,7 +39,7 @@ Key symbols (all in `mod.wh.cpp`, namespace `cmo`):
 
 1. Add the field and its default to `struct Appearance`.
 2. Add a row to `kAppearanceSchema` (section, key, type, default,
-   valid values, min/max, description, `sinceVersion`) and bump
+   group, valid values, min/max, description, `sinceVersion`, `unset`) and bump
    `kConfigSchemaVersion`.
 3. Add the setter branch in `ApplyAppearanceValue`. The gate already rejects
    keys without a row, so a branch without a row is dead code.
@@ -71,7 +71,7 @@ Key symbols (all in `mod.wh.cpp`, namespace `cmo`):
 alpha optional, default 255). `#RRGGBB`/`#AARRGGBB` are also accepted on read.
 
 The generated file is a **canonical settings list**: one `[appearance]` section
-with group comment headers, every setting active at its default, and a blank
+with group comment headers, almost every setting active at its default, and a blank
 line between groups. Four keys have "unset" semantics (`itemPadding`,
 `cornerRadii`, `markerColor`, `headerColor`) and are emitted commented with a
 note, because activating them would pin derived behavior. When the schema
@@ -83,39 +83,39 @@ rewritten.
 |---|---|---|---|
 | background | color | `#F01E1E1E` | panel background and blur tint |
 | blur | bool | `true` | blur the screen behind the menu |
-| blurstrength | int | `12` | 0–64 |
-| cornerradius | int | `8` | 0–256 px |
+| blurStrength | int | `12` | 0–64 |
+| cornerRadius | int | `8` | 0–256 px |
 | border | color | `#22FFFFFF` | border color |
-| borderwidth | int | `1` | 0–64 px (0 hides it) |
+| borderWidth | int | `1` | 0–64 px (0 hides it) |
 | shadow | bool | `true` | draw the drop shadow |
-| shadowsize | int | `12` | 0–64 px spread |
+| shadowSize | int | `12` | 0–64 px spread |
 | font | font | `Segoe UI, 9` | face, size |
-| itemheight | int | `28` | 1–256 px |
-| iconsize | int | `16` | 1–256 px |
+| itemHeight | int | `28` | 1–256 px |
+| iconSize | int | `16` | 1–256 px |
 | padding | int | `6` | 0–256 px base padding |
 | separator | color | `#18FFFFFF` | separator line |
-| hoverbackground | color | `#14FFFFFF` | hovered item |
-| pressedbackground | color | `#22FFFFFF` | pressed item |
-| textcolor | color | `#FFFFFFFF` | item text |
-| disabledtextcolor | color | `#66FFFFFF` | disabled item text |
-| submenuarrow | color | `#99FFFFFF` | submenu arrow |
+| hoverBackground | color | `#14FFFFFF` | hovered item |
+| pressedBackground | color | `#22FFFFFF` | pressed item |
+| textColor | color | `#FFFFFFFF` | item text |
+| disabledTextColor | color | `#66FFFFFF` | disabled item text |
+| submenuArrow | color | `#99FFFFFF` | submenu arrow |
 | animation | enum | `none` | none, fade, slide |
-| animationduration | int | `120` | 0–10000 ms |
-| verticalpadding | int | `4` | 0–256 px above/below items |
-| minwidth | int | `0` | 0–4096 px (0 = automatic) |
-| maxwidth | int | `0` | 0–4096 px (0 = unlimited) |
-| itempadding | int | `6` | 0–256 px; defaults to padding |
-| separatorspacing | int | `0` | 0–256 px above/below separators |
-| markerwidth | int | `14` | 0–256 px marker column |
-| fontweight | enum | `normal` | normal, semibold, bold |
-| fontstyle | enum | `normal` | normal, italic |
-| cornerradii | int list | `2, 4, 6, 8` | tl,tr,br,bl; overrides cornerradius |
-| shadowopacity | int | `120` | 0–255 |
-| shadowblur | int | `12` | 0–64 px |
+| animationDuration | int | `120` | 0–10000 ms |
+| verticalPadding | int | `4` | 0–256 px above/below items |
+| minWidth | int | `0` | 0–4096 px (0 = automatic) |
+| maxWidth | int | `0` | 0–4096 px (0 = unlimited) |
+| itemPadding | int | `6` | 0–256 px; defaults to padding |
+| separatorSpacing | int | `0` | 0–256 px above/below separators |
+| markerWidth | int | `14` | 0–256 px marker column |
+| fontWeight | enum | `normal` | normal, semibold, bold |
+| fontStyle | enum | `normal` | normal, italic |
+| cornerRadii | int list | `2, 4, 6, 8` | tl,tr,br,bl; overrides cornerradius |
+| shadowOpacity | int | `120` | 0–255 |
+| shadowBlur | int | `12` | 0–64 px |
 | marker | enum | `dot` | dot, check, bar, none |
-| markercolor | color | `#FFFFFFFF` | defaults to textcolor |
-| headercolor | color | `#66FFFFFF` | defaults to disabledtextcolor |
-| showaccelerators | enum | `underline` | underline, strip, raw |
+| markerColor | color | `#FFFFFFFF` | defaults to textcolor |
+| headerColor | color | `#66FFFFFF` | defaults to disabledtextcolor |
+| showAccelerators | enum | `underline` | underline, strip, raw |
 
 `[appearance.light]` and `[appearance.dark]` accept the same keys and override
 the base section when that theme is active; keys not listed inherit from

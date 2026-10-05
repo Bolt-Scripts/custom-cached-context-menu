@@ -1500,7 +1500,7 @@ bool ParseCornerRadii(const std::wstring& value, CornerRadii& radii) {
 enum class SettingType : uint8_t { Bool, Int, Color, Font, Enum, IntList };
 
 // The build's schema version; bump when a row is added.
-constexpr int kConfigSchemaVersion = 1;
+constexpr int kConfigSchemaVersion = 2;
 
 struct ConfigSchemaEntry {
     const wchar_t* section;
@@ -2403,14 +2403,14 @@ std::wstring CanonicalizeConfig(const std::wstring& text, int toVersion) {
             out += L" ---\n";
             lastGroup = entry.group;
         }
-        const auto it = source.baseValues.find(entry.key);
+        const auto it = source.baseValues.find(ToLowerCopy(entry.key));
         const bool hasValue = it != source.baseValues.end();
         if (entry.unset && !hasValue) {
             out += L"; ";
             out += entry.key;
             out += L" = ";
-            out += entry.defaultValue;
-            out += L"   ; ";
+            out += NormalizeAppearanceValue(entry, entry.defaultValue);
+            out += L"   ; unset: ";
             out += entry.description;
             out += L"\n";
             continue;
@@ -2426,7 +2426,7 @@ std::wstring CanonicalizeConfig(const std::wstring& text, int toVersion) {
                          const std::unordered_map<std::wstring, std::wstring>& values) {
         bool any = false;
         for (const ConfigSchemaEntry& entry : kAppearanceSchema) {
-            if (values.count(entry.key) != 0) {
+            if (values.count(ToLowerCopy(entry.key)) != 0) {
                 any = true;
                 break;
             }
@@ -2438,7 +2438,7 @@ std::wstring CanonicalizeConfig(const std::wstring& text, int toVersion) {
         out += section;
         out += L"]\n";
         for (const ConfigSchemaEntry& entry : kAppearanceSchema) {
-            const auto it = values.find(entry.key);
+            const auto it = values.find(ToLowerCopy(entry.key));
             if (it == values.end()) {
                 continue;
             }
@@ -2462,7 +2462,6 @@ std::wstring CanonicalizeConfig(const std::wstring& text, int toVersion) {
 }
 
 // ===========================================================================
-// [CMO:RulesEngine]// ===========================================================================
 // [CMO:RulesEngine] v2 predicates and rule matching.
 // ===========================================================================
 

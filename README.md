@@ -134,7 +134,8 @@ overrides are documented in [`docs/CONFIG.md`](docs/CONFIG.md).
   mode for the session.
 - Custom mode's backdrop blur samples the screen once per menu level when it
   opens (it is a blurred snapshot, not a live blur), and the drop shadow is a
-  layered approximation. Tall menus do not scroll visually yet (wheel input is
+  blurred mask whose spread, softness, and offset are configurable. Tall menus
+  do not scroll visually yet (wheel input is
   tracked but the drawing does not offset). Animations are off by default
   (`animation = none`); `fade` and `slide` are compositor-driven.
 

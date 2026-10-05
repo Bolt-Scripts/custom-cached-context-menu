@@ -2,7 +2,7 @@
 // @id              context-menu-overhaul
 // @name            Context Menu Overhaul
 // @description     Replaces the Explorer context menu with an instantly-opening cached menu, then discovers and caches shell extension items asynchronously.
-// @version         0.7.0
+// @version         0.8.0
 // @include         explorer.exe
 // @architecture    x86-64
 // @compilerOptions -lole32 -lshlwapi -luuid -lcomctl32 -ladvapi32 -lgdi32 -luxtheme -lversion -ld3d11 -ld2d1 -ldwrite -ldcomp -ldxgi
@@ -5853,6 +5853,8 @@ struct MenuSession {
     int submenuDelayMs = 150;
     int hoverCandidate = -1;
     int hoverLevel = -1;
+    HWND pendingTarget = nullptr;
+    POINT pendingScreen = {};
     bool submenuTimerActive = false;
     bool done = false;
     LayoutMetrics metrics;
@@ -6279,13 +6281,15 @@ LRESULT CustomMenuWindowProc(MenuWindow* window, HWND hwnd, UINT msg,
                         }
                     }
                     if (target && !ours) {
-                        POINT client = screen;
-                        ScreenToClient(target, &client);
+                        // Replay a full click at teardown: Explorer targets
+                        // the item on the button-down, so forwarding only the
+                        // up opens the previous selection's menu.
+                        session->pendingTarget = target;
+                        session->pendingScreen = screen;
                         if (g_settings.debugLogging) {
-                            Wh_Log(L"Forwarding WM_RBUTTONUP to %p", target);
+                            Wh_Log(L"Queueing a right-click replay for %p",
+                                   target);
                         }
-                        PostMessageW(target, WM_RBUTTONUP, MK_RBUTTON,
-                                     MAKELPARAM(client.x, client.y));
                     }
                 }
                 session->done = true;
@@ -6572,6 +6576,37 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
             ApplyWindowAnimation(window->CompVisual(), closing, false);
         }
         Sleep(static_cast<DWORD>(closing.durationMs));
+    }
+    if (session.pendingTarget) {
+        // Consume the physical button-up while we still hold capture, then
+        // replay the click to the window under the cursor.
+        MSG pending = {};
+        const ULONGLONG deadline = GetTickCount64() + 2000;
+        while (GetTickCount64() < deadline) {
+            bool gotUp = false;
+            while (PeekMessageW(&pending, nullptr, 0, 0, PM_REMOVE)) {
+                if (pending.message == WM_RBUTTONUP &&
+                    pending.hwnd == root->Handle()) {
+                    gotUp = true;
+                    continue;
+                }
+                TranslateMessage(&pending);
+                DispatchMessageW(&pending);
+            }
+            if (gotUp) {
+                break;
+            }
+            Sleep(1);
+        }
+        POINT client = session.pendingScreen;
+        ScreenToClient(session.pendingTarget, &client);
+        PostMessageW(session.pendingTarget, WM_RBUTTONDOWN, MK_RBUTTON,
+                     MAKELPARAM(client.x, client.y));
+        PostMessageW(session.pendingTarget, WM_RBUTTONUP, MK_RBUTTON,
+                     MAKELPARAM(client.x, client.y));
+        if (g_settings.debugLogging) {
+            Wh_Log(L"Replayed the right-click to %p", session.pendingTarget);
+        }
     }
     if (GetCapture() == root->Handle()) {
         ReleaseCapture();

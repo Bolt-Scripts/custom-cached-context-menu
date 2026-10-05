@@ -12491,6 +12491,10 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
             // Populate the retained menu (also QIs IContextMenu2/3) and
             // initialize it, exactly like the normal discovery path; otherwise
             // dynamic labels and submenus are empty and get pruned.
+            if (g_settings.debugLogging) {
+                Wh_Log(L"NavPane: capture idFirst=%u obj=%p flags=%08X",
+                       capture.idCmdFirst, capture.obj, capture.flags);
+            }
             if (EnsureContextPopulated(capture)) {
                 if (!capture.menuInitialized) {
                     InitializeMenuRecursive(capture, capture.populatedMenu, 0);
@@ -12499,7 +12503,14 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
                 model = BuildModelFromHMenu(capture.populatedMenu,
                                             capture.idCmdFirst, signature,
                                             capture.obj);
+                if (g_settings.debugLogging) {
+                    Wh_Log(L"NavPane: captured %zu items",
+                           model.items.size());
+                    DumpModelItems(model.items, 0);
+                }
                 ApplyRegistryIcons(model.items, signature);
+            } else if (g_settings.debugLogging) {
+                Wh_Log(L"NavPane: population failed");
             }
         } else {
             cached = g_cache.Find(signature);
@@ -12564,6 +12575,9 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
             }
         }
 
+        if (capturedMenuContext && g_settings.debugLogging) {
+            Wh_Log(L"NavPane: %zu items after prune", model.items.size());
+        }
         if (!hasMoveRules) {
             AdvancedGroupingOptions grouping;
             grouping.moveWindows = g_settings.advancedSubmenuWindows;

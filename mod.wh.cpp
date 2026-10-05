@@ -8739,15 +8739,15 @@ std::wstring ResolveIndirectString(const std::wstring& value) {
 
 // Finds a shell verb key whose display text matches the item label, for
 // handlers whose key name differs from the canonical verb.
-std::wstring ResolveRegistryIconByLabel(const ContextSignature& signature,
-                                        const std::wstring& label) {
-    std::wstring normalized = label;
-    normalized.erase(std::remove(normalized.begin(), normalized.end(), L'&'),
-                     normalized.end());
-    if (normalized.empty()) {
-        return L"";
-    }
+struct ShellLabelIcon {
+    std::wstring display;  // normalized, '&' stripped
+    std::wstring icon;
+};
 
+// Enumerates the shell verb keys once and maps display text to icons.
+std::vector<ShellLabelIcon> BuildShellLabelIcons(
+    const ContextSignature& signature) {
+    std::vector<ShellLabelIcon> icons;
     for (const std::wstring& base : ShellIconBases(signature)) {
         const std::wstring shellKey = base + L"\\shell";
         HKEY key = nullptr;
@@ -8776,16 +8776,44 @@ std::wstring ResolveRegistryIconByLabel(const ContextSignature& signature,
             display = ResolveIndirectString(display);
             display.erase(std::remove(display.begin(), display.end(), L'&'),
                           display.end());
-            if (!display.empty() &&
-                _wcsicmp(display.c_str(), normalized.c_str()) == 0) {
-                const std::wstring icon = ReadClassesString(verbKey, L"Icon");
-                if (!icon.empty()) {
-                    RegCloseKey(key);
-                    return icon;
-                }
+            if (display.empty()) {
+                continue;
             }
+            const std::wstring icon = ReadClassesString(verbKey, L"Icon");
+            if (icon.empty()) {
+                continue;
+            }
+            ShellLabelIcon entry;
+            entry.display = display;
+            entry.icon = icon;
+            icons.push_back(std::move(entry));
         }
         RegCloseKey(key);
+    }
+    return icons;
+}
+
+std::wstring MatchShellLabelIcon(const std::vector<ShellLabelIcon>& icons,
+                                 const std::wstring& label);
+
+// Compatibility wrapper; the open path uses the prebuilt list directly.
+std::wstring ResolveRegistryIconByLabel(const ContextSignature& signature,
+                                        const std::wstring& label) {
+    return MatchShellLabelIcon(BuildShellLabelIcons(signature), label);
+}
+
+std::wstring MatchShellLabelIcon(const std::vector<ShellLabelIcon>& icons,
+                                 const std::wstring& label) {
+    std::wstring normalized = label;
+    normalized.erase(std::remove(normalized.begin(), normalized.end(), L'&'),
+                     normalized.end());
+    if (normalized.empty()) {
+        return L"";
+    }
+    for (const ShellLabelIcon& entry : icons) {
+        if (_wcsicmp(entry.display.c_str(), normalized.c_str()) == 0) {
+            return entry.icon;
+        }
     }
     return L"";
 }
@@ -8831,16 +8859,18 @@ bool LabelMatchesWords(const std::wstring& label, const std::wstring& text) {
 }
 
 // Matches a handler DLL by its version-info company/product/description.
-bool VersionInfoMatchesLabel(const std::wstring& path, const std::wstring& label) {
+// Reads CompanyName/ProductName/FileDescription once per DLL.
+void ReadVersionStrings(const std::wstring& path,
+                        std::vector<std::wstring>& out) {
     DWORD ignored = 0;
     const DWORD size = GetFileVersionInfoSizeW(path.c_str(), &ignored);
     if (size == 0) {
-        return false;
+        return;
     }
 
     std::vector<uint8_t> data(size);
     if (!GetFileVersionInfoW(path.c_str(), 0, size, data.data())) {
-        return false;
+        return;
     }
 
     struct Translation {
@@ -8871,9 +8901,19 @@ bool VersionInfoMatchesLabel(const std::wstring& path, const std::wstring& label
             UINT valueChars = 0;
             if (VerQueryValueW(data.data(), query, reinterpret_cast<LPVOID*>(&value),
                                &valueChars) &&
-                value && valueChars > 0 && LabelMatchesWords(label, value)) {
-                return true;
+                value && valueChars > 0) {
+                out.emplace_back(value);
             }
+        }
+    }
+}
+
+bool VersionInfoMatchesLabel(const std::wstring& path, const std::wstring& label) {
+    std::vector<std::wstring> strings;
+    ReadVersionStrings(path, strings);
+    for (const std::wstring& value : strings) {
+        if (LabelMatchesWords(label, value)) {
+            return true;
         }
     }
     return false;
@@ -8886,13 +8926,16 @@ bool VersionInfoMatchesLabel(const std::wstring& path, const std::wstring& label
 // name, handler DLL name, or DLL version info. Fills `dllOut` with the
 // handler DLL path when matched. Used for icons and for classifying
 // third-party items.
-bool LabelMatchesRegisteredHandler(const ContextSignature& signature,
-                                   const std::wstring& label,
-                                   std::wstring* dllOut) {
-    if (label.empty()) {
-        return false;
-    }
+struct RegisteredHandlerInfo {
+    std::wstring name;
+    std::wstring dll;
+    std::vector<std::wstring> versionStrings;
+};
 
+// Enumerates the registered handlers once; matching per item is string work.
+std::vector<RegisteredHandlerInfo> BuildRegisteredHandlers(
+    const ContextSignature& signature) {
+    std::vector<RegisteredHandlerInfo> handlers;
     for (const std::wstring& base : ShellIconBases(signature)) {
         const std::wstring handlersKey = base + L"\\shellex\\ContextMenuHandlers";
         for (HKEY root : {HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE}) {
@@ -8923,7 +8966,6 @@ bool LabelMatchesRegisteredHandler(const ContextSignature& signature,
                 if (dll.size() >= 2 && dll.front() == L'"' && dll.back() == L'"') {
                     dll = dll.substr(1, dll.size() - 2);
                 }
-
                 wchar_t expanded[MAX_PATH] = {};
                 if (!ExpandEnvironmentStringsW(dll.c_str(), expanded,
                                               ARRAYSIZE(expanded)) ||
@@ -8931,37 +8973,27 @@ bool LabelMatchesRegisteredHandler(const ContextSignature& signature,
                     continue;
                 }
 
-                bool matches =
-                    nameLength >= 5 && StrStrIW(label.c_str(), name) != nullptr;
-                if (!matches) {
-                    // Some handlers are registered under a generic key name;
-                    // match the DLL file name instead.
-                    std::wstring stem = PathFindFileNameW(expanded);
-                    const size_t dot = stem.find_last_of(L'.');
-                    if (dot != std::wstring::npos) {
-                        stem.resize(dot);
-                    }
-                    matches = stem.size() >= 5 &&
-                              StrStrIW(label.c_str(), stem.c_str()) != nullptr;
-                }
-                if (!matches) {
-                    // Or match the DLL's version info (company/product name).
-                    matches = VersionInfoMatchesLabel(expanded, label);
-                }
-                if (!matches) {
-                    continue;
-                }
-
-                if (dllOut) {
-                    *dllOut = expanded;
-                }
-                RegCloseKey(key);
-                return true;
+                RegisteredHandlerInfo info;
+                info.name = name;
+                info.dll = expanded;
+                ReadVersionStrings(expanded, info.versionStrings);
+                handlers.push_back(std::move(info));
             }
             RegCloseKey(key);
         }
     }
-    return false;
+    return handlers;
+}
+
+bool MatchesRegisteredHandler(const std::vector<RegisteredHandlerInfo>& handlers,
+                              const std::wstring& label, std::wstring* dllOut);
+
+// Compatibility wrapper; the open path uses the prebuilt list directly.
+bool LabelMatchesRegisteredHandler(const ContextSignature& signature,
+                                   const std::wstring& label,
+                                   std::wstring* dllOut) {
+    return MatchesRegisteredHandler(BuildRegisteredHandlers(signature), label,
+                                    dllOut);
 }
 
 std::wstring ResolveHandlerDllIconByLabel(const ContextSignature& signature,
@@ -8972,6 +9004,42 @@ std::wstring ResolveHandlerDllIconByLabel(const ContextSignature& signature,
     }
     return L"";
 }
+
+bool MatchesRegisteredHandler(const std::vector<RegisteredHandlerInfo>& handlers,
+                              const std::wstring& label, std::wstring* dllOut) {
+    if (label.empty()) {
+        return false;
+    }
+    for (const RegisteredHandlerInfo& handler : handlers) {
+        bool matches = handler.name.size() >= 5 &&
+                       StrStrIW(label.c_str(), handler.name.c_str()) != nullptr;
+        if (!matches) {
+            std::wstring stem = PathFindFileNameW(handler.dll.c_str());
+            const size_t dot = stem.find_last_of(L'.');
+            if (dot != std::wstring::npos) {
+                stem.resize(dot);
+            }
+            matches = stem.size() >= 5 &&
+                      StrStrIW(label.c_str(), stem.c_str()) != nullptr;
+        }
+        if (!matches) {
+            for (const std::wstring& value : handler.versionStrings) {
+                if (LabelMatchesWords(label, value)) {
+                    matches = true;
+                    break;
+                }
+            }
+        }
+        if (matches) {
+            if (dllOut) {
+                *dllOut = handler.dll;
+            }
+            return true;
+        }
+    }
+    return false;
+}
+
 
 // Logs the registered context menu handlers so an unresolved item can be
 // traced to its registration.
@@ -9012,17 +9080,19 @@ void LogHandlerCandidates(const ContextSignature& signature,
 // Fills in registry icons for static verbs that provide no menu bitmap and
 // marks items that belong to registered shell extensions (used by the
 // advanced submenu).
-void ApplyRegistryIcons(std::vector<MenuItem>& items,
-                        const ContextSignature& signature) {
+void ApplyRegistryIconsRecursive(
+    std::vector<MenuItem>& items, const ContextSignature& signature,
+    const std::vector<RegisteredHandlerInfo>& handlers,
+    const std::vector<ShellLabelIcon>& labelIcons) {
     for (MenuItem& item : items) {
-        ApplyRegistryIcons(item.children, signature);
+        ApplyRegistryIconsRecursive(item.children, signature, handlers, labelIcons);
         if (item.kind == ItemKind::Separator) {
             continue;
         }
 
         std::wstring handlerDll;
         const bool registered =
-            LabelMatchesRegisteredHandler(signature, item.label, &handlerDll);
+            MatchesRegisteredHandler(handlers, item.label, &handlerDll);
         if (registered) {
             item.flags |= kModelThirdParty;
         }
@@ -9034,7 +9104,7 @@ void ApplyRegistryIcons(std::vector<MenuItem>& items,
 
         std::wstring icon = ResolveRegistryIcon(signature, item.canonicalVerb);
         if (icon.empty()) {
-            icon = ResolveRegistryIconByLabel(signature, item.label);
+            icon = MatchShellLabelIcon(labelIcons, item.label);
         }
         if (icon.empty() && registered) {
             icon = handlerDll + L",0";
@@ -9049,6 +9119,17 @@ void ApplyRegistryIcons(std::vector<MenuItem>& items,
                    item.canonicalVerb.c_str());
         }
     }
+}
+
+void ApplyRegistryIcons(std::vector<MenuItem>& items,
+                        const ContextSignature& signature) {
+    // The registry and DLL version info are read once per open instead of
+    // once per item; this is the open-path cost for nav-pane menus.
+    const std::vector<RegisteredHandlerInfo> handlers =
+        BuildRegisteredHandlers(signature);
+    const std::vector<ShellLabelIcon> labelIcons =
+        BuildShellLabelIcons(signature);
+    ApplyRegistryIconsRecursive(items, signature, handlers, labelIcons);
 }
 
 void BuildItemsFromHMenu(HMENU menu, UINT idCmdFirst, IContextMenu* context,

@@ -3638,6 +3638,103 @@ RulesApplication ApplyRulesConfigToModel(MenuModel& model,
 }
 
 // ===========================================================================
+// [CMO:Icons] Named symbol and Windows stock icon sources.
+// ===========================================================================
+
+struct NamedIcon {
+    const wchar_t* name;
+    const wchar_t* glyph;
+};
+
+const NamedIcon kNamedIcons[] = {
+    {L"copy", L"E8C8"},        {L"cut", L"E8C6"},
+    {L"paste", L"E77F"},       {L"delete", L"E74D"},
+    {L"rename", L"E8AC"},      {L"properties", L"E713"},
+    {L"refresh", L"E72C"},     {L"open", L"E8E5"},
+    {L"openwith", L"E7AC"},    {L"folder", L"E8B7"},
+    {L"file", L"E8A5"},        {L"drive", L"EDA2"},
+    {L"network", L"E968"},     {L"share", L"E72D"},
+    {L"pin", L"E718"},         {L"unpin", L"E77A"},
+    {L"new", L"E710"},         {L"link", L"E71B"},
+    {L"terminal", L"E756"},    {L"run", L"E768"},
+    {L"admin", L"E7EF"},       {L"search", L"E721"},
+    {L"filter", L"E71C"},      {L"check", L"E73E"},
+    {L"star", L"E734"},        {L"lock", L"E72E"},
+    {L"info", L"E946"},        {L"warning", L"E7BA"},
+    {L"error", L"E783"},       {L"up", L"E74A"},
+    {L"down", L"E74B"},        {L"left", L"E72B"},
+    {L"right", L"E72A"},       {L"more", L"E712"},
+    {L"close", L"E8BB"},       {L"settings", L"E713"},
+    {L"personalize", L"E790"}, {L"display", L"E7F4"},
+    {L"selectall", L"E8B3"},   {L"sort", L"E8CB"},
+    {L"group", L"E902"},       {L"view-xlarge", L"E7C4"},
+    {L"view-large", L"E739"},  {L"view-medium", L"E80A"},
+    {L"view-small", L"E8A9"},  {L"view-list", L"E8FD"},
+    {L"view-details", L"E8EF"}, {L"view-tiles", L"E8B3"},
+    {L"view-content", L"E71D"},
+};
+
+bool ResolveNamedIcon(const std::wstring& name, std::wstring& glyph) {
+    for (const NamedIcon& icon : kNamedIcons) {
+        if (_wcsicmp(icon.name, name.c_str()) == 0) {
+            glyph = icon.glyph;
+            return true;
+        }
+    }
+    return false;
+}
+
+struct StockIcon {
+    const wchar_t* name;
+    int id;
+    bool shellStock;  // true: SHSTOCKICONID, false: IDI_* resource id
+};
+
+const StockIcon kStockIcons[] = {
+    {L"info", 32516, false},      // IDI_INFORMATION
+    {L"warning", 32515, false},   // IDI_WARNING
+    {L"error", 32513, false},     // IDI_ERROR
+    {L"question", 32514, false},  // IDI_QUESTION
+    {L"shield", 32518, false},    // IDI_SHIELD
+    {L"folder", SIID_FOLDER, true},
+    {L"drive", SIID_DRIVEFIXED, true},
+    {L"network", SIID_MYNETWORK, true},
+    {L"computer", SIID_DESKTOPPC, true},
+    {L"desktop", SIID_FOLDER, true},
+    {L"documents", SIID_DOCNOASSOC, true},
+    {L"downloads", SIID_FOLDER, true},
+    {L"music", SIID_AUDIOFILES, true},
+    {L"pictures", SIID_IMAGEFILES, true},
+    {L"videos", SIID_VIDEOFILES, true},
+    {L"recycle", SIID_RECYCLER, true},
+};
+
+bool ResolveStockIcon(const std::wstring& name, int& id, bool& shellStock) {
+    for (const StockIcon& icon : kStockIcons) {
+        if (_wcsicmp(icon.name, name.c_str()) == 0) {
+            id = icon.id;
+            shellStock = icon.shellStock;
+            return true;
+        }
+    }
+    return false;
+}
+
+// Glyph codepoint for @glyph:XXXX or a resolved @icon:<name>; empty otherwise.
+std::wstring IconRefGlyph(const std::wstring& iconRef) {
+    if (iconRef.rfind(L"@glyph:", 0) == 0) {
+        return iconRef.substr(7);
+    }
+    if (iconRef.rfind(L"@icon:", 0) == 0) {
+        std::wstring glyph;
+        if (ResolveNamedIcon(iconRef.substr(6), glyph)) {
+            return glyph;
+        }
+    }
+    return L"";
+}
+
+// ===========================================================================
 // [CMO:Layout] Appearance resolution, metrics, and render-ready layout.
 // ===========================================================================
 

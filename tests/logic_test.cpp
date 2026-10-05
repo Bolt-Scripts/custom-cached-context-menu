@@ -3499,6 +3499,23 @@ int main() {
         CHECK(cmo::ResolveLayoutMetrics(appearance, 192, true).blurPasses == 6);
     }
 
+    // v2.6 named and stock icon tables.
+    {
+        std::wstring glyph;
+        CHECK(cmo::ResolveNamedIcon(L"copy", glyph) && glyph == L"E8C8");
+        CHECK(cmo::ResolveNamedIcon(L"DELETE", glyph) && glyph == L"E74D");
+        CHECK(!cmo::ResolveNamedIcon(L"notanicon", glyph));
+        CHECK(cmo::IconRefGlyph(L"@glyph:E8C8") == L"E8C8");
+        CHECK(cmo::IconRefGlyph(L"@icon:copy") == L"E8C8");
+        CHECK(cmo::IconRefGlyph(L"@ext:.txt").empty());
+
+        int id = 0;
+        bool shellStock = false;
+        CHECK(cmo::ResolveStockIcon(L"info", id, shellStock) && !shellStock);
+        CHECK(cmo::ResolveStockIcon(L"folder", id, shellStock) && shellStock);
+        CHECK(!cmo::ResolveStockIcon(L"notastock", id, shellStock));
+    }
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

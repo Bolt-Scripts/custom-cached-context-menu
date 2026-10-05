@@ -1673,31 +1673,67 @@ bool ApplyAppearanceValue(Appearance& appearance, const std::wstring& key,
     return false;
 }
 
-std::wstring DefaultRulesConfigText() {
-    return L"; Context Menu Overhaul v2 configuration\n"
-           L"; Colors are #RRGGBB or #AARRGGBB. Comments start with ';'.\n"
-           L"\n"
-           L"[appearance]\n"
-           L"; background = #1E1E1EF0\n"
-           L"; blur = true\n"
-           L"; cornerRadius = 8\n"
-           L"; border = #FFFFFF22\n"
-           L"; shadow = true\n"
-           L"; font = Segoe UI, 9\n"
-           L"; itemHeight = 28\n"
-           L"; iconSize = 16\n"
-           L"; padding = 6\n"
-           L"; hoverBackground = #FFFFFF14\n"
-           L"; textColor = #FFFFFF\n"
-           L"; animation = none\n"
-           L"\n"
-           L"; [appearance.light]\n"
-           L"; background = #F5F5F5F2\n"
-           L"; textColor = #202020\n"
-           L"\n"
-           L"; [rules]\n"
-           L"; hide = label:\"Cast to Device\"\n"
-           L"; move = thirdParty -> \"More options\"\n";
+std::wstring GenerateDefaultConfigText() {
+    std::wstring text;
+    text += L"; Context Menu Overhaul configuration (schema ";
+    text += std::to_wstring(kConfigSchemaVersion);
+    text += L")\n";
+    text += L"; UTF-8. Reloaded when a menu opens. Comments start with ';' or '#'.\n";
+    text += L"; Errors are logged as menu.ini:<line>: <message>; the last good\n";
+    text += L"; configuration stays in effect. Uncomment a line to override its default.\n";
+    text += L"\n";
+
+    const wchar_t* kSections[] = {L"appearance", L"appearance.light",
+                                  L"appearance.dark"};
+    for (const wchar_t* section : kSections) {
+        text += L"[";
+        text += section;
+        text += L"]\n";
+        if (wcscmp(section, L"appearance") != 0) {
+            text += L"; Overrides for this theme; keys not listed use [appearance].\n";
+        }
+        for (const ConfigSchemaEntry& entry : kAppearanceSchema) {
+            if (wcscmp(entry.section, L"appearance") != 0) {
+                continue;
+            }
+            text += L"; ";
+            text += entry.description;
+            text += L" (default: ";
+            text += entry.defaultValue;
+            text += L")\n; ";
+            text += entry.key;
+            text += L" = ";
+            text += entry.defaultValue;
+            text += L"\n";
+        }
+        text += L"\n";
+    }
+
+    text += L"[rules]\n"
+            L"; hide = label:\"Cast to Device\"\n"
+            L"; keep = label:Share\n"
+            L"; move = thirdParty -> \"More options\"\n"
+            L"\n"
+            L"[command \"Open in VS Code\"]\n"
+            L"; command = code.exe \"%1\"\n"
+            L"; workingDir = %dir%\n"
+            L"; match.ext = .cs, .cpp\n"
+            L"; menu = Tools\n"
+            L"\n"
+            L"[submenu \"Tools\"]\n"
+            L"; icon = @glyph:E712\n"
+            L"; position = top\n"
+            L"\n"
+            L"[item \"TortoiseSVN*\"]\n"
+            L"; label = SVN\n"
+            L"; icon = C:\\Tools\\svn.ico,0\n"
+            L"; marker = bar\n"
+            L"\n"
+            L"[meta]\n"
+            L"schemaVersion = ";
+    text += std::to_wstring(kConfigSchemaVersion);
+    text += L"\n";
+    return text;
 }
 
 // Declared here and defined in [CMO:RulesEngine] below.
@@ -2994,7 +3030,7 @@ public:
             CreateDirectoryW(path.substr(0, slash).c_str(), nullptr);
         }
         if (GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) {
-            WriteConfigFile(path, DefaultRulesConfigText());
+            WriteConfigFile(path, GenerateDefaultConfigText());
         }
         std::wstring text;
         if (ReadConfigFile(path, text)) {

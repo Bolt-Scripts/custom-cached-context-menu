@@ -3254,6 +3254,23 @@ int main() {
         CHECK(cmo::ReadSchemaVersion(L"[meta]\nschemaVersion = x\n") == 0);
     }
 
+    // v2.2 generated default file: every key, defaults, meta, parseable.
+    {
+        const std::wstring text = cmo::GenerateDefaultConfigText();
+        for (const cmo::ConfigSchemaEntry& entry : cmo::kAppearanceSchema) {
+            CHECK(text.find(entry.key) != std::wstring::npos);
+            CHECK(text.find(entry.defaultValue) != std::wstring::npos);
+        }
+        CHECK(text.find(L"[meta]") != std::wstring::npos);
+        CHECK(text.find(L"schemaVersion = 1") != std::wstring::npos);
+        CHECK(text.find(L"[rules]") != std::wstring::npos);
+        CHECK(text.find(L"[command ") != std::wstring::npos);
+        cmo::RulesConfig config;
+        std::vector<cmo::ConfigParseError> errors;
+        CHECK(cmo::ParseRulesConfig(text, config, errors));
+        CHECK(config.schemaVersion == 1);
+    }
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

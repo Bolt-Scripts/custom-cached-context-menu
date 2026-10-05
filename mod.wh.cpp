@@ -4916,7 +4916,9 @@ public:
         isRoot_ = isRoot;
         margin_ = margin > 0 ? margin : 0;
 
-        RegisterClassOnce();
+        if (!RegisterClassOnce()) {
+            return false;
+        }
 
         const int width = (panel && panel->size.cx > 0 ? panel->size.cx : 100) +
                           2 * margin_;
@@ -5010,10 +5012,10 @@ public:
     }
 
 private:
-    static void RegisterClassOnce() {
+    static bool RegisterClassOnce() {
         static bool registered = false;
         if (registered) {
-            return;
+            return true;
         }
         WNDCLASSEXW wc = {};
         wc.cbSize = sizeof(wc);
@@ -5022,8 +5024,16 @@ private:
         wc.hInstance = GetModuleHandleW(nullptr);
         wc.hCursor = LoadCursorW(nullptr, MAKEINTRESOURCEW(32512));
         wc.lpszClassName = kMenuWindowClass;
-        RegisterClassExW(&wc);
+        if (!RegisterClassExW(&wc)) {
+            // A class left behind by a previous load would keep pointing at
+            // the old window procedure; reclaim it instead of using it.
+            UnregisterClassW(kMenuWindowClass, GetModuleHandleW(nullptr));
+            if (!RegisterClassExW(&wc)) {
+                return false;
+            }
+        }
         registered = true;
+        return true;
     }
 
     static LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam,
@@ -5098,6 +5108,27 @@ private:
     IDCompositionVisual* visual_ = nullptr;
 };
 
+// Set while Wh_ModUninit tears the mod down. New sessions are refused and
+// window-pool releases destroy their window instead of keeping it around,
+// because the DLL (and its window procedures) is about to be unloaded.
+inline std::atomic<bool> g_unloading{false};
+// Custom menu sessions currently running on the UI thread. Uninit waits for
+// this to reach zero before releasing UI-thread resources.
+inline std::atomic<long> g_activeSessions{0};
+// UI-thread work (menu preparation, native replay) in progress. Uninit waits
+// for it so the DLL is not unloaded while a stack frame points into it.
+inline std::atomic<long> g_uiBusy{0};
+
+struct UiBusyScope {
+    UiBusyScope() { g_uiBusy.fetch_add(1); }
+    ~UiBusyScope() { g_uiBusy.fetch_sub(1); }
+    UiBusyScope(const UiBusyScope&) = delete;
+    UiBusyScope& operator=(const UiBusyScope&) = delete;
+};
+// Hidden message-only window created on the UI thread; Wh_ModUninit uses it
+// to run the window teardown on the thread that owns the windows.
+inline std::atomic<HWND> g_controlWindow{nullptr};
+
 class MenuWindowPool {
 public:
     static constexpr size_t kMaxWindows = 8;
@@ -5121,6 +5152,10 @@ public:
         if (!window) {
             return;
         }
+        if (g_unloading.load()) {
+            window->Destroy();
+            return;
+        }
         window->Hide();
         free_.push_back(window);
     }
@@ -5130,6 +5165,15 @@ public:
             window->Destroy();
         }
         all_.clear();
+        free_.clear();
+    }
+
+    // Destroys idle windows only. Windows checked out by a live session stay
+    // valid; that session's teardown destroys them (see Release).
+    void DestroyFreeWindows() {
+        for (MenuWindow* window : free_) {
+            window->Destroy();
+        }
         free_.clear();
     }
 
@@ -6789,7 +6833,7 @@ constexpr UINT_PTR kMenuSubmenuTimerId = 1;
 
 std::vector<RECT> SessionWindowRects(const MenuSession* session);
 
-inline HHOOK g_menuMouseHook = nullptr;
+inline std::atomic<HHOOK> g_menuMouseHook{nullptr};
 
 // Observes clicks while a menu is open without capturing the mouse, so hover
 // feedback keeps working everywhere. Outside clicks are consumed like native
@@ -7111,6 +7155,10 @@ LRESULT CustomMenuWindowProc(MenuWindow* window, HWND hwnd, UINT msg,
 CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
                                 HWND owner, POINT pt) {
     CustomMenuResult result;
+    if (g_unloading.load()) {
+        result.failed = true;
+        return result;
+    }
 
     if (!g_renderDevice.IsReady() && !g_renderDevice.Initialize()) {
         result.failed = true;
@@ -7193,6 +7241,7 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
     session.backdrops.push_back(hasBackdrop ? std::move(backdrop)
                                             : BackdropBitmap{});
 
+    g_activeSessions.fetch_add(1);
     g_menuSession = &session;
     g_menuWindowMessageHook = &CustomMenuWindowProc;
     if (g_settings.debugLogging) {
@@ -7205,11 +7254,12 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
     ApplyWindowAnimation(root->CompVisual(), ResolveAnimationSpec(appearance), true);
     root->Show();
     SetFocus(root->Handle());
-    if (!g_menuMouseHook) {
-        g_menuMouseHook = SetWindowsHookExW(WH_MOUSE_LL, MenuMouseHookProc,
-                                            GetModuleHandleW(nullptr), 0);
-        session.ownsMouseHook = g_menuMouseHook != nullptr;
-        if (!g_menuMouseHook && g_settings.debugLogging) {
+    if (!g_menuMouseHook.load()) {
+        HHOOK hook = SetWindowsHookExW(WH_MOUSE_LL, MenuMouseHookProc,
+                                       GetModuleHandleW(nullptr), 0);
+        g_menuMouseHook.store(hook);
+        session.ownsMouseHook = hook != nullptr;
+        if (!hook && g_settings.debugLogging) {
             Wh_Log(L"Failed to install the menu mouse hook");
         }
     }
@@ -7238,9 +7288,11 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
         }
         Sleep(static_cast<DWORD>(closing.durationMs));
     }
-    if (session.ownsMouseHook && g_menuMouseHook) {
-        UnhookWindowsHookEx(g_menuMouseHook);
-        g_menuMouseHook = nullptr;
+    if (session.ownsMouseHook) {
+        HHOOK hook = g_menuMouseHook.exchange(nullptr);
+        if (hook) {
+            UnhookWindowsHookEx(hook);
+        }
     }
     if (owner && IsWindow(owner)) {
         SetFocus(owner);
@@ -7253,6 +7305,7 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
         g_menuWindowMessageHook = nullptr;
         g_menuSession = nullptr;
     }
+    g_activeSessions.fetch_sub(1);
     if (g_settings.debugLogging) {
         Wh_Log(L"Custom menu session end (chosen=%d)",
                session.result.chosenItemId.has_value() ? 1 : 0);
@@ -7263,8 +7316,81 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
     return result;
 }
 
+// ---------------------------------------------------------------------------
+// Unload coordination. Every mod window belongs to the UI thread. Wh_ModUninit
+// runs on Windhawk's management thread, where DestroyWindow cannot destroy
+// windows owned by another thread; they would survive the unload with dangling
+// window procedures (a CFG crash on the next message). A hidden message-only
+// window created on the UI thread receives a synchronous cleanup request
+// instead, so all windows are destroyed and the classes unregistered before
+// the DLL goes away.
+constexpr wchar_t kControlWindowClass[] = L"ContextMenuOverhaulV2Control";
+constexpr UINT kControlUninitMessage = WM_APP + 37;
+
+LRESULT CALLBACK ControlWindowProc(HWND hwnd, UINT msg, WPARAM wParam,
+                                   LPARAM lParam) {
+    if (msg == kControlUninitMessage) {
+        g_unloading.store(true);
+        if (g_menuSession) {
+            g_menuSession->done = true;
+            PostThreadMessageW(GetCurrentThreadId(), WM_NULL, 0, 0);
+        }
+        HHOOK hook = g_menuMouseHook.exchange(nullptr);
+        if (hook) {
+            UnhookWindowsHookEx(hook);
+        }
+        g_menuWindowPool.DestroyFreeWindows();
+        DestroyWindow(hwnd);
+        if (g_controlWindow.load() == hwnd) {
+            g_controlWindow.store(nullptr);
+        }
+        UnregisterClassW(kMenuWindowClass, GetModuleHandleW(nullptr));
+        UnregisterClassW(kControlWindowClass, GetModuleHandleW(nullptr));
+        return 0;
+    }
+    return DefWindowProcW(hwnd, msg, wParam, lParam);
+}
+
+// Must be called on the UI thread (the TrackPopupMenu hook thread).
+bool EnsureControlWindow() {
+    HWND existing = g_controlWindow.load();
+    if (existing && IsWindow(existing)) {
+        return true;
+    }
+    static bool registered = false;
+    if (!registered) {
+        WNDCLASSEXW wc = {};
+        wc.cbSize = sizeof(wc);
+        wc.lpfnWndProc = &ControlWindowProc;
+        wc.hInstance = GetModuleHandleW(nullptr);
+        wc.lpszClassName = kControlWindowClass;
+        if (!RegisterClassExW(&wc)) {
+            // Reclaim a class left behind by a previous load.
+            UnregisterClassW(kControlWindowClass, GetModuleHandleW(nullptr));
+            if (!RegisterClassExW(&wc)) {
+                if (g_settings.debugLogging) {
+                    Wh_Log(L"Failed to register the control window class");
+                }
+                return false;
+            }
+        }
+        registered = true;
+    }
+    HWND control = CreateWindowExW(0, kControlWindowClass, L"", 0, 0, 0, 0, 0,
+                                   HWND_MESSAGE, nullptr, GetModuleHandleW(nullptr),
+                                   nullptr);
+    g_controlWindow.store(control);
+    if (!control && g_settings.debugLogging) {
+        Wh_Log(L"Failed to create the control window");
+    }
+    return control != nullptr;
+}
+
 void PrebuildLayoutsForWarmup(const std::vector<MenuModel>& models, uint32_t dpi,
                               bool darkTheme) {
+    if (g_unloading.load()) {
+        return;
+    }
     if (!g_renderDevice.IsReady() && !g_renderDevice.Initialize()) {
         return;
     }
@@ -12389,18 +12515,27 @@ public:
         if (stopEvent_) {
             SetEvent(stopEvent_);
         }
+        bool exited = true;
         if (thread_) {
-            WaitForSingleObject(thread_, 5000);
-            CloseHandle(thread_);
-            thread_ = nullptr;
+            exited = WaitForSingleObject(thread_, 5000) == WAIT_OBJECT_0;
+            if (exited) {
+                CloseHandle(thread_);
+                thread_ = nullptr;
+            } else {
+                // Leaking the handles is safer than closing them under a
+                // thread that is still running mod code.
+                Wh_Log(L"Invalidation thread did not exit; leaking its handles");
+            }
         }
-        if (stopEvent_) {
-            CloseHandle(stopEvent_);
-            stopEvent_ = nullptr;
-        }
-        if (checkEvent_) {
-            CloseHandle(checkEvent_);
-            checkEvent_ = nullptr;
+        if (exited) {
+            if (stopEvent_) {
+                CloseHandle(stopEvent_);
+                stopEvent_ = nullptr;
+            }
+            if (checkEvent_) {
+                CloseHandle(checkEvent_);
+                checkEvent_ = nullptr;
+            }
         }
     }
 
@@ -12573,6 +12708,7 @@ std::wstring SelectionDirectory(const std::vector<std::wstring>& paths,
 }
 
 bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner, POINT pt) {
+    UiBusyScope uiBusy;
     g_perf.MarkOpenPathStart();
     // Handler changes are checked while menus are used, not on a timer.
     g_invalidation.RequestCheck();
@@ -12724,7 +12860,7 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
         bool customShown = false;
         const MenuMode mode = ResolveMenuMode(
             g_settings.menuMode, g_modeController.ConsecutiveFailures());
-        if (mode == MenuMode::Custom) {
+        if (mode == MenuMode::Custom && !g_unloading.load()) {
             if (g_menuSession != nullptr && !g_menuSession->done) {
                 // A live session owns input; never clobber it. A session that
                 // is already closing may be superseded by this new menu.
@@ -12733,6 +12869,12 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
                 }
                 g_modeController.RecordSuccess();
                 customShown = true;
+            } else if (!EnsureControlWindow()) {
+                // Without the control window the UI thread cannot be asked to
+                // tear the windows down before unload; stay native instead of
+                // risking windows that outlive the DLL.
+                Wh_Log(L"Control window unavailable; using the HMENU path");
+                g_modeController.RecordFailure();
             } else {
                 const RulesConfig emptyConfig;
                 const RulesConfig& effectiveRules = rules ? *rules : emptyConfig;
@@ -13071,14 +13213,58 @@ void Wh_ModAfterInit() {
 
 void Wh_ModUninit() {
     Wh_Log(L"Context Menu Overhaul uninit");
-    cmo::g_menuWindowPool.DestroyAll();
+    cmo::g_unloading.store(true);
+
+    // Workers use the caches and the render device; stop them before anything
+    // is released.
+    cmo::g_warmup.Stop();
+    cmo::g_invalidation.Stop();
+
+    // Destroy the windows (and unregister the classes) on the UI thread that
+    // owns them. DestroyWindow from this thread cannot destroy another
+    // thread's windows, and the survivors would keep window procedures that
+    // point into the unloaded DLL.
+    bool uiCleaned = true;
+    HWND control = cmo::g_controlWindow.load();
+    if (control) {
+        DWORD_PTR cleanupResult = 0;
+        uiCleaned = SendMessageTimeoutW(control, cmo::kControlUninitMessage, 0, 0,
+                                        SMTO_ABORTIFHUNG | SMTO_BLOCK, 5000,
+                                        &cleanupResult) != 0;
+        if (!uiCleaned) {
+            Wh_Log(L"UI-thread cleanup did not complete");
+        }
+    }
+
+    // An open menu session runs on the UI thread; wait for it to observe the
+    // unload flag and finish its own teardown. Menu preparation and native
+    // replay also hold a busy scope.
+    const ULONGLONG deadline = GetTickCount64() + 5000;
+    while ((cmo::g_activeSessions.load() > 0 || cmo::g_uiBusy.load() > 0) &&
+           GetTickCount64() < deadline) {
+        Sleep(10);
+    }
+    if (cmo::g_activeSessions.load() > 0 || cmo::g_uiBusy.load() > 0) {
+        Wh_Log(L"UI-thread work did not finish before unload");
+    }
+
+    // Safety net in case the UI-thread cleanup never ran.
+    HHOOK hook = cmo::g_menuMouseHook.exchange(nullptr);
+    if (hook) {
+        UnhookWindowsHookEx(hook);
+    }
+    if (uiCleaned) {
+        cmo::g_menuWindowPool.DestroyAll();
+    }
+    // Best effort: the UI cleanup may have raced an open session and failed to
+    // unregister the class; all windows are gone by now.
+    UnregisterClassW(cmo::kMenuWindowClass, GetModuleHandleW(nullptr));
+
     cmo::g_contentCaches.Clear();
     cmo::g_layoutCache.InvalidateAll();
     cmo::g_renderDevice.Shutdown();
     cmo::RestoreMenuAnimation();
     cmo::RestoreMenuDelay();
-    cmo::g_warmup.Stop();
-    cmo::g_invalidation.Stop();
     cmo::g_iconCache.Clear();
 
     const std::wstring cachePath = cmo::CacheFilePath();
@@ -13088,6 +13274,9 @@ void Wh_ModUninit() {
 }
 
 void Wh_ModSettingsChanged() {
+    if (cmo::g_unloading.load()) {
+        return;
+    }
     Wh_Log(L"Context Menu Overhaul settings changed");
     cmo::LoadSettings();
 

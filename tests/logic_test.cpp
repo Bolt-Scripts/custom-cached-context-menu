@@ -4009,6 +4009,42 @@ int main() {
     }
 
     {
+        int v = 0;
+        CHECK(cmo::ParseIntField(L"42", 0, 100, v));
+        CHECK_EQ(v, 42);
+        CHECK(cmo::ParseIntField(L"  -7 ", -32, 32, v));
+        CHECK_EQ(v, -7);
+        CHECK(cmo::ParseIntField(L"999", 0, 100, v));
+        CHECK_EQ(v, 100);
+        CHECK(cmo::ParseIntField(L"-999", 0, 100, v));
+        CHECK_EQ(v, 0);
+        CHECK(!cmo::ParseIntField(L"", 0, 100, v));
+        CHECK(!cmo::ParseIntField(L"12x", 0, 100, v));
+        CHECK(!cmo::ParseIntField(L"-", 0, 100, v));
+
+        uint32_t argb = 0;
+        CHECK(cmo::ParseColorField(L"#11223344", argb));
+        CHECK_EQ(argb, 0x11223344u);
+        CHECK(cmo::ParseColorField(L"#123456", argb));
+        CHECK_EQ(argb, 0xFF123456u);
+        CHECK(!cmo::ParseColorField(L"#12345", argb));
+        CHECK(cmo::ParseColorField(L"10, 20, 30, 40", argb));
+        CHECK_EQ(argb, 0x280A141Eu);
+
+        CHECK_EQ(cmo::SliderValueFromX(0, 0, 100, 0, 100, 1), 0);
+        CHECK_EQ(cmo::SliderValueFromX(100, 0, 100, 0, 100, 1), 100);
+        CHECK_EQ(cmo::SliderValueFromX(50, 0, 100, 0, 100, 1), 50);
+        CHECK_EQ(cmo::SliderValueFromX(53, 0, 100, 0, 100, 10), 50);
+        CHECK_EQ(cmo::SliderValueFromX(57, 0, 100, 0, 100, 10), 60);
+        CHECK_EQ(cmo::SliderValueFromX(-10, 0, 100, 0, 100, 1), 0);
+        CHECK_EQ(cmo::SliderValueFromX(0, 0, 0, 0, 100, 1), 0);
+        CHECK_EQ(cmo::SliderValueFromX(5, 0, 100, 7, 7, 1), 7);
+        CHECK_EQ(cmo::SliderXFromValue(0, 10, 100, 0, 100), 10);
+        CHECK_EQ(cmo::SliderXFromValue(100, 10, 100, 0, 100), 110);
+        CHECK_EQ(cmo::SliderXFromValue(50, 10, 100, 0, 100), 60);
+    }
+
+    {
         using cmo::SettingsTargetKind;
         CHECK(cmo::DefaultSettingsTargetKind(false, false, false) ==
               SettingsTargetKind::MenuIniBase);

@@ -5033,6 +5033,77 @@ ConfigOverride ResetOverrideForTarget(const SettingsTarget& target,
     return change;
 }
 
+// Typed numeric field: optional '-', digits only; clamps into [min, max].
+bool ParseIntField(const std::wstring& text, int minValue, int maxValue,
+                   int& out) {
+    const std::wstring trimmed = TrimWhitespace(text);
+    if (trimmed.empty()) {
+        return false;
+    }
+    size_t pos = 0;
+    bool negative = false;
+    if (trimmed[pos] == L'-') {
+        negative = true;
+        ++pos;
+    }
+    if (pos >= trimmed.size()) {
+        return false;
+    }
+    long long value = 0;
+    for (; pos < trimmed.size(); ++pos) {
+        const wchar_t c = trimmed[pos];
+        if (c < L'0' || c > L'9') {
+            return false;
+        }
+        value = value * 10 + (c - L'0');
+        if (value > 0x7FFFFFFFLL) {
+            value = 0x7FFFFFFFLL;  // saturate, then clamp
+        }
+    }
+    if (negative) {
+        value = -value;
+    }
+    out = static_cast<int>(std::clamp(
+        value, static_cast<long long>(minValue),
+        static_cast<long long>(maxValue)));
+    return true;
+}
+
+// Hex (#RRGGBB / #AARRGGBB) or decimal "R, G, B[, A]" via the config parser.
+bool ParseColorField(const std::wstring& text, uint32_t& argb) {
+    return ParseColor(TrimWhitespace(text), argb);
+}
+
+int SliderValueFromX(int x, int trackLeft, int trackWidth, int minValue,
+                     int maxValue, int step) {
+    if (trackWidth <= 0 || maxValue <= minValue) {
+        return minValue;
+    }
+    const double fraction =
+        static_cast<double>(x - trackLeft) / static_cast<double>(trackWidth);
+    const double raw = minValue + fraction * (maxValue - minValue);
+    long long value = 0;
+    if (step > 0) {
+        const long long steps =
+            std::lround((raw - minValue) / static_cast<double>(step));
+        value = minValue + steps * step;
+    } else {
+        value = std::lround(raw);
+    }
+    return std::clamp(static_cast<int>(value), minValue, maxValue);
+}
+
+int SliderXFromValue(int value, int trackLeft, int trackWidth, int minValue,
+                     int maxValue) {
+    if (maxValue <= minValue) {
+        return trackLeft;
+    }
+    const double fraction =
+        static_cast<double>(value - minValue) /
+        static_cast<double>(maxValue - minValue);
+    return trackLeft + static_cast<int>(std::lround(fraction * trackWidth));
+}
+
 // ===========================================================================
 // [CMO:Layout] Appearance resolution, metrics, and render-ready layout.
 // ===========================================================================

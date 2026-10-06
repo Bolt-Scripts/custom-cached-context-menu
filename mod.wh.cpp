@@ -11785,6 +11785,29 @@ bool InvokePasteShortcut(const InvocationContext& ctx) {
     return ok;
 }
 
+// Open with: shows the shell's "How do you want to open this file?" dialog.
+// The shell's classic menu exposes "Open with" as a submenu, which cannot be
+// invoked by offset, so the mod shows the dialog directly.
+bool InvokeOpenWith(const InvocationContext& ctx) {
+    if (ctx.paths.empty()) {
+        return false;
+    }
+    bool any = false;
+    for (const std::wstring& path : ctx.paths) {
+        OPENASINFO info = {};
+        info.pcszFile = path.c_str();
+        info.pcszClass = nullptr;
+        info.oaifInFlags = OAIF_ALLOW_REGISTRATION | OAIF_EXEC;
+        if (SUCCEEDED(SHOpenWithDialog(ctx.owner, &info))) {
+            any = true;
+        }
+    }
+    if (g_settings.debugLogging) {
+        Wh_Log(L"Open with: %zu file(s), ok=%d", ctx.paths.size(), any ? 1 : 0);
+    }
+    return any;
+}
+
 // Executes a SendTo shortcut with the selected paths as arguments.
 bool InvokeSendTo(const std::wstring& target, const std::vector<std::wstring>& paths) {
     if (target.empty() || paths.empty()) {
@@ -12066,6 +12089,10 @@ InvokeResult InvokeItem(const MenuItem& item, const InvocationContext& ctx,
             if (item.canonicalVerb == L"createshortcut") {
                 return CreateShortcutForPaths(ctx.paths) ? InvokeResult::Handled
                                                          : InvokeResult::FallbackNative;
+            }
+            if (item.canonicalVerb == L"openwith") {
+                return InvokeOpenWith(ctx) ? InvokeResult::Handled
+                                           : InvokeResult::FallbackNative;
             }
             if (item.canonicalVerb == L"paste") {
                 const DWORD currentSequence = GetClipboardSequenceNumber();

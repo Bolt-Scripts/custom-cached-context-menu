@@ -113,6 +113,7 @@ rewritten.
 | fontStyle | enum | `normal` | normal, italic |
 | cornerRadii | int list | `2, 4, 6, 8` | tl,tr,br,bl; overrides cornerradius |
 | shadowOpacity | int | `120` | 0–255 |
+| shadowColor | color | `#FF000000` | shadow tint; its alpha multiplies shadowOpacity |
 | shadowBlur | int | `12` | 0–64 px softness (blur radius) |
 | marker | enum | `dot` | dot, check, bar, none |
 | markerColor | color | `#FFFFFFFF` | defaults to textcolor |

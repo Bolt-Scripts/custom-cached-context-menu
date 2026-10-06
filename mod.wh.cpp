@@ -1120,6 +1120,7 @@ struct Appearance {
     CornerRadii cornerRadii;
     bool hasCornerRadii = false;
     int shadowOpacity = 120;
+    uint32_t shadowColor = 0xFF000000;
     int shadowBlur = 12;
     MarkerStyle marker = MarkerStyle::Dot;
     uint32_t markerColor = 0xFFFFFFFF;
@@ -1457,7 +1458,7 @@ bool ParseCornerRadii(const std::wstring& value, CornerRadii& radii) {
 enum class SettingType : uint8_t { Bool, Int, Color, Font, Enum, IntList };
 
 // The build's schema version; bump when a row is added.
-constexpr int kConfigSchemaVersion = 4;
+constexpr int kConfigSchemaVersion = 5;
 
 struct ConfigSchemaEntry {
     const wchar_t* section;
@@ -1538,6 +1539,8 @@ const ConfigSchemaEntry kAppearanceSchema[] = {
      32, L"Shadow vertical offset in pixels.", 3, false},
     {L"appearance", L"shadowOpacity", L"Shadow", SettingType::Int, L"120", nullptr, 0, 255,
      L"Shadow alpha (0-255).", 1, false},
+    {L"appearance", L"shadowColor", L"Shadow", SettingType::Color, L"#FF000000", nullptr, 0, 0,
+     L"Shadow color; its alpha multiplies shadowOpacity.", 5, false},
     {L"appearance", L"shadowBlur", L"Shadow", SettingType::Int, L"12", nullptr, 0, 64,
      L"Shadow blur radius in pixels.", 1, false},
     {L"appearance", L"blur", L"Effects", SettingType::Bool, L"true", nullptr, 0, 0,
@@ -1755,6 +1758,9 @@ bool ApplyAppearanceValue(Appearance& appearance, const std::wstring& key,
     }
     if (normalized == L"shadowopacity") {
         return applyInt(appearance.shadowOpacity, _wtoi(row->defaultValue));
+    }
+    if (normalized == L"shadowcolor") {
+        return applyColor(appearance.shadowColor, nullptr);
     }
     if (normalized == L"shadowblur") {
         return applyInt(appearance.shadowBlur, _wtoi(row->defaultValue));
@@ -4187,6 +4193,7 @@ struct LayoutMetrics {
     CornerRadii cornerRadii;
     bool hasCornerRadii = false;
     int shadowOpacity = 120;
+    uint32_t shadowColor = 0xFF000000;
     int shadowBlur = 12;
     MarkerStyle marker = MarkerStyle::Dot;
     uint32_t markerColor = 0xFFFFFFFF;
@@ -4251,6 +4258,7 @@ LayoutMetrics ResolveLayoutMetrics(const Appearance& appearance, uint32_t dpi,
         MulDiv(appearance.cornerRadii.bottomLeft, scale, 96)};
     metrics.hasCornerRadii = appearance.hasCornerRadii;
     metrics.shadowOpacity = appearance.shadowOpacity;
+    metrics.shadowColor = appearance.shadowColor;
     metrics.shadowBlur = MulDiv(appearance.shadowBlur, scale, 96);
     metrics.shadowOffsetX = MulDiv(appearance.shadowOffsetX, scale, 96);
     metrics.shadowOffsetY = MulDiv(appearance.shadowOffsetY, scale, 96);
@@ -5380,8 +5388,9 @@ void BuildRoundedRectMaskRadii(int width, int height, int topLeft, int topRight,
 }
 
 bool BuildShadowBitmap(int width, int height, const CornerRadii& radii,
-                       int spread, int blur, int opacity, int downscale,
-                       std::vector<uint32_t>& pixels, int& outW, int& outH) {
+                       int spread, int blur, int opacity, uint32_t color,
+                       int downscale, std::vector<uint32_t>& pixels, int& outW,
+                       int& outH) {
     pixels.clear();
     outW = 0;
     outH = 0;
@@ -5407,11 +5416,18 @@ bool BuildShadowBitmap(int width, int height, const CornerRadii& radii,
                &silhouette[static_cast<size_t>(y) * silhouetteW],
                static_cast<size_t>(silhouetteW));
     }
+    const uint32_t colorR = (color >> 16) & 0xFF;
+    const uint32_t colorG = (color >> 8) & 0xFF;
+    const uint32_t colorB = color & 0xFF;
+    const uint32_t colorA = (color >> 24) & 0xFF;
     std::vector<uint32_t> argb(static_cast<size_t>(maskW) * maskH);
     for (size_t i = 0; i < argb.size(); ++i) {
         const uint32_t alpha =
-            (static_cast<uint32_t>(mask[i]) * static_cast<uint32_t>(opacity)) / 255;
-        argb[i] = alpha << 24;  // black, premultiplied
+            (static_cast<uint32_t>(mask[i]) * static_cast<uint32_t>(opacity) / 255) *
+            colorA / 255;
+        // Premultiplied shadow color.
+        argb[i] = (alpha << 24) | ((colorR * alpha / 255) << 16) |
+                  ((colorG * alpha / 255) << 8) | (colorB * alpha / 255);
     }
 
     std::vector<uint32_t> blurred;
@@ -5983,8 +5999,8 @@ void DrawPanel(ID2D1DeviceContext* dc, const LayoutPanel& panel,
         int shadowW = 0;
         int shadowH = 0;
         if (BuildShadowBitmap(panel.size.cx, panel.size.cy, radii, spread, blur,
-                              metrics.shadowOpacity, 4, shadowPixels, shadowW,
-                              shadowH)) {
+                              metrics.shadowOpacity, metrics.shadowColor, 4,
+                              shadowPixels, shadowW, shadowH)) {
             ID2D1Bitmap* bitmap = nullptr;
             const D2D1_SIZE_U size = {static_cast<UINT32>(shadowW),
                                       static_cast<UINT32>(shadowH)};
@@ -6831,6 +6847,9 @@ void OpenSubmenu(MenuSession* session, int index, int itemIndex) {
 constexpr UINT_PTR kMenuSubmenuTimerId = 1;
 
 std::vector<RECT> SessionWindowRects(const MenuSession* session);
+std::vector<RECT> SessionPanelRects(const MenuSession* session);
+bool IsSessionWindow(const MenuSession* session, HWND hwnd);
+HWND TargetWindowUnderPoint(const MenuSession* session, POINT pt);
 
 inline std::atomic<HHOOK> g_menuMouseHook{nullptr};
 
@@ -6844,7 +6863,9 @@ LRESULT CALLBACK MenuMouseHookProc(int code, WPARAM wParam, LPARAM lParam) {
         (wParam == WM_LBUTTONDOWN || wParam == WM_RBUTTONDOWN ||
          wParam == WM_MBUTTONDOWN)) {
         const auto* info = reinterpret_cast<const MSLLHOOKSTRUCT*>(lParam);
-        const std::vector<RECT> rects = SessionWindowRects(session);
+        // Panel rects: the shadow margin is click-through and counts as
+        // outside the menu for dismissal.
+        const std::vector<RECT> rects = SessionPanelRects(session);
         if (SessionLevelAtPoint(rects, info->pt) < 0) {
             session->done = true;
             if (g_settings.debugLogging) {
@@ -6860,15 +6881,8 @@ LRESULT CALLBACK MenuMouseHookProc(int code, WPARAM wParam, LPARAM lParam) {
                 // reliably. Letting the real down through is racy: when it is
                 // the message the modal loop unwinds on, the target never
                 // records the gesture.
-                const HWND target = WindowFromPoint(info->pt);
-                bool ours = false;
-                for (MenuWindow* menuWindow : session->windows) {
-                    if (menuWindow->Handle() == target) {
-                        ours = true;
-                        break;
-                    }
-                }
-                if (target && !ours) {
+                const HWND target = TargetWindowUnderPoint(session, info->pt);
+                if (target) {
                     POINT client = info->pt;
                     ScreenToClient(target, &client);
                     PostMessageW(target, WM_RBUTTONDOWN, MK_RBUTTON,
@@ -6897,6 +6911,65 @@ std::vector<RECT> SessionWindowRects(const MenuSession* session) {
         rects.push_back(rect);
     }
     return rects;
+}
+
+// Window rectangles inset by the shadow margin: the visible panel area. The
+// margin is click-through (see WM_NCHITTEST) and counts as outside the menu
+// for dismissal.
+std::vector<RECT> SessionPanelRects(const MenuSession* session) {
+    std::vector<RECT> rects = SessionWindowRects(session);
+    const int margin = session->margin;
+    for (RECT& rect : rects) {
+        rect.left += margin;
+        rect.top += margin;
+        rect.right -= margin;
+        rect.bottom -= margin;
+    }
+    return rects;
+}
+
+bool IsSessionWindow(const MenuSession* session, HWND hwnd) {
+    for (MenuWindow* menuWindow : session->windows) {
+        if (menuWindow->Handle() == hwnd) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Finds the window that should receive a replayed click at a screen point.
+// WindowFromPoint normally returns the right window, but in a shadow margin it
+// can report one of our topmost windows; then walk down the z-order and return
+// the deepest window below that contains the point.
+HWND TargetWindowUnderPoint(const MenuSession* session, POINT pt) {
+    HWND hwnd = WindowFromPoint(pt);
+    if (!hwnd || !IsSessionWindow(session, hwnd)) {
+        return hwnd;
+    }
+    for (HWND candidate = GetWindow(hwnd, GW_HWNDNEXT); candidate;
+         candidate = GetWindow(candidate, GW_HWNDNEXT)) {
+        if (!IsWindowVisible(candidate) || IsSessionWindow(session, candidate)) {
+            continue;
+        }
+        RECT rect = {};
+        if (!GetWindowRect(candidate, &rect) || !PtInRect(&rect, pt)) {
+            continue;
+        }
+        HWND deepest = candidate;
+        for (int depth = 0; depth < 16; ++depth) {
+            POINT client = pt;
+            ScreenToClient(deepest, &client);
+            HWND child = ChildWindowFromPointEx(
+                deepest, client,
+                CWP_SKIPINVISIBLE | CWP_SKIPDISABLED | CWP_SKIPTRANSPARENT);
+            if (!child || child == deepest) {
+                break;
+            }
+            deepest = child;
+        }
+        return deepest;
+    }
+    return nullptr;
 }
 
 // Handles a key press for the active (deepest open) panel. The modal loop
@@ -7008,6 +7081,25 @@ LRESULT CustomMenuWindowProc(MenuWindow* window, HWND hwnd, UINT msg,
                               clientPoint.y - session->margin};
 
     switch (msg) {
+        case WM_NCHITTEST: {
+            // The shadow margin is decorative: make it click-through so items
+            // behind it stay reachable.
+            if (session->margin <= 0) {
+                return HTCLIENT;
+            }
+            const POINT screen = {static_cast<short>(LOWORD(lParam)),
+                                  static_cast<short>(HIWORD(lParam))};
+            POINT client = screen;
+            ScreenToClient(hwnd, &client);
+            RECT rect = {};
+            GetClientRect(hwnd, &rect);
+            if (client.x < session->margin || client.y < session->margin ||
+                client.x >= rect.right - session->margin ||
+                client.y >= rect.bottom - session->margin) {
+                return HTTRANSPARENT;
+            }
+            return HTCLIENT;
+        }
         case WM_MOUSEMOVE: {
             const std::vector<RECT> rects = SessionWindowRects(session);
             POINT screen = clientPoint;

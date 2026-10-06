@@ -3112,8 +3112,8 @@ int main() {
         CHECK(cmo::BlurPasses(0) == 0);
         CHECK(cmo::BlurPasses(12) == 3);
         CHECK(cmo::BlurPasses(64) == 16);
-        CHECK(cmo::BuildShadowBitmap(60, 40, radii, 12, 8, 128, 4, pixels, outW,
-                                     outH));
+        CHECK(cmo::BuildShadowBitmap(60, 40, radii, 12, 8, 128, 0xFF000000, 4,
+                                     pixels, outW, outH));
         CHECK(outW > 0 && outH > 0);
         CHECK(pixels.size() == static_cast<size_t>(outW) * outH);
         bool anyAlpha = false;
@@ -3205,8 +3205,8 @@ int main() {
         int outW = 0;
         int outH = 0;
         cmo::CornerRadii radii{};
-        CHECK(!cmo::BuildShadowBitmap(4000, 4000, radii, 64, 64, 120, 4, pixels,
-                                      outW, outH));
+        CHECK(!cmo::BuildShadowBitmap(4000, 4000, radii, 64, 64, 120, 0xFF000000,
+                                      4, pixels, outW, outH));
 
         CHECK(cmo::FontWeightToDwrite(cmo::FontWeightKind::Bold) ==
               DWRITE_FONT_WEIGHT_BOLD);
@@ -3320,13 +3320,13 @@ int main() {
                       entry, entry.defaultValue)) != std::wstring::npos);
         }
         CHECK(text.find(L"[meta]") != std::wstring::npos);
-        CHECK(text.find(L"schemaVersion = 4") != std::wstring::npos);
+        CHECK(text.find(L"schemaVersion = 5") != std::wstring::npos);
         CHECK(text.find(L"[rules]") != std::wstring::npos);
         CHECK(text.find(L"[command ") != std::wstring::npos);
         cmo::RulesConfig config;
         std::vector<cmo::ConfigParseError> errors;
         CHECK(cmo::ParseRulesConfig(text, config, errors));
-        CHECK(config.schemaVersion == 4);
+        CHECK(config.schemaVersion == 5);
     }
 
     // v2.3/v2.4 review fixes: inert examples, '#' comments.
@@ -3384,13 +3384,13 @@ int main() {
             L"; my notes\n[appearance]\nitemHeight = 30\n[appearance]\n"
             L"background = #11223344\n[rules]\n; my rule\n"
             L"hide = label:\"Cast to Device\"\n[meta]\nschemaVersion = 0\n";
-        const std::wstring canonical = cmo::CanonicalizeConfig(legacy, 4);
+        const std::wstring canonical = cmo::CanonicalizeConfig(legacy, 5);
         CHECK(cmo::CountSubstring(canonical, L"[appearance]") == 1);
         CHECK(canonical.find(L"itemHeight = 30") != std::wstring::npos);
         CHECK(canonical.find(L"background = 34, 51, 68, 17") != std::wstring::npos);
         CHECK(canonical.find(L"hide = label:\"Cast to Device\"") != std::wstring::npos);
         CHECK(canonical.find(L"; my rule") != std::wstring::npos);
-        CHECK(canonical.find(L"schemaVersion = 4") != std::wstring::npos);
+        CHECK(canonical.find(L"schemaVersion = 5") != std::wstring::npos);
         cmo::RulesConfig reparsed;
         CHECK(cmo::ParseRulesConfig(canonical, reparsed, errors));
         CHECK(reparsed.appearance.itemHeight == 30);
@@ -3427,7 +3427,7 @@ int main() {
             custom += testValue(entry);
             custom += L"\n";
         }
-        const std::wstring canonical = cmo::CanonicalizeConfig(custom, 4);
+        const std::wstring canonical = cmo::CanonicalizeConfig(custom, 5);
         for (const cmo::ConfigSchemaEntry& entry : cmo::kAppearanceSchema) {
             const std::wstring expected =
                 std::wstring(entry.key) + L" = " +
@@ -3436,7 +3436,7 @@ int main() {
         }
         const std::wstring themed =
             L"[appearance]\nitemHeight = 28\n[appearance.light]\nitemHeight = 40\n";
-        const std::wstring themeCanonical = cmo::CanonicalizeConfig(themed, 4);
+        const std::wstring themeCanonical = cmo::CanonicalizeConfig(themed, 5);
         CHECK(themeCanonical.find(L"[appearance.light]") != std::wstring::npos);
         CHECK(themeCanonical.find(L"itemHeight = 40") != std::wstring::npos);
     }
@@ -3456,7 +3456,7 @@ int main() {
         CHECK(store.Snapshot()->appearance.itemHeight == 30);
         std::wstring text;
         CHECK(cmo::ReadConfigFile(path, text));
-        CHECK(text.find(L"schemaVersion = 4") != std::wstring::npos);
+        CHECK(text.find(L"schemaVersion = 5") != std::wstring::npos);
         CHECK(text.find(L"itemHeight = 30") != std::wstring::npos);
         CHECK(text.find(L"; itemPadding = 6") != std::wstring::npos);
 
@@ -3467,7 +3467,7 @@ int main() {
         std::wstring rewritten;
         CHECK(cmo::ReadConfigFile(path, rewritten));
         CHECK(rewritten.find(L"[appearance]") != std::wstring::npos);
-        CHECK(rewritten.find(L"schemaVersion = 4") != std::wstring::npos);
+        CHECK(rewritten.find(L"schemaVersion = 5") != std::wstring::npos);
         DeleteFileW(path.c_str());
     }
 
@@ -3509,12 +3509,20 @@ int main() {
         std::vector<uint32_t> pixels;
         int outW = 0;
         int outH = 0;
-        CHECK(cmo::BuildShadowBitmap(40, 40, radii, 0, 8, 255, 4, pixels, outW,
-                                     outH));
+        CHECK(cmo::BuildShadowBitmap(40, 40, radii, 0, 8, 255, 0xFF000000, 4,
+                                     pixels, outW, outH));
         const uint32_t center = pixels[(outH / 2) * outW + outW / 2] >> 24;
         const uint32_t corner = pixels[0] >> 24;
         CHECK(center > 200);
         CHECK(corner < 64);  // a blurred shadow fades toward its edge
+
+        // The shadow color tints the bitmap (premultiplied red).
+        CHECK(cmo::BuildShadowBitmap(40, 40, radii, 0, 8, 255, 0xFFFF0000, 4,
+                                     pixels, outW, outH));
+        const uint32_t tinted = pixels[(outH / 2) * outW + outW / 2];
+        CHECK(((tinted >> 16) & 0xFF) > 200);
+        CHECK(((tinted >> 8) & 0xFF) < 32);
+        CHECK((tinted & 0xFF) < 32);
 
         const std::wstring themed =
             L"[appearance]\n[appearance.light]\nitemPadding = nope\n"
@@ -3585,7 +3593,7 @@ int main() {
         CHECK(text.find(L"none | fade | slide") != std::wstring::npos);
         CHECK(text.find(L"1-256") != std::wstring::npos);
         CHECK(text.find(L"dot | check | bar | none") != std::wstring::npos);
-        CHECK(text.find(L"schemaVersion = 4") != std::wstring::npos);
+        CHECK(text.find(L"schemaVersion = 5") != std::wstring::npos);
     }
 
     // v2.6 advanced grouping: toggles, exclude, keep.

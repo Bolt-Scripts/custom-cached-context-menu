@@ -5823,19 +5823,39 @@ std::vector<MenuItem> BuildSettingsTree(const SettingsModelInputs& inputs) {
     return root;
 }
 
-// Appends the "Menu settings..." entry (and a separator) to a list, unless it
-// is already present. Called after rules and pruning so nothing can hide it.
-void AppendSettingsEntry(std::vector<MenuItem>& items) {
-    for (const MenuItem& item : items) {
-        if (item.action == ActionKind::Builtin &&
-            item.builtinAction == BuiltinAction::OpenSettings) {
-            return;
+// Removes any existing settings entry (and its separator) from the tree, so
+// repeated assembly never duplicates or leaves a stale copy behind.
+bool StripSettingsEntry(std::vector<MenuItem>& items) {
+    bool removed = false;
+    for (size_t i = 0; i < items.size();) {
+        if (items[i].action == ActionKind::Builtin &&
+            items[i].builtinAction == BuiltinAction::OpenSettings) {
+            if (i > 0 && items[i - 1].kind == ItemKind::Separator) {
+                items.erase(items.begin() + (i - 1), items.begin() + (i + 1));
+            } else {
+                items.erase(items.begin() + i);
+            }
+            removed = true;
+            continue;
         }
+        if (StripSettingsEntry(items[i].children)) {
+            removed = true;
+        }
+        ++i;
     }
+    return removed;
+}
+
+// Appends the "Menu settings..." entry (and a separator) to a list. Called
+// after rules, pruning, and advanced-submenu reorganization, so nothing can
+// hide it and the advanced submenu exists when it should.
+void AppendSettingsEntry(std::vector<MenuItem>& items) {
+    StripSettingsEntry(items);
     MenuItem separator = MakeSettingsItem(ItemKind::Separator, L"");
     separator.action = ActionKind::ViewAction;
     items.push_back(std::move(separator));
     MenuItem row = MakeSettingsItem(ItemKind::Command, L"Menu settings\u2026");
+    row.id = 0xF300;  // unique: FindById must resolve this row, not id 0
     row.action = ActionKind::Builtin;
     row.builtinAction = BuiltinAction::OpenSettings;
     row.iconRef = L"@icon:settings";
@@ -17120,18 +17140,6 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
         DumpSuspiciousItems(model.items, 0);
         PruneMenuItems(model.items);
 
-        if (g_settings.menuMode == 0) {
-            std::vector<MenuItem>* container = &model.items;
-            for (MenuItem& item : model.items) {
-                if (item.kind == ItemKind::Submenu &&
-                    item.label == g_settings.advancedSubmenuLabel) {
-                    container = &item.children;
-                    break;
-                }
-            }
-            AppendSettingsEntry(*container);
-        }
-
         if (ShouldShowNativeReplay(model.flags)) {
             Wh_Log(L"Owner-draw context: using the native menu");
             ShowNativeReplay(capture, owner, pt);
@@ -17151,6 +17159,18 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
             grouping.rules = rules ? rules.get() : nullptr;
             grouping.ctx = itemCtx;
             ReorganizeAdvancedItems(model.items, grouping);
+        }
+
+        if (g_settings.menuMode == 0) {
+            std::vector<MenuItem>* container = &model.items;
+            for (MenuItem& item : model.items) {
+                if (item.kind == ItemKind::Submenu &&
+                    item.label == g_settings.advancedSubmenuLabel) {
+                    container = &item.children;
+                    break;
+                }
+            }
+            AppendSettingsEntry(*container);
         }
 
         if (scope == Scope::Background || scope == Scope::Desktop) {

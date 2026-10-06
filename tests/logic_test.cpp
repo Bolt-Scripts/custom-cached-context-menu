@@ -4234,7 +4234,11 @@ int main() {
             };
         walk(root);
         for (const cmo::ConfigSchemaEntry& row : cmo::kAppearanceSchema) {
-            CHECK_EQ(seen[row.key], 1);
+            if (wcscmp(row.key, L"animation") == 0) {
+                CHECK_EQ(seen[row.key], 0);  // deprecated, never shown
+            } else {
+                CHECK_EQ(seen[row.key], 1);
+            }
         }
 
         const cmo::MenuItem* colorsGroup = findChild(root, L"Colors");

@@ -5479,6 +5479,70 @@ MenuItem MakeIntSliderRow(const wchar_t* label, std::wstring key, int minValue,
     return item;
 }
 
+// Human-friendly presentation name for a schema key.
+std::wstring SettingsDisplayLabel(const std::wstring& key) {
+    struct LabelOverride {
+        const wchar_t* key;
+        const wchar_t* label;
+    };
+    static const LabelOverride kOverrides[] = {
+        {L"animationopen", L"Open animation"},
+        {L"animationclose", L"Close animation"},
+        {L"animationduration", L"Open duration"},
+        {L"animationcloseduration", L"Close duration"},
+        {L"animationframems", L"Animation frame interval"},
+        {L"animationeasing", L"Animation easing"},
+        {L"animationanchor", L"Animation anchor"},
+        {L"animatesubmenus", L"Animate submenus"},
+        {L"showaccelerators", L"Accelerator display"},
+        {L"blurstrength", L"Blur strength"},
+        {L"cornerradius", L"Corner radius"},
+        {L"cornerradii", L"Corner radii"},
+        {L"borderwidth", L"Border width"},
+        {L"shadowsize", L"Shadow size"},
+        {L"shadowoffsetx", L"Shadow offset X"},
+        {L"shadowoffsety", L"Shadow offset Y"},
+        {L"shadowopacity", L"Shadow opacity"},
+        {L"shadowcolor", L"Shadow color"},
+        {L"shadowblur", L"Shadow blur"},
+        {L"itemheight", L"Item height"},
+        {L"iconsize", L"Icon size"},
+        {L"hoverbackground", L"Hover background"},
+        {L"pressedbackground", L"Pressed background"},
+        {L"textcolor", L"Text color"},
+        {L"disabledtextcolor", L"Disabled text color"},
+        {L"submenuarrow", L"Submenu arrow"},
+        {L"separatorspacing", L"Separator spacing"},
+        {L"markerwidth", L"Marker width"},
+        {L"markercolor", L"Marker color"},
+        {L"headercolor", L"Header color"},
+        {L"minwidth", L"Minimum width"},
+        {L"maxwidth", L"Maximum width"},
+        {L"fontweight", L"Font weight"},
+        {L"fontstyle", L"Font style"},
+        {L"itempadding", L"Item padding"},
+        {L"verticalpadding", L"Vertical padding"},
+        {L"slideoffsetx", L"Slide offset X"},
+        {L"slideoffsety", L"Slide offset Y"},
+        {L"scalefrom", L"Scale from"},
+    };
+    const std::wstring lower = ToLowerCopy(key);
+    for (const LabelOverride& entry : kOverrides) {
+        if (lower == entry.key) {
+            return entry.label;
+        }
+    }
+    std::wstring out;
+    for (size_t i = 0; i < key.size(); ++i) {
+        const wchar_t c = key[i];
+        if (i > 0 && c >= L'A' && c <= L'Z') {
+            out += L' ';
+        }
+        out += (i == 0) ? static_cast<wchar_t>(towupper(c)) : c;
+    }
+    return out;
+}
+
 MenuItem BuildSettingsRow(const Appearance& working,
                           const ConfigSchemaEntry& entry) {
     const std::wstring key = ToLowerCopy(entry.key);
@@ -5491,7 +5555,8 @@ MenuItem BuildSettingsRow(const Appearance& working,
     }
     const ControlSpec spec = MakeControlSpec(entry);
     if (spec.kind == ControlKind::ColorSwatch) {
-        MenuItem row = MakeSettingsItem(ItemKind::Submenu, entry.key);
+        MenuItem row =
+            MakeSettingsItem(ItemKind::Submenu, SettingsDisplayLabel(entry.key));
         row.action = ActionKind::Submenu;
         row.control = spec;
         row.controlColor = AppearanceColorValue(working, entry.key);
@@ -5548,7 +5613,8 @@ MenuItem BuildSettingsRow(const Appearance& working,
         return row;
     }
     if (spec.kind == ControlKind::Enum) {
-        MenuItem row = MakeSettingsItem(ItemKind::Submenu, entry.key);
+        MenuItem row =
+            MakeSettingsItem(ItemKind::Submenu, SettingsDisplayLabel(entry.key));
         row.action = ActionKind::Submenu;
         row.control = spec;
         std::wstring current;
@@ -5567,7 +5633,8 @@ MenuItem BuildSettingsRow(const Appearance& working,
         return row;
     }
     if (entry.type == SettingType::EffectList) {
-        MenuItem row = MakeSettingsItem(ItemKind::Submenu, entry.key);
+        MenuItem row =
+            MakeSettingsItem(ItemKind::Submenu, SettingsDisplayLabel(entry.key));
         row.action = ActionKind::Submenu;
         row.control = spec;
         const bool opening = key == L"animationopen";
@@ -5590,7 +5657,8 @@ MenuItem BuildSettingsRow(const Appearance& working,
         return row;
     }
     if (entry.type == SettingType::IntList) {
-        MenuItem row = MakeSettingsItem(ItemKind::Submenu, entry.key);
+        MenuItem row =
+            MakeSettingsItem(ItemKind::Submenu, SettingsDisplayLabel(entry.key));
         row.action = ActionKind::Submenu;
         row.control = spec;
         CornerRadii radii = working.cornerRadii;
@@ -5619,7 +5687,8 @@ MenuItem BuildSettingsRow(const Appearance& working,
         return row;
     }
     if (entry.type == SettingType::Font) {
-        MenuItem row = MakeSettingsItem(ItemKind::Submenu, entry.key);
+        MenuItem row =
+            MakeSettingsItem(ItemKind::Submenu, SettingsDisplayLabel(entry.key));
         row.action = ActionKind::Submenu;
         row.control = spec;
         row.controlText =
@@ -5635,7 +5704,8 @@ MenuItem BuildSettingsRow(const Appearance& working,
         row.children.push_back(std::move(size));
         return row;
     }
-    MenuItem row = MakeSettingsItem(ItemKind::Command, entry.key);
+    MenuItem row =
+        MakeSettingsItem(ItemKind::Command, SettingsDisplayLabel(entry.key));
     row.control = spec;
     if (spec.kind == ControlKind::Toggle) {
         bool value = false;
@@ -5730,6 +5800,9 @@ std::vector<MenuItem> BuildSettingsTree(const SettingsModelInputs& inputs) {
                 continue;
             }
             const std::wstring key = ToLowerCopy(entry.key);
+            if (key == L"animation") {
+                continue;  // deprecated alias, never shown
+            }
             if (key == L"slideoffsetx" || key == L"slideoffsety" ||
                 key == L"scalefrom") {
                 continue;  // conditional pages below
@@ -6267,9 +6340,11 @@ LayoutPanel BuildLayoutPanel(const std::vector<MenuItem>& items,
             const int arrowSpace = item.kind == ItemKind::Submenu
                                        ? metrics.submenuArrowWidth
                                        : 0;
+            const int reserve = controlReserve(item);
+            const int labelGap = reserve > 0 ? 12 : 0;
             contentWidth =
                 std::max(contentWidth, textLeft + textWidth + arrowSpace +
-                                           controlReserve(item) + textGap);
+                                           labelGap + reserve + textGap);
         }
         y += height;
     }
@@ -6362,11 +6437,21 @@ LayoutPanel BuildLayoutPanel(const std::vector<MenuItem>& items,
                     break;
                 case ControlKind::ColorArea:
                 case ControlKind::HueStrip:
-                case ControlKind::AlphaStrip:
-                    layout.areaRect = {textLeft, offset,
+                case ControlKind::AlphaStrip: {
+                    // Leave the label its own space so the bar does not cover
+                    // or clip it, with a minimum bar width.
+                    const int labelWidth = measureText(layout.label);
+                    int stripLeft = textLeft + labelWidth + 12;
+                    const int minBarWidth = 120;
+                    stripLeft = std::min(
+                        stripLeft, static_cast<int>(panel.size.cx) - textGap -
+                                       minBarWidth);
+                    stripLeft = std::max(stripLeft, textLeft);
+                    layout.areaRect = {stripLeft, offset,
                                        panel.size.cx - textGap, offset + height};
                     layout.stripRect = layout.areaRect;
                     break;
+                }
                 default:
                     break;
             }
@@ -7306,6 +7391,9 @@ struct MenuInputState {
     std::wstring dragControl;
     ControlPart dragPart = ControlPart::None;
     ControlPart hoverPart = ControlPart::None;
+    // Live value shown while dragging a slider (the setting itself may be
+    // deferred to release for geometry keys).
+    int dragValue = 0;
 };
 
 struct BackdropBitmap {
@@ -8238,7 +8326,10 @@ void DrawSettingsField(ID2D1DeviceContext* dc, const LayoutItem& item,
         dc->DrawRoundedRectangle(field, brush, 1.0f);
         brush->Release();
     }
-    const std::wstring& text = focused ? state.editBuffer : item.controlText;
+    std::wstring text = focused ? state.editBuffer : item.controlText;
+    if (!focused && state.dragControl == item.control.key) {
+        text = std::to_wstring(state.dragValue);
+    }
     DrawSettingsText(dc, text, item.fieldRect, metrics.textColor, metrics,
                      DWRITE_TEXT_ALIGNMENT_TRAILING);
     if (focused && state.caretVisible) {
@@ -8282,8 +8373,11 @@ void DrawSettingsSlider(ID2D1DeviceContext* dc, const LayoutItem& item,
         brush->Release();
     }
     const int trackWidth = item.trackRect.right - item.trackRect.left;
+    const int shownValue = state.dragControl == item.control.key
+                               ? state.dragValue
+                               : item.controlValue;
     const int thumbX =
-        SliderXFromValue(item.controlValue, item.trackRect.left, trackWidth,
+        SliderXFromValue(shownValue, item.trackRect.left, trackWidth,
                          item.control.minValue, item.control.maxValue);
     const float centerY =
         (static_cast<float>(item.rect.top) + static_cast<float>(item.rect.bottom)) /
@@ -9322,6 +9416,7 @@ void SettingsFocusField(MenuSession& session, int level,
 void RelayoutSession(MenuSession& session);
 void SettingsApplyReset(MenuSession& session, const std::wstring& key);
 void SettingsPerformWrite(SettingsSessionContext* settings);
+void RepaintMenuWindow(MenuSession* session, int index);
 
 // Rebuilds the settings model from the working appearance and re-lays out the
 // open windows so changes show live.
@@ -9618,6 +9713,13 @@ bool SettingsHandleMouseMove(MenuSession& session, int level, POINT panelPoint) 
     }
     std::wstring text;
     if (SettingsComputeDragValue(*session.settings, *item, panelPoint, text)) {
+        if (item->control.kind == ControlKind::IntSlider) {
+            int value = 0;
+            if (ParseIntField(text, item->control.minValue,
+                              item->control.maxValue, value)) {
+                state.dragValue = value;
+            }
+        }
         const std::wstring schemaKey = SettingsDragSchemaKey(item->control.key);
         if (schemaKey.rfind(L"@cornerRadii:", 0) == 0) {
             // The drag wrote the radius directly; dirty and refresh it.
@@ -9635,6 +9737,9 @@ bool SettingsHandleMouseMove(MenuSession& session, int level, POINT panelPoint) 
             SettingsApplyControlChange(session, schemaKey, text,
                                        !SettingsKeyIsGeometry(schemaKey));
         }
+        // Deferred geometry keys skip the relayout; repaint so the thumb and
+        // the value readout still follow the cursor.
+        RepaintMenuWindow(&session, level);
     }
     return true;
 }

@@ -3591,6 +3591,8 @@ int main() {
                     const size_t bar = values.rfind(L'|');
                     return bar == std::wstring::npos ? values : values.substr(bar + 1);
                 }
+                case cmo::SettingType::EffectList:
+                    return L"fade, slide";
             }
             return L"";
         };

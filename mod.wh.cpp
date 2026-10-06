@@ -10169,8 +10169,11 @@ void RenderMenuWindow(MenuWindow* window, const LayoutPanel& panel,
         return;
     }
     const D2D1_BITMAP_PROPERTIES1 props = {
-        {DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED}, 96.0f, 96.0f,
-        D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW};
+        {DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED},
+        96.0f,
+        96.0f,
+        D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
+        nullptr};
     ID2D1Bitmap1* target = nullptr;
     if (SUCCEEDED(dc->CreateBitmapFromDxgiSurface(surface, &props, &target)) &&
         target) {
@@ -10181,7 +10184,7 @@ void RenderMenuWindow(MenuWindow* window, const LayoutPanel& panel,
                   shadowClipSide, frame, anchor);
         const HRESULT drawResult = dc->EndDraw();
         target->Release();
-        if (drawResult == D2DERR_RECREATE_TARGET) {
+        if (drawResult == static_cast<HRESULT>(D2DERR_RECREATE_TARGET)) {
             OnDeviceLost();
         }
     }
@@ -10741,12 +10744,8 @@ LRESULT CustomMenuWindowProc(MenuWindow* window, HWND hwnd, UINT msg,
     if (index < 0 || !window->Panel()) {
         return DefWindowProcW(hwnd, msg, wParam, lParam);
     }
-    const LayoutPanel& panel = *window->Panel();
-    MenuInputState& state = session->states[index];
     const POINT clientPoint = {static_cast<short>(LOWORD(lParam)),
                                static_cast<short>(HIWORD(lParam))};
-    const POINT panelPoint = {clientPoint.x - session->margin,
-                              clientPoint.y - session->margin};
 
     switch (msg) {
         case WM_NCHITTEST: {
@@ -15300,6 +15299,8 @@ bool InvokeBuiltinAction(const MenuItem& item, const InvocationContext& ctx) {
         return false;
     }
     switch (item.builtinAction) {
+        case BuiltinAction::OpenSettings:
+            return false;  // handled before the target check / not invokable
         case BuiltinAction::CopyPath:
             return CopyAsPath(targets);
         case BuiltinAction::OpenNewWindow: {

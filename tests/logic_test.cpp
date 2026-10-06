@@ -4009,6 +4009,38 @@ int main() {
     }
 
     {
+        cmo::HsvColor h = cmo::RgbToHsv(0xFFFF0000u);
+        CHECK(std::fabs(h.h - 0.0f) < 0.5f);
+        CHECK(std::fabs(h.s - 1.0f) < 0.001f);
+        CHECK(std::fabs(h.v - 1.0f) < 0.001f);
+        CHECK(std::fabs(cmo::RgbToHsv(0xFF00FF00u).h - 120.0f) < 0.5f);
+        CHECK(std::fabs(cmo::RgbToHsv(0xFF0000FFu).h - 240.0f) < 0.5f);
+        CHECK_EQ(cmo::HsvToRgb(cmo::HsvColor{0, 0, 1}, 255), 0xFFFFFFFFu);
+        CHECK_EQ(cmo::HsvToRgb(cmo::HsvColor{0, 0, 0}, 255), 0xFF000000u);
+        CHECK_EQ(cmo::HsvToRgb(cmo::HsvColor{0, 1, 1}, 255), 0xFFFF0000u);
+        CHECK_EQ(cmo::HsvToRgb(cmo::HsvColor{120, 1, 1}, 255), 0xFF00FF00u);
+        CHECK_EQ(cmo::HsvToRgb(cmo::HsvColor{240, 1, 1}, 255), 0xFF0000FFu);
+        CHECK_EQ(cmo::HsvToRgb(cmo::HsvColor{0, 1, 1}, 0) >> 24, 0u);
+        for (uint32_t c : {0xFFFF0000u, 0xFF00FF00u, 0xFF0000FFu, 0xFF808080u,
+                           0xFF123456u}) {
+            CHECK_EQ(cmo::HsvToRgb(cmo::RgbToHsv(c), 0xFF), c);
+        }
+
+        const std::vector<uint8_t> px = cmo::BuildSvSquarePixels(0.0f, 2, 2);
+        CHECK_EQ(px.size(), size_t(16));
+        auto pixel = [&](int x, int y) {
+            const size_t o = (static_cast<size_t>(y) * 2 + x) * 4;
+            return (static_cast<uint32_t>(px[o + 3]) << 24) |
+                   (static_cast<uint32_t>(px[o + 2]) << 16) |
+                   (static_cast<uint32_t>(px[o + 1]) << 8) | px[o];
+        };
+        CHECK_EQ(pixel(0, 0), 0xFFFFFFFFu);  // s=0, v=1
+        CHECK_EQ(pixel(1, 0), 0xFFFF0000u);  // s=1, v=1 at hue 0
+        CHECK_EQ(pixel(0, 1), 0xFF000000u);  // v=0
+        CHECK_EQ(pixel(1, 1), 0xFF000000u);
+    }
+
+    {
         int v = 0;
         CHECK(cmo::ParseIntField(L"42", 0, 100, v));
         CHECK_EQ(v, 42);

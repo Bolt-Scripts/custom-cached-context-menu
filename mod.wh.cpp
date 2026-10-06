@@ -5104,6 +5104,103 @@ int SliderXFromValue(int value, int trackLeft, int trackWidth, int minValue,
     return trackLeft + static_cast<int>(std::lround(fraction * trackWidth));
 }
 
+struct HsvColor {
+    float h = 0.0f;  // [0, 360)
+    float s = 0.0f;  // [0, 1]
+    float v = 1.0f;  // [0, 1]
+};
+
+HsvColor RgbToHsv(uint32_t argb) {
+    const float r = ((argb >> 16) & 0xFF) / 255.0f;
+    const float g = ((argb >> 8) & 0xFF) / 255.0f;
+    const float b = (argb & 0xFF) / 255.0f;
+    const float maxC = std::max({r, g, b});
+    const float minC = std::min({r, g, b});
+    const float delta = maxC - minC;
+    HsvColor hsv;
+    hsv.v = maxC;
+    hsv.s = maxC <= 0.0f ? 0.0f : delta / maxC;
+    if (delta <= 0.0f) {
+        hsv.h = 0.0f;
+        return hsv;
+    }
+    if (maxC == r) {
+        hsv.h = 60.0f * std::fmod((g - b) / delta, 6.0f);
+    } else if (maxC == g) {
+        hsv.h = 60.0f * (((b - r) / delta) + 2.0f);
+    } else {
+        hsv.h = 60.0f * (((r - g) / delta) + 4.0f);
+    }
+    if (hsv.h < 0.0f) {
+        hsv.h += 360.0f;
+    }
+    return hsv;
+}
+
+uint32_t HsvToRgb(const HsvColor& hsv, uint8_t alpha) {
+    const float h = std::fmod(std::fmod(hsv.h, 360.0f) + 360.0f, 360.0f);
+    const float s = std::clamp(hsv.s, 0.0f, 1.0f);
+    const float v = std::clamp(hsv.v, 0.0f, 1.0f);
+    const float c = v * s;
+    const float x = c * (1.0f - std::fabs(std::fmod(h / 60.0f, 2.0f) - 1.0f));
+    const float m = v - c;
+    float r = 0.0f;
+    float g = 0.0f;
+    float b = 0.0f;
+    if (h < 60.0f) {
+        r = c;
+        g = x;
+    } else if (h < 120.0f) {
+        r = x;
+        g = c;
+    } else if (h < 180.0f) {
+        g = c;
+        b = x;
+    } else if (h < 240.0f) {
+        g = x;
+        b = c;
+    } else if (h < 300.0f) {
+        r = x;
+        b = c;
+    } else {
+        r = c;
+        b = x;
+    }
+    auto channel = [&](float value) {
+        return static_cast<uint32_t>(std::lround((value + m) * 255.0f));
+    };
+    return (static_cast<uint32_t>(alpha) << 24) | (channel(r) << 16) |
+           (channel(g) << 8) | channel(b);
+}
+
+// BGRA pixels for the saturation/value square: x is saturation, y is value
+// (top row is v=1). Top-down row order.
+std::vector<uint8_t> BuildSvSquarePixels(float hue, int width, int height) {
+    std::vector<uint8_t> pixels;
+    if (width <= 0 || height <= 0) {
+        return pixels;
+    }
+    pixels.resize(static_cast<size_t>(width) * static_cast<size_t>(height) * 4);
+    const float wDen = width > 1 ? static_cast<float>(width - 1) : 1.0f;
+    const float hDen = height > 1 ? static_cast<float>(height - 1) : 1.0f;
+    for (int y = 0; y < height; ++y) {
+        const float v = 1.0f - static_cast<float>(y) / hDen;
+        for (int x = 0; x < width; ++x) {
+            const float s = static_cast<float>(x) / wDen;
+            const uint32_t argb = HsvToRgb(HsvColor{hue, s, v}, 255);
+            const size_t offset =
+                (static_cast<size_t>(y) * static_cast<size_t>(width) +
+                 static_cast<size_t>(x)) *
+                4;
+            pixels[offset + 0] = static_cast<uint8_t>(argb & 0xFF);
+            pixels[offset + 1] = static_cast<uint8_t>((argb >> 8) & 0xFF);
+            pixels[offset + 2] = static_cast<uint8_t>((argb >> 16) & 0xFF);
+            pixels[offset + 3] = static_cast<uint8_t>((argb >> 24) & 0xFF);
+        }
+    }
+    return pixels;
+}
+
 // ===========================================================================
 // [CMO:Layout] Appearance resolution, metrics, and render-ready layout.
 // ===========================================================================

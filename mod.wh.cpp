@@ -12402,14 +12402,38 @@ private:
 
 class Cache {
 public:
+    // NavPane menus can change from outside (pin/unpin, renames), so those
+    // entries expire; file menus are stable and stay.
+    static constexpr uint64_t kNavPaneCacheTtlMs = 60000;
+
     std::optional<MenuModel> Find(const ContextSignature& signature) {
+        return FindAt(signature, GetTickCount64());
+    }
+
+    // Expiry hook (also used by tests): a NavPane entry older than the TTL is
+    // treated as absent and dropped.
+    std::optional<MenuModel> FindAt(const ContextSignature& signature,
+                                    uint64_t nowMs) {
         std::lock_guard<std::mutex> lock(mutex_);
         auto it = entries_.find(signature.Hash());
-        if (it == entries_.end()) {
+        if (it == entries_.end() || !(it->second.model.sig == signature)) {
             return std::nullopt;
         }
-        it->second.lastUsed = GetTickCount64();
+        if (it->second.model.sig.scope == Scope::NavPane &&
+            nowMs - it->second.putTick > kNavPaneCacheTtlMs) {
+            entries_.erase(it);
+            dirty_ = true;
+            return std::nullopt;
+        }
+        it->second.lastUsed = nowMs;
         return it->second.model;
+    }
+
+    void Remove(const ContextSignature& signature) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (entries_.erase(signature.Hash()) > 0) {
+            dirty_ = true;
+        }
     }
 
     bool Has(const ContextSignature& signature) {
@@ -12568,12 +12592,14 @@ private:
     struct Entry {
         MenuModel model;
         uint64_t lastUsed = 0;
+        uint64_t putTick = 0;
     };
 
     void PutLocked(MenuModel model) {
         Entry entry{};
         entry.model = std::move(model);
         entry.lastUsed = GetTickCount64();
+        entry.putTick = entry.lastUsed;
         entries_[entry.model.sig.Hash()] = std::move(entry);
         EvictIfNeededLocked();
         dirty_ = true;
@@ -12586,6 +12612,7 @@ private:
             Entry entry{};
             entry.model = std::move(model);
             entry.lastUsed = GetTickCount64();
+            entry.putTick = entry.lastUsed;
             entries_[entry.model.sig.Hash()] = std::move(entry);
         }
         EvictIfNeededLocked();
@@ -12608,8 +12635,19 @@ private:
         std::vector<uint8_t> out;
         WriteU32(out, kCacheMagic);
         WriteU32(out, kCacheVersion);
-        WriteU32(out, static_cast<uint32_t>(entries_.size()));
+        uint32_t count = 0;
         for (const auto& pair : entries_) {
+            if (pair.second.model.sig.scope != Scope::NavPane) {
+                ++count;
+            }
+        }
+        WriteU32(out, count);
+        for (const auto& pair : entries_) {
+            // NavPane menus are session-only: their state can change from
+            // outside (pin/unpin), so they are never restored across runs.
+            if (pair.second.model.sig.scope == Scope::NavPane) {
+                continue;
+            }
             WriteModel(out, pair.second.model);
         }
         WriteU32(out, Crc32(out));
@@ -12838,6 +12876,94 @@ inline ShellViewKind ClassifyOwner(HWND owner) {
         }
     }
     return ClassifyClassChain(ancestors, false);
+}
+
+// Finds the namespace tree view under the nav-pane popup owner (the owner is
+// either the tree itself or the NamespaceTreeControl hosting it).
+HWND FindNamespaceTreeWindow(HWND owner) {
+    if (!owner) {
+        return nullptr;
+    }
+    wchar_t className[64] = {};
+    if (GetClassNameW(owner, className, ARRAYSIZE(className)) &&
+        _wcsicmp(className, L"SysTreeView32") == 0) {
+        return owner;
+    }
+    HWND found = nullptr;
+    EnumChildWindows(
+        owner,
+        [](HWND child, LPARAM param) -> BOOL {
+            wchar_t name[64] = {};
+            if (GetClassNameW(child, name, ARRAYSIZE(name)) &&
+                _wcsicmp(name, L"SysTreeView32") == 0) {
+                *reinterpret_cast<HWND*>(param) = child;
+                return FALSE;
+            }
+            return TRUE;
+        },
+        reinterpret_cast<LPARAM>(&found));
+    return found;
+}
+
+// A stable key for the selected nav-pane node: the shell's tree stores the
+// item PIDL in lParam; its desktop-absolute parsing name is stable across
+// sessions. Falls back to the ancestor text chain when the PIDL is not
+// available. Returns empty when no node can be identified (no caching then).
+std::wstring NavPaneNodeKey(HWND owner) {
+    HWND tree = FindNamespaceTreeWindow(owner);
+    if (!tree) {
+        return L"";
+    }
+    const HTREEITEM item = reinterpret_cast<HTREEITEM>(
+        SendMessageW(tree, TVM_GETNEXTITEM, TVGN_CARET, 0));
+    if (!item) {
+        return L"";
+    }
+    wchar_t text[512] = {};
+    TVITEMW info = {};
+    info.mask = TVIF_HANDLE | TVIF_PARAM | TVIF_TEXT;
+    info.hItem = item;
+    info.pszText = text;
+    info.cchTextMax = ARRAYSIZE(text);
+    if (!SendMessageW(tree, TVM_GETITEMW, 0, reinterpret_cast<LPARAM>(&info))) {
+        return L"";
+    }
+    if (info.lParam) {
+        // Explorer's namespace tree stores a PIDL here.
+        PWSTR parsing = nullptr;
+        if (SUCCEEDED(SHGetNameFromIDList(
+                reinterpret_cast<PCIDLIST_ABSOLUTE>(info.lParam),
+                SIGDN_DESKTOPABSOLUTEPARSING, &parsing)) &&
+            parsing && parsing[0]) {
+            std::wstring key = parsing;
+            CoTaskMemFree(parsing);
+            return key;
+        }
+        if (parsing) {
+            CoTaskMemFree(parsing);
+        }
+    }
+    // Fallback: the display text chain (parent\...\item).
+    std::wstring key = text;
+    HTREEITEM parent = reinterpret_cast<HTREEITEM>(
+        SendMessageW(tree, TVM_GETNEXTITEM, TVGN_PARENT,
+                     reinterpret_cast<LPARAM>(item)));
+    for (int depth = 0; parent && depth < 16; ++depth) {
+        wchar_t parentText[512] = {};
+        TVITEMW parentInfo = {};
+        parentInfo.mask = TVIF_HANDLE | TVIF_TEXT;
+        parentInfo.hItem = parent;
+        parentInfo.pszText = parentText;
+        parentInfo.cchTextMax = ARRAYSIZE(parentText);
+        if (SendMessageW(tree, TVM_GETITEMW, 0,
+                         reinterpret_cast<LPARAM>(&parentInfo))) {
+            key = std::wstring(parentText) + L"\\" + key;
+        }
+        parent = reinterpret_cast<HTREEITEM>(
+            SendMessageW(tree, TVM_GETNEXTITEM, TVGN_PARENT,
+                         reinterpret_cast<LPARAM>(parent)));
+    }
+    return key;
 }
 
 }  // namespace cmo
@@ -17378,8 +17504,14 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
                       ? Scope::NavPane
                       : RefineScope(ScopeFromKind(kind, paths.empty()),
                                     info.allItemsAreFolders, AllPathsAreDrives(paths));
-    const std::wstring typeKey =
+    std::wstring typeKey =
         scope == Scope::Files ? MakeTypeKey(paths) : std::wstring(L"*");
+    if (scope == Scope::NavPane) {
+        const std::wstring nodeKey = NavPaneNodeKey(owner);
+        if (!nodeKey.empty()) {
+            typeKey = L"nav:" + ToLowerCopy(nodeKey);
+        }
+    }
     ContextSignature signature{scope, typeKey, shape, Variant::Normal};
 
     const DWORD clipboardSequence = GetClipboardSequenceNumber();
@@ -17397,29 +17529,46 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
         bool needsDiscovery = false;
         MenuModel model;
         if (capturedMenuContext) {
-            // Populate the retained menu (also QIs IContextMenu2/3) and
-            // initialize it, exactly like the normal discovery path; otherwise
-            // dynamic labels and submenus are empty and get pruned.
-            if (g_settings.debugLogging) {
-                Wh_Log(L"NavPane: capture idFirst=%u obj=%p flags=%08X",
-                       capture.idCmdFirst, capture.obj, capture.flags);
+            const bool navKeyed = typeKey != L"*";
+            if (navKeyed) {
+                cached = g_cache.Find(signature);
             }
-            if (EnsureContextPopulated(capture)) {
-                if (!capture.menuInitialized) {
-                    InitializeMenuRecursive(capture, capture.populatedMenu, 0);
-                    capture.menuInitialized = true;
-                }
-                model = BuildModelFromHMenu(capture.populatedMenu,
-                                            capture.idCmdFirst, signature,
-                                            capture.obj);
+            if (cached) {
+                model = *cached;
                 if (g_settings.debugLogging) {
-                    Wh_Log(L"NavPane: captured %zu items",
-                           model.items.size());
-                    DumpModelItems(model.items, 0);
+                    Wh_Log(L"NavPane: cache hit key=%s (%zu items)",
+                           typeKey.c_str(), model.items.size());
                 }
-                ApplyRegistryIcons(model.items, signature);
-            } else if (g_settings.debugLogging) {
-                Wh_Log(L"NavPane: population failed");
+            } else {
+                // Populate the retained menu (also QIs IContextMenu2/3) and
+                // initialize it, exactly like the normal discovery path;
+                // otherwise dynamic labels and submenus are empty and get
+                // pruned.
+                if (g_settings.debugLogging) {
+                    Wh_Log(L"NavPane: capture idFirst=%u obj=%p flags=%08X",
+                           capture.idCmdFirst, capture.obj, capture.flags);
+                }
+                if (EnsureContextPopulated(capture)) {
+                    if (!capture.menuInitialized) {
+                        InitializeMenuRecursive(capture, capture.populatedMenu,
+                                                0);
+                        capture.menuInitialized = true;
+                    }
+                    model = BuildModelFromHMenu(capture.populatedMenu,
+                                                capture.idCmdFirst, signature,
+                                                capture.obj);
+                    if (g_settings.debugLogging) {
+                        Wh_Log(L"NavPane: captured %zu items (key=%s)",
+                               model.items.size(), typeKey.c_str());
+                        DumpModelItems(model.items, 0);
+                    }
+                    ApplyRegistryIcons(model.items, signature);
+                    if (navKeyed && !model.items.empty()) {
+                        g_cache.Put(model);  // copy for the next open
+                    }
+                } else if (g_settings.debugLogging) {
+                    Wh_Log(L"NavPane: population failed");
+                }
             }
         } else {
             cached = g_cache.Find(signature);
@@ -17613,6 +17762,12 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
 
                 Wh_Log(L"Invoke '%s' -> %d", item->label.c_str(),
                        static_cast<int>(result));
+
+                if (capturedMenuContext && typeKey != L"*") {
+                    // An invocation can change the node (pin/unpin), so the
+                    // next open repopulates instead of showing a stale menu.
+                    g_cache.Remove(signature);
+                }
 
                 if (result == InvokeResult::FallbackNative) {
                     ShowNativeReplay(capture, owner, pt);

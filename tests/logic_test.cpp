@@ -383,6 +383,46 @@ int main() {
     CHECK(lruCache.Find(lruA.sig).has_value());
     CHECK(lruCache.Find(lruC.sig).has_value());
 
+    // NavPane entries: session-only, TTL'd, removable after invocation.
+    {
+        cmo::Cache navCache;
+        cmo::MenuModel navModel{};
+        navModel.sig = cmo::ContextSignature{cmo::Scope::NavPane, L"nav:test",
+                                             cmo::Shape::Single,
+                                             cmo::Variant::Normal};
+        navCache.Put(navModel);
+        CHECK(navCache.Has(navModel.sig));
+        const uint64_t now = GetTickCount64();
+        CHECK(navCache.FindAt(navModel.sig, now).has_value());
+        CHECK(!navCache.FindAt(
+                   navModel.sig, now + cmo::Cache::kNavPaneCacheTtlMs + 1)
+                   .has_value());
+        CHECK(!navCache.Has(navModel.sig));  // the expired entry is removed
+
+        navCache.Put(navModel);
+        navCache.Remove(navModel.sig);
+        CHECK(!navCache.Has(navModel.sig));
+
+        // NavPane models never persist to disk; file models do.
+        cmo::Cache mixedCache;
+        cmo::MenuModel fileModel =
+            cmo::BuildCoreFileModel({L"a.txt"}, cmo::Shape::Single);
+        mixedCache.Put(fileModel);
+        mixedCache.Put(navModel);
+        cmo::Cache restored;
+        CHECK(cmo::Cache::Deserialize(mixedCache.Serialize(), restored));
+        CHECK(restored.Has(fileModel.sig));
+        CHECK(!restored.Has(navModel.sig));
+
+        // File entries do not expire.
+        cmo::Cache fileCache;
+        fileCache.Put(fileModel);
+        CHECK(fileCache
+                  .FindAt(fileModel.sig,
+                          now + cmo::Cache::kNavPaneCacheTtlMs + 1)
+                  .has_value());
+    }
+
     CreateDirectoryW(L"cmo-test-storage", nullptr);
     std::wstring cachePath = L"cmo-test-storage\\cache-test.bin";
     CHECK(serializeCache.Save(cachePath));

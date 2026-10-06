@@ -8748,6 +8748,16 @@ MenuModel MergeCoreWithCached(const MenuModel& core, const MenuModel& cached) {
 
         bool matchedCore = false;
         for (MenuItem& coreItem : result.items) {
+            // A matching submenu donates its children (e.g. the shell's Send
+            // to list) instead of being dropped as a duplicate, which would
+            // leave the core submenu empty and pruned.
+            if (item.kind == ItemKind::Submenu &&
+                coreItem.kind == ItemKind::Submenu &&
+                coreItem.children.empty() && matches(coreItem, item)) {
+                coreItem.children = item.children;
+                matchedCore = true;
+                break;
+            }
             // Only invokable commands donate a descriptor; a matching submenu
             // has none and would otherwise clear the core verb and point the
             // item at offset 0.
@@ -14097,15 +14107,9 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
                 ApplyRulesConfigToModel(model, *rules, itemCtx).hasMoveRules;
         }
 
-        DumpSuspiciousItems(model.items, 0);
-        PruneMenuItems(model.items);
-
-        if (ShouldShowNativeReplay(model.flags)) {
-            Wh_Log(L"Owner-draw context: using the native menu");
-            ShowNativeReplay(capture, owner, pt);
-            break;
-        }
-
+        // Fill the Send to submenu before pruning: an empty submenu is
+        // removed, and a cached shell submenu already donated its children
+        // during the merge.
         for (MenuItem& item : model.items) {
             if (item.canonicalVerb == L"paste" && !clipboardHadData) {
                 item.flags |= kModelDisabled;
@@ -14114,6 +14118,15 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
                 item.children.empty()) {
                 item.children = GetSendToChildren();
             }
+        }
+
+        DumpSuspiciousItems(model.items, 0);
+        PruneMenuItems(model.items);
+
+        if (ShouldShowNativeReplay(model.flags)) {
+            Wh_Log(L"Owner-draw context: using the native menu");
+            ShowNativeReplay(capture, owner, pt);
+            break;
         }
 
         if (capturedMenuContext && g_settings.debugLogging) {

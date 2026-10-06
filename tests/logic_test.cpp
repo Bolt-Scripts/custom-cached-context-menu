@@ -2818,6 +2818,35 @@ int main() {
         DestroyMenu(menu);
     }
 
+    // v2.8 merge: a cached submenu donates its children to an empty core
+    // submenu (the shell's Send to list used to be dropped, leaving it pruned).
+    {
+        cmo::MenuModel core{};
+        cmo::MenuItem sendTo{};
+        sendTo.id = 1;
+        sendTo.kind = cmo::ItemKind::Submenu;
+        sendTo.action = cmo::ActionKind::Submenu;
+        sendTo.label = L"Send to";
+        core.items.push_back(sendTo);
+
+        cmo::MenuModel cached{};
+        cmo::MenuItem nativeSendTo = sendTo;
+        nativeSendTo.label = L"Se&nd to";
+        cmo::MenuItem child{};
+        child.id = 2;
+        child.kind = cmo::ItemKind::Command;
+        child.action = cmo::ActionKind::ShellVerb;
+        child.label = L"Compressed (zipped) folder";
+        nativeSendTo.children.push_back(child);
+        cached.items.push_back(nativeSendTo);
+
+        const cmo::MenuModel merged = cmo::MergeCoreWithCached(core, cached);
+        CHECK(merged.items.size() == 1);
+        CHECK(merged.items[0].children.size() == 1);
+        CHECK(merged.items[0].children[0].label ==
+              L"Compressed (zipped) folder");
+    }
+
     // v2 cache keys include config revisions; device loss clears layouts.
     {
         cmo::RulesConfig config;

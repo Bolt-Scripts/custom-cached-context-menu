@@ -2818,6 +2818,15 @@ int main() {
         DestroyMenu(menu);
     }
 
+    // v2.8 extension state: never inherit a native check marker.
+    {
+        CHECK(cmo::MapExtensionMenuState(MFS_CHECKED) == cmo::kModelNone);
+        CHECK(cmo::MapExtensionMenuState(MFS_CHECKED | MFS_DISABLED) ==
+              cmo::kModelDisabled);
+        CHECK(cmo::MapExtensionMenuState(MFS_DEFAULT) == cmo::kModelDefault);
+        CHECK(cmo::MapMenuState(MFS_CHECKED) == cmo::kModelChecked);
+    }
+
     // v2.8 merge: a cached submenu donates its children to an empty core
     // submenu (the shell's Send to list used to be dropped, leaving it pruned).
     {

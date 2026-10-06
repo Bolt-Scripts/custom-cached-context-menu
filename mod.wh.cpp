@@ -9725,6 +9725,13 @@ uint32_t MapMenuState(UINT state) {
     return flags;
 }
 
+// Extension items never inherit the native check state: third-party handlers
+// sometimes set MFS_CHECKED for their own rendering (Adobe's shim does), and
+// the state is a discovery-time snapshot we cannot refresh after a toggle.
+uint32_t MapExtensionMenuState(UINT state) {
+    return MapMenuState(state) & ~kModelChecked;
+}
+
 // Bitmaps attached with SetMenuItemBitmaps cannot be read back from the
 // menu, so record them while the shell populates it. Thread-local because
 // population happens on the thread that owns the menu.
@@ -10313,7 +10320,7 @@ void BuildItemsFromHMenu(HMENU menu, UINT idCmdFirst, IContextMenu* context,
 
         MenuItem item{};
         item.id = nextId++;
-        item.flags = MapMenuState(info.fState) | kModelExtension;
+        item.flags = MapExtensionMenuState(info.fState) | kModelExtension;
 
         if (info.fType & MFT_SEPARATOR) {
             item.kind = ItemKind::Separator;

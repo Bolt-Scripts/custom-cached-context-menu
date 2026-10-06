@@ -5486,28 +5486,28 @@ MenuItem BuildSettingsRow(const Appearance& working,
         if (AppearanceValueText(working, entry, text)) {
             row.controlText = text;
         }
-        auto colorChild = [&](const wchar_t* id, const wchar_t* label,
+        const std::wstring parentKey = entry.key;
+        auto colorChild = [&](const wchar_t* part, const wchar_t* label,
                               ControlKind kind, int height) {
             MenuItem child = MakeSettingsItem(ItemKind::Command, label);
             child.control.kind = kind;
-            child.control.key = id;
+            child.control.key = L"@color:" + parentKey + L":" + part;
             child.controlColor = row.controlColor;
             child.controlHeight = height;
             return child;
         };
-        row.children.push_back(colorChild(L"@color:area", L"Saturation / value",
+        row.children.push_back(colorChild(L"area", L"Saturation / value",
                                           ControlKind::ColorArea, 120));
         row.children.push_back(
-            colorChild(L"@color:hue", L"Hue", ControlKind::HueStrip, 24));
+            colorChild(L"hue", L"Hue", ControlKind::HueStrip, 24));
         row.children.push_back(
-            colorChild(L"@color:alpha", L"Alpha", ControlKind::AlphaStrip, 24));
+            colorChild(L"alpha", L"Alpha", ControlKind::AlphaStrip, 24));
         MenuItem hex = MakeSettingsItem(ItemKind::Command, L"Hex");
         hex.control.kind = ControlKind::TextField;
-        hex.control.key = L"@color:hex";
+        hex.control.key = L"@color:" + parentKey + L":hex";
         hex.controlText = FormatColorHex(row.controlColor);
         row.children.push_back(std::move(hex));
-        const wchar_t* channelIds[] = {L"@color:r", L"@color:g", L"@color:b",
-                                       L"@color:a"};
+        const wchar_t* channelParts[] = {L"r", L"g", L"b", L"a"};
         const wchar_t* channelLabels[] = {L"Red", L"Green", L"Blue",
                                           L"Alpha value"};
         const int channels[] = {
@@ -5516,15 +5516,16 @@ MenuItem BuildSettingsRow(const Appearance& working,
             static_cast<int>(row.controlColor & 0xFF),
             static_cast<int>((row.controlColor >> 24) & 0xFF)};
         for (int i = 0; i < 4; ++i) {
-            MenuItem channel = MakeIntSliderRow(channelLabels[i], channelIds[i],
-                                                0, 255, channels[i]);
+            MenuItem channel = MakeIntSliderRow(
+                channelLabels[i], L"@color:" + parentKey + L":" + channelParts[i],
+                0, 255, channels[i]);
             row.children.push_back(std::move(channel));
         }
         if (spec.unsetCapable) {
             MenuItem unset =
                 MakeSettingsItem(ItemKind::Command, L"Default (unset)");
             unset.control.kind = ControlKind::Toggle;
-            unset.control.key = L"@color:unset";
+            unset.control.key = L"@color:" + parentKey + L":unset";
             const bool has = key == L"markercolor" ? working.hasMarkerColor
                                                    : working.hasHeaderColor;
             unset.controlValue = has ? 0 : 1;
@@ -9140,6 +9141,8 @@ struct MenuSession {
     POINT animationAnchor = {0, 0};
     LayoutMetrics metrics;
     Appearance appearance;
+    // Non-null for a settings session; see [CMO:SettingsUI].
+    struct SettingsSessionContext* settings = nullptr;
 };
 
 inline MenuSession* g_menuSession = nullptr;
@@ -9179,6 +9182,542 @@ int MeasureTextWidthDirectWrite(const wchar_t* label, size_t length,
     }
     format->Release();
     return width;
+}
+
+// --- Settings session state and input --------------------------------------
+
+struct SettingsSessionContext {
+    SettingsTarget target;
+    SettingsModelInputs inputs;
+    Appearance working;
+    std::vector<MenuItem> model;
+    std::vector<std::wstring> dirtyKeys;
+    SettingsWriteState write;
+    bool themeActive = false;
+    int themeIndex = 0;
+    std::wstring themeName;
+    bool darkSystemTheme = false;
+    bool hasLight = false;
+    bool hasDark = false;
+    std::wstring statusText;
+};
+
+bool SettingsKeyIsGeometry(const std::wstring& key) {
+    const std::wstring k = ToLowerCopy(key);
+    return k == L"itemheight" || k == L"padding" || k == L"verticalpadding" ||
+           k == L"itempadding" || k == L"iconsize" || k == L"markerwidth" ||
+           k == L"separatorspacing" || k == L"minwidth" || k == L"maxwidth" ||
+           k == L"font" || k == L"fontweight" || k == L"fontstyle" ||
+           k == L"showaccelerators";
+}
+
+const LayoutItem* SettingsFindItem(MenuSession& session, int level,
+                                   const std::wstring& key) {
+    if (level < 0 || level >= static_cast<int>(session.windows.size())) {
+        return nullptr;
+    }
+    const LayoutPanel& panel = *session.windows[level]->Panel();
+    for (const LayoutItem& item : panel.items) {
+        if (item.control.key == key) {
+            return &item;
+        }
+    }
+    return nullptr;
+}
+
+void SettingsFocusField(MenuSession& session, int level,
+                        const LayoutItem& item) {
+    MenuInputState& state = session.states[level];
+    state.focusedControl = item.control.key;
+    state.editBuffer = item.controlText;
+    state.caretPos = state.editBuffer.size();
+    state.caretVisible = true;
+}
+
+// Rebuilds the settings model from the working appearance. Window relayout and
+// repaint are added by the session runtime.
+void SettingsRefreshSession(MenuSession& session) {
+    SettingsSessionContext* settings = session.settings;
+    if (!settings) {
+        return;
+    }
+    settings->inputs.working = settings->working;
+    settings->model = BuildSettingsTree(settings->inputs);
+}
+
+void SettingsApplyControlChange(MenuSession& session, const std::wstring& key,
+                                const std::wstring& canonicalText,
+                                bool commitGeometry);
+void SettingsReplayOpenAnimation(MenuSession& session);
+
+void SettingsHandleReservedAction(MenuSession& session,
+                                  const std::wstring& key,
+                                  const std::wstring& canonicalText) {
+    SettingsSessionContext* settings = session.settings;
+    if (!settings) {
+        return;
+    }
+    if (key.rfind(L"@target:", 0) == 0) {
+        const std::wstring which = key.substr(8);
+        SettingsTargetKind kind = SettingsTargetKind::MenuIniBase;
+        if (which == L"light") {
+            kind = SettingsTargetKind::MenuIniLight;
+        } else if (which == L"dark") {
+            kind = SettingsTargetKind::MenuIniDark;
+        }
+        settings->target = ResolveSettingsTarget(0, kind);
+        settings->inputs.target = settings->target;
+        SettingsRefreshSession(session);
+        return;
+    }
+    if (key.rfind(L"@enum:", 0) == 0) {
+        const size_t first = key.find(L':', 6);
+        if (first != std::wstring::npos) {
+            SettingsApplyControlChange(session, key.substr(6, first - 6),
+                                       key.substr(first + 1), true);
+        }
+        return;
+    }
+    if (key.rfind(L"@effect:", 0) == 0) {
+        const size_t first = key.find(L':', 8);
+        if (first == std::wstring::npos) {
+            return;
+        }
+        const std::wstring which = key.substr(8, first - 8);
+        const std::wstring name = key.substr(first + 1);
+        uint32_t bit = 0;
+        for (const SettingsEffectName& effect : kSettingsEffectNames) {
+            if (name == effect.name) {
+                bit = effect.bit;
+                break;
+            }
+        }
+        const bool opening = which == L"open";
+        const uint32_t effects =
+            ToggleAnimationEffect(opening ? settings->working.animationOpen
+                                          : settings->working.animationClose,
+                                  bit);
+        SettingsApplyControlChange(session,
+                                   opening ? L"animationOpen"
+                                           : L"animationClose",
+                                   AnimationEffectsText(effects), true);
+        return;
+    }
+    if (key == L"@font:size") {
+        int size = 0;
+        if (ParseIntField(canonicalText, 6, 72, size)) {
+            settings->working.fontSize = static_cast<float>(size);
+            if (std::find(settings->dirtyKeys.begin(),
+                          settings->dirtyKeys.end(),
+                          std::wstring(L"font")) == settings->dirtyKeys.end()) {
+                settings->dirtyKeys.push_back(L"font");
+            }
+            SettingsMarkDirty(settings->write, GetTickCount64(), 400);
+            SettingsRefreshSession(session);
+        }
+        return;
+    }
+    if (key.rfind(L"@color:", 0) == 0 && key.size() > 6 &&
+        key.compare(key.size() - 6, 6, L":unset") == 0) {
+        // @color:<parent>:unset toggle: on = remove the key (inherit).
+        const size_t first = key.find(L':', 7);
+        if (first == std::wstring::npos) {
+            return;
+        }
+        const std::wstring parent = key.substr(7, first - 7);
+        const bool wantUnset = canonicalText == L"true";
+        const std::wstring lower = ToLowerCopy(parent);
+        if (lower == L"markercolor") {
+            settings->working.hasMarkerColor = !wantUnset;
+        } else if (lower == L"headercolor") {
+            settings->working.hasHeaderColor = !wantUnset;
+        }
+        if (std::find(settings->dirtyKeys.begin(), settings->dirtyKeys.end(),
+                      parent) == settings->dirtyKeys.end()) {
+            settings->dirtyKeys.push_back(parent);
+        }
+        SettingsMarkDirty(settings->write, GetTickCount64(), 400);
+        SettingsRefreshSession(session);
+        return;
+    }
+    if (key == L"@preview-open") {
+        SettingsReplayOpenAnimation(session);
+        return;
+    }
+    // @reset:*, @open:*, and the remaining reserved ids are handled by the
+    // settings session runtime.
+}
+
+void SettingsApplyControlChange(MenuSession& session, const std::wstring& key,
+                                const std::wstring& canonicalText,
+                                bool commitGeometry) {
+    SettingsSessionContext* settings = session.settings;
+    if (!settings || key.empty()) {
+        return;
+    }
+    if (key[0] == L'@') {
+        SettingsHandleReservedAction(session, key, canonicalText);
+        return;
+    }
+    const ConfigSchemaEntry* entry = SchemaFind(key);
+    if (!entry) {
+        return;
+    }
+    ApplyAppearanceValue(settings->working, entry->key, canonicalText, nullptr);
+    if (std::find(settings->dirtyKeys.begin(), settings->dirtyKeys.end(),
+                  std::wstring(entry->key)) == settings->dirtyKeys.end()) {
+        settings->dirtyKeys.push_back(entry->key);
+    }
+    SettingsMarkDirty(settings->write, GetTickCount64(), 400);
+    if (!SettingsKeyIsGeometry(entry->key) || commitGeometry) {
+        SettingsRefreshSession(session);
+    }
+}
+
+// The schema key a dragged control edits: color-editor parts edit their parent
+// color key.
+std::wstring SettingsDragSchemaKey(const std::wstring& controlKey) {
+    if (controlKey.rfind(L"@color:", 0) == 0) {
+        const size_t first = controlKey.find(L':', 7);
+        if (first != std::wstring::npos) {
+            return controlKey.substr(7, first - 7);
+        }
+    }
+    return controlKey;
+}
+
+bool SettingsComputeDragValue(SettingsSessionContext& settings,
+                              const LayoutItem& item, POINT pt,
+                              std::wstring& out) {
+    const ControlSpec& control = item.control;
+    const std::wstring& key = control.key;
+    if (control.kind == ControlKind::IntSlider) {
+        const int width = item.trackRect.right - item.trackRect.left;
+        const int value = SliderValueFromX(pt.x, item.trackRect.left, width,
+                                           control.minValue, control.maxValue,
+                                           control.step);
+        out = std::to_wstring(value);
+        return true;
+    }
+    if (key.rfind(L"@color:", 0) == 0) {
+        const size_t first = key.find(L':', 7);
+        if (first == std::wstring::npos) {
+            return false;
+        }
+        const std::wstring parent = key.substr(7, first - 7);
+        const std::wstring part = key.substr(first + 1);
+        const uint32_t current = AppearanceColorValue(settings.working, parent);
+        const HsvColor hsv = RgbToHsv(current);
+        const uint8_t alpha = static_cast<uint8_t>((current >> 24) & 0xFF);
+        const float stripFraction =
+            std::clamp(static_cast<float>(pt.x - item.stripRect.left) /
+                           static_cast<float>(std::max(
+                               1, static_cast<int>(item.stripRect.right -
+                                                   item.stripRect.left))),
+                       0.0f, 1.0f);
+        const float areaS =
+            std::clamp(static_cast<float>(pt.x - item.areaRect.left) /
+                           static_cast<float>(std::max(
+                               1, static_cast<int>(item.areaRect.right -
+                                                   item.areaRect.left))),
+                       0.0f, 1.0f);
+        const float areaV =
+            1.0f - std::clamp(static_cast<float>(pt.y - item.areaRect.top) /
+                                  static_cast<float>(std::max(
+                                      1, static_cast<int>(item.areaRect.bottom -
+                                                          item.areaRect.top))),
+                              0.0f, 1.0f);
+        uint32_t updated = current;
+        if (part == L"hue") {
+            updated = HsvToRgb(HsvColor{stripFraction * 360.0f, hsv.s, hsv.v},
+                               alpha);
+        } else if (part == L"alpha") {
+            updated = (current & 0x00FFFFFF) |
+                      (static_cast<uint32_t>(std::lround(stripFraction * 255.0f))
+                       << 24);
+        } else if (part == L"area") {
+            updated = HsvToRgb(HsvColor{hsv.h, areaS, areaV}, alpha);
+        } else {
+            return false;
+        }
+        out = FormatColorRgba(updated);
+        return true;
+    }
+    if (key.rfind(L"@cornerRadii:", 0) == 0) {
+        const int width = item.trackRect.right - item.trackRect.left;
+        const int value = SliderValueFromX(pt.x, item.trackRect.left, width, 0,
+                                           256, 1);
+        const std::wstring part = key.substr(14);
+        if (part == L"tl") {
+            settings.working.cornerRadii.topLeft = value;
+        } else if (part == L"tr") {
+            settings.working.cornerRadii.topRight = value;
+        } else if (part == L"br") {
+            settings.working.cornerRadii.bottomRight = value;
+        } else if (part == L"bl") {
+            settings.working.cornerRadii.bottomLeft = value;
+        } else {
+            return false;
+        }
+        out = std::to_wstring(value);
+        return true;
+    }
+    return false;
+}
+
+bool SettingsHandleMouseMove(MenuSession& session, int level, POINT panelPoint) {
+    if (!session.settings || level < 0 ||
+        level >= static_cast<int>(session.windows.size())) {
+        return false;
+    }
+    MenuInputState& state = session.states[level];
+    if (state.dragControl.empty()) {
+        return false;
+    }
+    const LayoutItem* item =
+        SettingsFindItem(session, level, state.dragControl);
+    if (!item) {
+        return false;
+    }
+    std::wstring text;
+    if (SettingsComputeDragValue(*session.settings, *item, panelPoint, text)) {
+        const std::wstring schemaKey = SettingsDragSchemaKey(item->control.key);
+        SettingsApplyControlChange(
+            session, schemaKey, text,
+            !SettingsKeyIsGeometry(schemaKey));
+    }
+    return true;
+}
+
+bool SettingsHandleMouseDown(MenuSession& session, int level,
+                             POINT panelPoint) {
+    if (!session.settings || level < 0 ||
+        level >= static_cast<int>(session.windows.size())) {
+        return false;
+    }
+    const LayoutPanel& panel = *session.windows[level]->Panel();
+    MenuInputState& state = session.states[level];
+    const int hit = MenuStateItemAt(panel, state, panelPoint);
+    if (hit < 0) {
+        return false;
+    }
+    const LayoutItem& item = panel.items[hit];
+    if (item.control.kind == ControlKind::None) {
+        return false;
+    }
+    const ControlPart part = HitTestControlPart(item, panelPoint);
+    switch (item.control.kind) {
+        case ControlKind::Toggle:
+            SettingsApplyControlChange(session, item.control.key,
+                                       item.controlValue ? L"false" : L"true",
+                                       true);
+            return true;
+        case ControlKind::IntSlider:
+            if (part == ControlPart::Field) {
+                SettingsFocusField(session, level, item);
+                return true;
+            }
+            state.dragControl = item.control.key;
+            state.dragPart = part;
+            SetCapture(session.windows[level]->Handle());
+            SettingsHandleMouseMove(session, level, panelPoint);
+            return true;
+        case ControlKind::ColorArea:
+        case ControlKind::HueStrip:
+        case ControlKind::AlphaStrip:
+            state.dragControl = item.control.key;
+            state.dragPart = part;
+            SetCapture(session.windows[level]->Handle());
+            SettingsHandleMouseMove(session, level, panelPoint);
+            return true;
+        case ControlKind::TextField:
+            SettingsFocusField(session, level, item);
+            return true;
+        default:
+            return false;  // submenu rows open through the generic path
+    }
+}
+
+bool SettingsHandleMouseUp(MenuSession& session, int level, POINT panelPoint) {
+    if (!session.settings || level < 0 ||
+        level >= static_cast<int>(session.windows.size())) {
+        return false;
+    }
+    MenuInputState& state = session.states[level];
+    if (!state.dragControl.empty()) {
+        const LayoutItem* item =
+            SettingsFindItem(session, level, state.dragControl);
+        if (item) {
+            std::wstring text;
+            if (SettingsComputeDragValue(*session.settings, *item, panelPoint,
+                                         text)) {
+                SettingsApplyControlChange(
+                    session, SettingsDragSchemaKey(item->control.key), text,
+                    true);
+            }
+        }
+        state.dragControl.clear();
+        state.dragPart = ControlPart::None;
+        ReleaseCapture();
+        return true;
+    }
+    const LayoutPanel& panel = *session.windows[level]->Panel();
+    const int hit = MenuStateItemAt(panel, state, panelPoint);
+    if (hit < 0) {
+        return false;
+    }
+    const LayoutItem& item = panel.items[hit];
+    if (item.kind == ItemKind::Submenu) {
+        return false;  // the generic path opens it
+    }
+    if (!item.control.key.empty() && item.control.key[0] == L'@') {
+        const std::wstring text =
+            item.control.kind == ControlKind::Toggle
+                ? (item.controlValue ? L"false" : L"true")
+                : std::wstring();
+        SettingsHandleReservedAction(session, item.control.key, text);
+        return true;
+    }
+    return false;
+}
+
+bool SettingsHandleKey(MenuSession& session, UINT key, wchar_t ch) {
+    SettingsSessionContext* settings = session.settings;
+    if (!settings || session.active < 0 ||
+        session.active >= static_cast<int>(session.states.size())) {
+        return false;
+    }
+    MenuInputState& state = session.states[session.active];
+    const LayoutPanel& panel = *session.windows[session.active]->Panel();
+    if (!state.focusedControl.empty()) {
+        const LayoutItem* item =
+            SettingsFindItem(session, session.active, state.focusedControl);
+        if (!item) {
+            state.focusedControl.clear();
+            return false;
+        }
+        const ControlSpec& control = item->control;
+        if (key == VK_RETURN) {
+            std::wstring canonical;
+            if (CommitFieldBuffer(control, state.editBuffer, canonical)) {
+                SettingsApplyControlChange(session, control.key, canonical,
+                                           true);
+            }
+            state.focusedControl.clear();
+            state.editBuffer.clear();
+            state.caretVisible = false;
+            SettingsRefreshSession(session);
+            return true;
+        }
+        if (key == VK_ESCAPE) {
+            state.focusedControl.clear();
+            state.editBuffer.clear();
+            state.caretVisible = false;
+            SettingsRefreshSession(session);
+            return true;
+        }
+        if (key == VK_UP || key == VK_DOWN) {
+            int value = item->controlValue + (key == VK_UP ? 1 : -1);
+            value = std::clamp(value, control.minValue, control.maxValue);
+            SettingsApplyControlChange(session, control.key,
+                                       std::to_wstring(value), true);
+            return true;
+        }
+        const bool allowNegative = control.minValue < 0;
+        const bool hexOnly = control.kind == ControlKind::TextField;
+        ApplyFieldKey(state.editBuffer, state.caretPos, key, ch, allowNegative,
+                      hexOnly);
+        SettingsRefreshSession(session);
+        return true;
+    }
+    if (key == VK_TAB) {
+        for (size_t i = 1; i <= panel.items.size(); ++i) {
+            const int candidate = (std::max(0, state.keyboardIndex) +
+                                   static_cast<int>(i)) %
+                                  static_cast<int>(panel.items.size());
+            const LayoutItem& item = panel.items[candidate];
+            if (item.control.kind == ControlKind::IntSlider ||
+                item.control.kind == ControlKind::TextField) {
+                state.keyboardIndex = candidate;
+                SettingsFocusField(session, session.active, item);
+                SettingsRefreshSession(session);
+                return true;
+            }
+        }
+        return true;
+    }
+    if (key == VK_LEFT || key == VK_RIGHT) {
+        const LayoutItem* item = MenuStateActiveItem(panel, state);
+        if (!item || item->control.kind == ControlKind::None) {
+            return false;
+        }
+        const ControlSpec& control = item->control;
+        if (control.kind == ControlKind::Toggle) {
+            SettingsApplyControlChange(session, control.key,
+                                       item->controlValue ? L"false" : L"true",
+                                       true);
+            return true;
+        }
+        if (control.kind == ControlKind::IntSlider) {
+            const int step =
+                (GetKeyState(VK_SHIFT) & 0x8000) ? control.coarseStep
+                                                 : control.step;
+            const int value = std::clamp(
+                item->controlValue + (key == VK_RIGHT ? step : -step),
+                control.minValue, control.maxValue);
+            SettingsApplyControlChange(session, control.key,
+                                       std::to_wstring(value), true);
+            return true;
+        }
+        if (control.kind == ControlKind::Enum && !control.options.empty()) {
+            int index = 0;
+            for (size_t i = 0; i < control.options.size(); ++i) {
+                if (_wcsicmp(control.options[i].c_str(),
+                             item->controlText.c_str()) == 0) {
+                    index = static_cast<int>(i);
+                    break;
+                }
+            }
+            const int count = static_cast<int>(control.options.size());
+            index = (index + (key == VK_RIGHT ? 1 : count - 1)) % count;
+            SettingsApplyControlChange(session, control.key,
+                                       control.options[index], true);
+            return true;
+        }
+        return false;
+    }
+    if (key == VK_RETURN) {
+        const LayoutItem* item = MenuStateActiveItem(panel, state);
+        if (!item || item->control.kind == ControlKind::None) {
+            return false;
+        }
+        const ControlSpec& control = item->control;
+        if (control.kind == ControlKind::Toggle) {
+            SettingsApplyControlChange(session, control.key,
+                                       item->controlValue ? L"false" : L"true",
+                                       true);
+            return true;
+        }
+        if (control.kind == ControlKind::IntSlider ||
+            control.kind == ControlKind::TextField) {
+            SettingsFocusField(session, session.active, *item);
+            SettingsRefreshSession(session);
+            return true;
+        }
+        return false;  // submenus open through the generic path
+    }
+    if (ch >= L'0' && ch <= L'9') {
+        const LayoutItem* item = MenuStateActiveItem(panel, state);
+        if (item && item->control.kind == ControlKind::IntSlider) {
+            SettingsFocusField(session, session.active, *item);
+            MenuInputState& focused = session.states[session.active];
+            ApplyFieldKey(focused.editBuffer, focused.caretPos, 0, ch,
+                          item->control.minValue < 0, false);
+            SettingsRefreshSession(session);
+            return true;
+        }
+    }
+    return false;
 }
 
 struct AnimationSpec {
@@ -9460,6 +9999,14 @@ void RunSessionAnimation(MenuSession& session, const AnimationSpec& spec,
             DispatchMessageW(&msg);
         }
         Sleep(static_cast<DWORD>(std::clamp(spec.frameMs, 1, 100)));
+    }
+}
+
+void SettingsReplayOpenAnimation(MenuSession& session) {
+    if (session.settings) {
+        RunSessionAnimation(session,
+                            ResolveAnimationSpec(session.settings->working, true),
+                            true);
     }
 }
 
@@ -9928,6 +10475,18 @@ LRESULT CustomMenuWindowProc(MenuWindow* window, HWND hwnd, UINT msg,
             return HTCLIENT;
         }
         case WM_MOUSEMOVE: {
+            if (session->settings && session->active >= 0 &&
+                session->active < static_cast<int>(session->states.size()) &&
+                !session->states[session->active].dragControl.empty()) {
+                const std::vector<RECT> windowRects = SessionWindowRects(session);
+                POINT screen = clientPoint;
+                ClientToScreen(hwnd, &screen);
+                const int level = session->active;
+                const POINT levelPoint = PanelPointForWindow(
+                    windowRects[level], session->margin, screen);
+                SettingsHandleMouseMove(*session, level, levelPoint);
+                return 0;
+            }
             const std::vector<RECT> windowRects = SessionWindowRects(session);
             const std::vector<RECT> panelRects = SessionPanelRects(session);
             POINT screen = clientPoint;
@@ -9998,7 +10557,17 @@ LRESULT CustomMenuWindowProc(MenuWindow* window, HWND hwnd, UINT msg,
             const std::vector<RECT> panelRects = SessionPanelRects(session);
             POINT screen = clientPoint;
             ClientToScreen(hwnd, &screen);
-            if (SessionLevelAtPoint(panelRects, screen) < 0) {
+            const int level = SessionLevelAtPoint(panelRects, screen);
+            if (session->settings && level >= 0) {
+                const std::vector<RECT> windowRects =
+                    SessionWindowRects(session);
+                const POINT levelPoint = PanelPointForWindow(
+                    windowRects[level], session->margin, screen);
+                if (SettingsHandleMouseDown(*session, level, levelPoint)) {
+                    return 0;
+                }
+            }
+            if (level < 0) {
                 session->done = true;
             }
             return 0;
@@ -10014,6 +10583,10 @@ LRESULT CustomMenuWindowProc(MenuWindow* window, HWND hwnd, UINT msg,
                 MenuInputState& levelState = session->states[level];
                 const POINT levelPoint =
                     PanelPointForWindow(windowRects[level], session->margin, screen);
+                if (session->settings &&
+                    SettingsHandleMouseUp(*session, level, levelPoint)) {
+                    return 0;
+                }
                 const int hit = MenuStateItemAt(levelPanel, levelState, levelPoint);
                 if (hit >= 0) {
                     const LayoutItem& item = levelPanel.items[hit];
@@ -10059,6 +10632,10 @@ LRESULT CustomMenuWindowProc(MenuWindow* window, HWND hwnd, UINT msg,
             return 0;
         }
         case WM_KEYDOWN:
+            if (session->settings &&
+                SettingsHandleKey(*session, static_cast<UINT>(wParam), 0)) {
+                return 0;
+            }
             HandleMenuKey(session, static_cast<UINT>(wParam));
             return 0;
         case WM_MOUSEACTIVATE:
@@ -10228,12 +10805,21 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
         // are addressed to it. Handle them here, exactly like a native menu
         // loop, and swallow the rest instead of stealing focus from the owner.
         if (msg.message == WM_KEYDOWN || msg.message == WM_SYSKEYDOWN) {
+            if (session.settings &&
+                SettingsHandleKey(session, static_cast<UINT>(msg.wParam), 0)) {
+                continue;
+            }
             HandleMenuKey(&session, static_cast<UINT>(msg.wParam));
             continue;
         }
         if (msg.message == WM_KEYUP || msg.message == WM_SYSKEYUP ||
             msg.message == WM_CHAR || msg.message == WM_SYSCHAR ||
             msg.message == WM_DEADCHAR) {
+            if (msg.message == WM_CHAR && session.settings &&
+                SettingsHandleKey(session, 0,
+                                  static_cast<wchar_t>(msg.wParam))) {
+                continue;
+            }
             continue;
         }
         TranslateMessage(&msg);

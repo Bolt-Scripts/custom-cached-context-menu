@@ -3886,10 +3886,13 @@ bool ReadConfigFile(const std::wstring& path, std::wstring& text) {
     return DecodeConfigBytes(bytes, text);
 }
 
+// Atomic: write a sibling temp file, flush it, then replace the destination.
+// A crash or full disk can never leave a truncated config behind.
 bool WriteConfigFile(const std::wstring& path, const std::wstring& text) {
     const std::vector<uint8_t> bytes = EncodeConfigText(text);
-    HANDLE file = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
-                              FILE_ATTRIBUTE_NORMAL, nullptr);
+    const std::wstring tempPath = path + L".tmp";
+    HANDLE file = CreateFileW(tempPath.c_str(), GENERIC_WRITE, 0, nullptr,
+                              CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (file == INVALID_HANDLE_VALUE) {
         return false;
     }
@@ -3898,8 +3901,20 @@ bool WriteConfigFile(const std::wstring& path, const std::wstring& text) {
         bytes.empty() ||
         WriteFile(file, bytes.data(), static_cast<DWORD>(bytes.size()), &written,
                   nullptr);
+    if (ok && written == bytes.size()) {
+        FlushFileBuffers(file);
+    }
     CloseHandle(file);
-    return ok && written == bytes.size();
+    if (!ok || written != bytes.size()) {
+        DeleteFileW(tempPath.c_str());
+        return false;
+    }
+    if (!MoveFileExW(tempPath.c_str(), path.c_str(),
+                     MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        DeleteFileW(tempPath.c_str());
+        return false;
+    }
+    return true;
 }
 
 std::wstring ConfigFilePath() {

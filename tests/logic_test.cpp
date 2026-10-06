@@ -4009,6 +4009,28 @@ int main() {
     }
 
     {
+        wchar_t tempDir[MAX_PATH] = {};
+        GetTempPathW(MAX_PATH, tempDir);
+        const std::wstring path =
+            std::wstring(tempDir) + L"cmo-atomic-write-test.ini";
+        DeleteFileW(path.c_str());
+        CHECK(cmo::WriteConfigFile(path, L"alpha\n"));
+        std::wstring text;
+        CHECK(cmo::ReadConfigFile(path, text));
+        CHECK_EQ(text, std::wstring(L"alpha\n"));
+        CHECK(cmo::WriteConfigFile(path, L"beta\n"));
+        text.clear();
+        CHECK(cmo::ReadConfigFile(path, text));
+        CHECK_EQ(text, std::wstring(L"beta\n"));
+        // A write into a missing directory fails and leaves no temp behind.
+        const std::wstring bad =
+            std::wstring(tempDir) + L"cmo-no-such-dir\\x.ini";
+        CHECK(!cmo::WriteConfigFile(bad, L"x"));
+        CHECK(!cmo::WriteConfigFile(bad + L".tmp", L"x"));
+        DeleteFileW(path.c_str());
+    }
+
+    {
         const std::wstring base =
             L"[appearance]\nbackground = 0, 0, 0, 255\nitemHeight = 40\n";
         std::wstring out = cmo::CanonicalizeConfigWithOverrides(

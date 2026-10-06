@@ -4010,6 +4010,20 @@ int main() {
     }
 
     {
+        std::vector<cmo::MenuItem> items;
+        cmo::AppendSettingsEntry(items);
+        CHECK(items.size() >= 2);
+        CHECK(items.back().action == cmo::ActionKind::Builtin);
+        CHECK(items.back().builtinAction == cmo::BuiltinAction::OpenSettings);
+        CHECK_EQ(items.back().label, std::wstring(L"Menu settings\u2026"));
+        CHECK(items[items.size() - 2].kind == cmo::ItemKind::Separator);
+        // Idempotent: calling again does not duplicate the row.
+        const size_t before = items.size();
+        cmo::AppendSettingsEntry(items);
+        CHECK_EQ(items.size(), before);
+    }
+
+    {
         cmo::LayoutItem item{};
         item.control.kind = cmo::ControlKind::IntSlider;
         item.rect = {0, 0, 300, 28};

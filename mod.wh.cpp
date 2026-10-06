@@ -50,6 +50,9 @@ Design document: `docs/superpowers/specs/2026-10-04-context-menu-overhaul-design
   - Tokyo Night: Blue night palette with violet accents
   - AMOLED Black: True black, no blur or shadow
   - High Contrast: White on black, thick border
+- settingsHotkey: ""
+  $name: Settings hotkey
+  $description: Optional global hotkey that opens the appearance settings menu (for example Ctrl+Alt+M). Empty disables it.
 - menuMode: 0
   $name: Menu mode
   $description: 0 shows the custom-rendered menu (falls back automatically on repeated failures); 1 keeps the classic owner-drawn menu.
@@ -144,6 +147,7 @@ struct Settings {
     bool enableShiftBypass = true;
     std::wstring theme = L"Custom (menu.ini)";
     int themeIndex = 0;
+    std::wstring settingsHotkey;
     int menuMode = 0;
     bool showMoreOptionsItem = true;
     int submenuDelayMs = 150;
@@ -224,6 +228,9 @@ void LoadSettings() {
     PCWSTR theme = Wh_GetStringSetting(L"theme");
     g_settings.theme = (theme && theme[0]) ? theme : L"Custom (menu.ini)";
     Wh_FreeStringSetting(theme);
+    PCWSTR hotkey = Wh_GetStringSetting(L"settingsHotkey");
+    g_settings.settingsHotkey = hotkey ? hotkey : L"";
+    Wh_FreeStringSetting(hotkey);
     g_settings.themeIndex = ThemeIndexFromName(g_settings.theme);
     g_settings.menuMode = Wh_GetIntSetting(L"menuMode");
     g_settings.showMoreOptionsItem = Wh_GetIntSetting(L"showMoreOptionsItem") != 0;
@@ -350,7 +357,13 @@ enum class ActionKind : uint8_t {
     Builtin,
 };
 
-enum class BuiltinAction : uint8_t { None, CopyPath, OpenNewWindow, Properties };
+enum class BuiltinAction : uint8_t {
+    None,
+    CopyPath,
+    OpenNewWindow,
+    Properties,
+    OpenSettings,
+};
 
 // Documented view operations, dispatched through IFolderView2 / IShellView.
 // The old FCIDM_* view command IDs are not defined by the Windows SDK and
@@ -5810,6 +5823,25 @@ std::vector<MenuItem> BuildSettingsTree(const SettingsModelInputs& inputs) {
     return root;
 }
 
+// Appends the "Menu settings..." entry (and a separator) to a list, unless it
+// is already present. Called after rules and pruning so nothing can hide it.
+void AppendSettingsEntry(std::vector<MenuItem>& items) {
+    for (const MenuItem& item : items) {
+        if (item.action == ActionKind::Builtin &&
+            item.builtinAction == BuiltinAction::OpenSettings) {
+            return;
+        }
+    }
+    MenuItem separator = MakeSettingsItem(ItemKind::Separator, L"");
+    separator.action = ActionKind::ViewAction;
+    items.push_back(std::move(separator));
+    MenuItem row = MakeSettingsItem(ItemKind::Command, L"Menu settings\u2026");
+    row.action = ActionKind::Builtin;
+    row.builtinAction = BuiltinAction::OpenSettings;
+    row.iconRef = L"@icon:settings";
+    items.push_back(std::move(row));
+}
+
 // --- Settings persistence helpers ------------------------------------------
 
 struct SettingsWriteState {
@@ -11201,6 +11233,28 @@ void OpenSettingsMenu(HWND owner, POINT pt) {
 // the DLL goes away.
 constexpr wchar_t kControlWindowClass[] = L"ContextMenuOverhaulV2Control";
 constexpr UINT kControlUninitMessage = WM_APP + 37;
+constexpr int kSettingsHotkeyId = 0x5E77;
+
+// (Re-)registers the optional global settings hotkey on the control window.
+// Only one explorer process can own a given combination; failures are logged
+// and the menu row remains the primary entry point.
+void UpdateSettingsHotkey() {
+    HWND control = g_controlWindow.load();
+    if (!control || !IsWindow(control)) {
+        return;
+    }
+    UnregisterHotKey(control, kSettingsHotkeyId);
+    HotkeySpec spec;
+    if (g_settings.menuMode != 0 ||
+        !ParseHotkey(g_settings.settingsHotkey, spec)) {
+        return;
+    }
+    if (!RegisterHotKey(control, kSettingsHotkeyId, spec.modifiers,
+                        spec.virtualKey) &&
+        g_settings.debugLogging) {
+        Wh_Log(L"Failed to register the settings hotkey");
+    }
+}
 
 // Defined after OwnerSubclass; removes every window subclass this DLL
 // installed so comctl32 cannot call into unloaded code.
@@ -11208,6 +11262,12 @@ void RemoveOwnerSubclasses();
 
 LRESULT CALLBACK ControlWindowProc(HWND hwnd, UINT msg, WPARAM wParam,
                                    LPARAM lParam) {
+    if (msg == WM_HOTKEY && wParam == kSettingsHotkeyId) {
+        POINT pt = {};
+        GetCursorPos(&pt);
+        OpenSettingsMenu(GetForegroundWindow(), pt);
+        return 0;
+    }
     if (msg == kControlUninitMessage) {
         g_unloading.store(true);
         if (g_menuSession) {
@@ -11266,6 +11326,9 @@ bool EnsureControlWindow() {
     g_controlWindow.store(control);
     if (!control && g_settings.debugLogging) {
         Wh_Log(L"Failed to create the control window");
+    }
+    if (control) {
+        UpdateSettingsHotkey();
     }
     return control != nullptr;
 }
@@ -14986,6 +15049,12 @@ std::vector<std::wstring> BuiltinActionTargets(BuiltinAction action,
 }
 
 bool InvokeBuiltinAction(const MenuItem& item, const InvocationContext& ctx) {
+    if (item.builtinAction == BuiltinAction::OpenSettings) {
+        POINT pt = {};
+        GetCursorPos(&pt);
+        OpenSettingsMenu(ctx.owner, pt);
+        return true;
+    }
     const std::vector<std::wstring> targets =
         BuiltinActionTargets(item.builtinAction, ctx);
     if (targets.empty()) {
@@ -16994,6 +17063,18 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
         DumpSuspiciousItems(model.items, 0);
         PruneMenuItems(model.items);
 
+        if (g_settings.menuMode == 0) {
+            std::vector<MenuItem>* container = &model.items;
+            for (MenuItem& item : model.items) {
+                if (item.kind == ItemKind::Submenu &&
+                    item.label == g_settings.advancedSubmenuLabel) {
+                    container = &item.children;
+                    break;
+                }
+            }
+            AppendSettingsEntry(*container);
+        }
+
         if (ShouldShowNativeReplay(model.flags)) {
             Wh_Log(L"Owner-draw context: using the native menu");
             ShowNativeReplay(capture, owner, pt);
@@ -17448,6 +17529,7 @@ void Wh_ModSettingsChanged() {
     }
     Wh_Log(L"Context Menu Overhaul settings changed");
     cmo::LoadSettings();
+    cmo::UpdateSettingsHotkey();
 
     if (cmo::g_settings.themeIndex != cmo::g_lastAppliedTheme) {
         cmo::g_themeStore.ApplySelectedTheme(cmo::g_settings.themeIndex);

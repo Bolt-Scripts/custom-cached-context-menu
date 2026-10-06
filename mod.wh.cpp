@@ -7043,6 +7043,17 @@ public:
                                   static_cast<UINT>(height), DXGI_FORMAT_UNKNOWN, 0);
     }
 
+    // Relayout support: swap in a rebuilt panel and resize/move the window.
+    void SetPanel(const LayoutPanel* panel) { panel_ = panel; }
+
+    void SetBounds(POINT screenPos, int width, int height) {
+        if (!hwnd_ || width <= 0 || height <= 0) {
+            return;
+        }
+        SetWindowPos(hwnd_, HWND_TOPMOST, screenPos.x, screenPos.y, width,
+                     height, SWP_NOACTIVATE);
+    }
+
     LRESULT HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         if (g_menuWindowMessageHook) {
             return g_menuWindowMessageHook(this, hwnd, msg, wParam, lParam);
@@ -9200,7 +9211,21 @@ struct SettingsSessionContext {
     bool hasLight = false;
     bool hasDark = false;
     std::wstring statusText;
+    // Owns the rebuilt panels; windows point into it.
+    std::shared_ptr<LayoutPanel> panel;
+    // ShellExecute target for @open:* rows, launched after teardown.
+    std::wstring pendingLaunch;
 };
+
+constexpr UINT_PTR kSettingsSaveTimerId = 2;
+constexpr UINT_PTR kSettingsCaretTimerId = 3;
+
+void SettingsArmSaveTimer(MenuSession& session) {
+    if (!session.windows.empty() && session.windows[0]) {
+        SetTimer(session.windows[0]->Handle(), kSettingsSaveTimerId, 100,
+                 nullptr);
+    }
+}
 
 bool SettingsKeyIsGeometry(const std::wstring& key) {
     const std::wstring k = ToLowerCopy(key);
@@ -9232,10 +9257,19 @@ void SettingsFocusField(MenuSession& session, int level,
     state.editBuffer = item.controlText;
     state.caretPos = state.editBuffer.size();
     state.caretVisible = true;
+    if (level >= 0 && level < static_cast<int>(session.windows.size()) &&
+        session.windows[level]) {
+        SetTimer(session.windows[level]->Handle(), kSettingsCaretTimerId, 530,
+                 nullptr);
+    }
 }
 
-// Rebuilds the settings model from the working appearance. Window relayout and
-// repaint are added by the session runtime.
+void RelayoutSession(MenuSession& session);
+void SettingsApplyReset(MenuSession& session, const std::wstring& key);
+void SettingsPerformWrite(SettingsSessionContext* settings);
+
+// Rebuilds the settings model from the working appearance and re-lays out the
+// open windows so changes show live.
 void SettingsRefreshSession(MenuSession& session) {
     SettingsSessionContext* settings = session.settings;
     if (!settings) {
@@ -9243,6 +9277,7 @@ void SettingsRefreshSession(MenuSession& session) {
     }
     settings->inputs.working = settings->working;
     settings->model = BuildSettingsTree(settings->inputs);
+    RelayoutSession(session);
 }
 
 void SettingsApplyControlChange(MenuSession& session, const std::wstring& key,
@@ -9313,6 +9348,7 @@ void SettingsHandleReservedAction(MenuSession& session,
                 settings->dirtyKeys.push_back(L"font");
             }
             SettingsMarkDirty(settings->write, GetTickCount64(), 400);
+            SettingsArmSaveTimer(session);
             SettingsRefreshSession(session);
         }
         return;
@@ -9337,6 +9373,7 @@ void SettingsHandleReservedAction(MenuSession& session,
             settings->dirtyKeys.push_back(parent);
         }
         SettingsMarkDirty(settings->write, GetTickCount64(), 400);
+        SettingsArmSaveTimer(session);
         SettingsRefreshSession(session);
         return;
     }
@@ -9344,8 +9381,39 @@ void SettingsHandleReservedAction(MenuSession& session,
         SettingsReplayOpenAnimation(session);
         return;
     }
-    // @reset:*, @open:*, and the remaining reserved ids are handled by the
-    // settings session runtime.
+    if (key.rfind(L"@reset:", 0) == 0) {
+        SettingsApplyReset(session, key);
+        return;
+    }
+    if (key.rfind(L"@cornerRadii:", 0) == 0 &&
+        key.compare(key.size() - 6, 6, L":unset") == 0) {
+        const bool wantUnset = canonicalText == L"true";
+        settings->working.hasCornerRadii = !wantUnset;
+        if (std::find(settings->dirtyKeys.begin(), settings->dirtyKeys.end(),
+                      std::wstring(L"cornerRadii")) ==
+            settings->dirtyKeys.end()) {
+            settings->dirtyKeys.push_back(L"cornerRadii");
+        }
+        SettingsMarkDirty(settings->write, GetTickCount64(), 400);
+        SettingsArmSaveTimer(session);
+        SettingsRefreshSession(session);
+        return;
+    }
+    if (key == L"@open:ini") {
+        settings->pendingLaunch = ConfigFilePath();
+        session.done = true;
+        return;
+    }
+    if (key == L"@open:theme") {
+        settings->pendingLaunch = ThemeFilePath(settings->target.themeIndex);
+        session.done = true;
+        return;
+    }
+    if (key == L"@open:windhawk") {
+        settings->pendingLaunch = L"windhawk.exe";
+        session.done = true;
+        return;
+    }
 }
 
 void SettingsApplyControlChange(MenuSession& session, const std::wstring& key,
@@ -9369,6 +9437,7 @@ void SettingsApplyControlChange(MenuSession& session, const std::wstring& key,
         settings->dirtyKeys.push_back(entry->key);
     }
     SettingsMarkDirty(settings->write, GetTickCount64(), 400);
+    SettingsArmSaveTimer(session);
     if (!SettingsKeyIsGeometry(entry->key) || commitGeometry) {
         SettingsRefreshSession(session);
     }
@@ -9606,6 +9675,8 @@ bool SettingsHandleKey(MenuSession& session, UINT key, wchar_t ch) {
             state.focusedControl.clear();
             state.editBuffer.clear();
             state.caretVisible = false;
+            KillTimer(session.windows[session.active]->Handle(),
+                      kSettingsCaretTimerId);
             SettingsRefreshSession(session);
             return true;
         }
@@ -9613,6 +9684,8 @@ bool SettingsHandleKey(MenuSession& session, UINT key, wchar_t ch) {
             state.focusedControl.clear();
             state.editBuffer.clear();
             state.caretVisible = false;
+            KillTimer(session.windows[session.active]->Handle(),
+                      kSettingsCaretTimerId);
             SettingsRefreshSession(session);
             return true;
         }
@@ -10617,6 +10690,30 @@ LRESULT CustomMenuWindowProc(MenuWindow* window, HWND hwnd, UINT msg,
             return 0;
         }
         case WM_TIMER: {
+            if (wParam == kSettingsCaretTimerId && session->settings) {
+                if (session->active >= 0 &&
+                    session->active <
+                        static_cast<int>(session->states.size())) {
+                    MenuInputState& caretState =
+                        session->states[session->active];
+                    if (!caretState.focusedControl.empty()) {
+                        caretState.caretVisible = !caretState.caretVisible;
+                        RepaintMenuWindow(session, session->active);
+                    }
+                }
+                return 0;
+            }
+            if (wParam == kSettingsSaveTimerId && session->settings) {
+                if (SettingsWriteDue(session->settings->write,
+                                     GetTickCount64())) {
+                    SettingsPerformWrite(session->settings);
+                    SettingsRefreshSession(*session);
+                    if (!session->settings->write.pending) {
+                        KillTimer(hwnd, kSettingsSaveTimerId);
+                    }
+                }
+                return 0;
+            }
             if (wParam == kMenuSubmenuTimerId) {
                 session->submenuTimerActive = false;
                 KillTimer(hwnd, kMenuSubmenuTimerId);
@@ -10670,7 +10767,8 @@ LRESULT CustomMenuWindowProc(MenuWindow* window, HWND hwnd, UINT msg,
 }
 
 CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
-                                HWND owner, POINT pt) {
+                                HWND owner, POINT pt,
+                                SettingsSessionContext* settings = nullptr) {
     CustomMenuResult result;
     if (g_unloading.load()) {
         result.failed = true;
@@ -10685,11 +10783,16 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
     std::shared_ptr<const RulesConfig> config = g_configStore.Snapshot();
     const RulesConfig emptyConfig;
     const RulesConfig& effective = config ? *config : emptyConfig;
-    const Appearance appearance = EffectiveAppearance(effective, key.darkTheme);
+    const Appearance appearance =
+        settings ? settings->working
+                 : EffectiveAppearance(effective, key.darkTheme);
     const LayoutMetrics metrics =
         ResolveLayoutMetrics(appearance, key.dpi, key.darkTheme);
 
-    std::shared_ptr<const LayoutPanel> panel = g_layoutCache.Find(key);
+    std::shared_ptr<const LayoutPanel> panel;
+    if (!settings) {
+        panel = g_layoutCache.Find(key);
+    }
     if (!panel) {
         auto built = std::make_shared<LayoutPanel>(
             BuildLayoutPanel(model.items, metrics, &MeasureTextWidthDirectWrite));
@@ -10702,7 +10805,7 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
             bindDc->Release();
             bound = true;
         }
-        if (bound) {
+        if (bound && !settings) {
             g_layoutCache.Put(key, built);
         }
         panel = built;
@@ -10734,6 +10837,11 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
     session.model = &model;
     session.metrics = metrics;
     session.appearance = appearance;
+    session.settings = settings;
+    if (settings) {
+        settings->panel = std::const_pointer_cast<LayoutPanel>(panel);
+        settings->inputs.working = settings->working;
+    }
     session.submenuDelayMs = g_settings.submenuDelayMs;
     if (session.submenuDelayMs < 0) {
         DWORD systemDelay = 400;
@@ -10832,6 +10940,13 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
     }
     const AnimationSpec closing = ResolveAnimationSpec(appearance, false);
     RunSessionAnimation(session, closing, false);
+    if (session.settings) {
+        if (session.settings->write.pending) {
+            SettingsPerformWrite(session.settings);
+        }
+        KillTimer(root->Handle(), kSettingsCaretTimerId);
+        KillTimer(root->Handle(), kSettingsSaveTimerId);
+    }
     if (session.ownsMouseHook) {
         HHOOK hook = g_menuMouseHook.exchange(nullptr);
         if (hook) {
@@ -10847,6 +10962,17 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
         g_menuSession = nullptr;
     }
     g_activeSessions.fetch_sub(1);
+    if (session.settings && !session.settings->pendingLaunch.empty()) {
+        const std::wstring target = session.settings->pendingLaunch;
+        session.settings->pendingLaunch.clear();
+        SHELLEXECUTEINFOW info = {};
+        info.cbSize = sizeof(info);
+        info.fMask = SEE_MASK_FLAG_NO_UI;
+        info.lpVerb = L"open";
+        info.lpFile = target.c_str();
+        info.nShow = SW_SHOWNORMAL;
+        ShellExecuteExW(&info);
+    }
     if (g_settings.debugLogging) {
         Wh_Log(L"Custom menu session end (chosen=%d)",
                session.result.chosenItemId.has_value() ? 1 : 0);
@@ -10855,6 +10981,214 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
     result = session.result;
     result.handled = true;
     return result;
+}
+
+void RelayoutSession(MenuSession& session) {
+    SettingsSessionContext* settings = session.settings;
+    if (!settings || session.windows.empty() || !session.windows[0]) {
+        return;
+    }
+    auto panel = std::make_shared<LayoutPanel>(BuildLayoutPanel(
+        settings->model, session.metrics, &MeasureTextWidthDirectWrite));
+    ID2D1DeviceContext* bindDc = nullptr;
+    if (SUCCEEDED(g_renderDevice.D2DDevice()->CreateDeviceContext(
+            D2D1_DEVICE_CONTEXT_OPTIONS_NONE, &bindDc)) &&
+        bindDc) {
+        g_contentCaches.Bind(*panel, session.metrics, bindDc);
+        bindDc->Release();
+    }
+    settings->panel = panel;
+
+    // Resolve each open level's panel through the open-submenu chain.
+    std::vector<const LayoutPanel*> levelPanels(session.windows.size(), nullptr);
+    levelPanels[0] = panel.get();
+    for (size_t i = 1; i < session.windows.size(); ++i) {
+        const LayoutPanel* parent = levelPanels[i - 1];
+        const int childIndex = session.states[i - 1].openSubmenu;
+        if (!parent || childIndex < 0 ||
+            childIndex >= static_cast<int>(parent->children.size())) {
+            levelPanels[i] = parent;
+            continue;
+        }
+        levelPanels[i] = &parent->children[childIndex];
+    }
+
+    for (size_t i = 0; i < session.windows.size(); ++i) {
+        const LayoutPanel* levelPanel = levelPanels[i];
+        if (!levelPanel) {
+            continue;
+        }
+        session.windows[i]->SetPanel(levelPanel);
+        const int width = levelPanel->size.cx + 2 * session.margin;
+        const int height = levelPanel->size.cy + 2 * session.margin;
+        POINT pos = {0, 0};
+        if (i == 0) {
+            RECT windowRect = {};
+            GetWindowRect(session.windows[0]->Handle(), &windowRect);
+            pos = {windowRect.left, windowRect.top};
+        } else {
+            const LayoutPanel* parentPanel = levelPanels[i - 1];
+            int itemIndex = -1;
+            for (size_t j = 0; j < parentPanel->items.size(); ++j) {
+                if (parentPanel->items[j].submenuIndex ==
+                    session.states[i - 1].openSubmenu) {
+                    itemIndex = static_cast<int>(j);
+                    break;
+                }
+            }
+            if (itemIndex < 0) {
+                continue;
+            }
+            const LayoutItem& parentItem = parentPanel->items[itemIndex];
+            RECT parentRect = {};
+            GetWindowRect(session.windows[i - 1]->Handle(), &parentRect);
+            const int panelLeft = parentRect.left + session.margin;
+            const int panelTop = parentRect.top + session.margin;
+            const RECT itemScreen = {
+                panelLeft + parentItem.rect.left,
+                panelTop + parentItem.rect.top,
+                panelLeft + parentItem.rect.right,
+                panelTop + parentItem.rect.bottom};
+            const RECT workArea =
+                WorkAreaForPoint(POINT{itemScreen.left, itemScreen.top});
+            POINT childPos =
+                SubmenuPosition(itemScreen, levelPanel->size, workArea, 4);
+            childPos.x -= session.margin;
+            childPos.y -= session.margin;
+            pos = childPos;
+        }
+        session.windows[i]->SetBounds(pos, width, height);
+        RepaintMenuWindow(&session, static_cast<int>(i));
+    }
+}
+
+void SettingsPerformWrite(SettingsSessionContext* settings) {
+    if (!settings) {
+        return;
+    }
+    if (settings->dirtyKeys.empty()) {
+        settings->write.pending = false;
+        return;
+    }
+    const std::vector<ConfigOverride> changes = BuildChangeOverrides(
+        settings->working, settings->dirtyKeys, settings->target);
+    bool ok = false;
+    if (settings->target.kind == SettingsTargetKind::ThemeFile) {
+        const std::wstring path = ThemeFilePath(settings->target.themeIndex);
+        if (!path.empty()) {
+            std::wstring existing;
+            ReadConfigFile(path, existing);
+            const std::wstring preset =
+                GenerateThemeText(settings->target.themeIndex);
+            const std::wstring text =
+                BuildThemeTextWithChanges(preset, existing, changes);
+            ok = !text.empty() && WriteConfigFile(path, text);
+            if (ok) {
+                g_themeStore.RefreshIfChanged();
+            }
+        }
+    } else {
+        const std::wstring path = ConfigFilePath();
+        std::wstring existing;
+        ReadConfigFile(path, existing);
+        const std::wstring text =
+            BuildMenuIniTextWithChanges(existing, changes);
+        ok = !text.empty() && WriteConfigFile(path, text);
+    }
+    if (ok) {
+        settings->dirtyKeys.clear();
+        settings->statusText = L"Saved";
+    } else {
+        settings->statusText = L"Save failed";
+    }
+    SettingsWriteFinished(settings->write, ok, GetTickCount64(), 1000);
+}
+
+void SettingsApplyReset(MenuSession& session, const std::wstring& key) {
+    SettingsSessionContext* settings = session.settings;
+    if (!settings) {
+        return;
+    }
+    const bool all = key == L"@reset:all";
+    const std::wstring group = all ? std::wstring() : key.substr(7);
+    for (const ConfigSchemaEntry& entry : kAppearanceSchema) {
+        if (!all && group != entry.group) {
+            continue;
+        }
+        if (settings->target.kind == SettingsTargetKind::MenuIniBase &&
+            !entry.unset) {
+            ApplyAppearanceValue(settings->working, entry.key,
+                                 entry.defaultValue, nullptr);
+        }
+        // Inherited targets (theme/light/dark) restore the value by removing
+        // the key on write; the display keeps the current value until reopen.
+        if (std::find(settings->dirtyKeys.begin(), settings->dirtyKeys.end(),
+                      std::wstring(entry.key)) == settings->dirtyKeys.end()) {
+            settings->dirtyKeys.push_back(entry.key);
+        }
+    }
+    SettingsMarkDirty(settings->write, GetTickCount64(), 400);
+    SettingsArmSaveTimer(session);
+    SettingsRefreshSession(session);
+}
+
+void OpenSettingsMenu(HWND owner, POINT pt) {
+    if (g_unloading.load() || g_settings.menuMode != 0) {
+        return;
+    }
+    if (!g_renderDevice.IsReady() && !g_renderDevice.Initialize()) {
+        return;
+    }
+    SettingsSessionContext settings;
+    settings.themeIndex = g_settings.themeIndex;
+    settings.themeActive = settings.themeIndex > 0;
+    settings.themeName = g_settings.theme;
+    settings.darkSystemTheme = IsDarkThemeActive();
+    std::wstring iniText;
+    ReadConfigFile(ConfigFilePath(), iniText);
+    const std::wstring lower = ToLowerCopy(iniText);
+    settings.hasLight =
+        lower.find(L"[appearance.light]") != std::wstring::npos;
+    settings.hasDark = lower.find(L"[appearance.dark]") != std::wstring::npos;
+    std::shared_ptr<const RulesConfig> config = g_configStore.Snapshot();
+    const RulesConfig emptyConfig;
+    settings.working = EffectiveAppearance(config ? *config : emptyConfig,
+                                            settings.darkSystemTheme);
+    settings.target = ResolveSettingsTarget(
+        settings.themeIndex,
+        DefaultSettingsTargetKind(settings.hasLight, settings.hasDark,
+                                  settings.darkSystemTheme));
+    settings.inputs.working = settings.working;
+    settings.inputs.target = settings.target;
+    settings.inputs.themeActive = settings.themeActive;
+    settings.inputs.themeIndex = settings.themeIndex;
+    settings.inputs.themeName = settings.themeName;
+    settings.inputs.darkSystemTheme = settings.darkSystemTheme;
+    settings.inputs.hasLight = settings.hasLight;
+    settings.inputs.hasDark = settings.hasDark;
+    settings.inputs.selectedEffects =
+        settings.working.animationOpen | settings.working.animationClose;
+    settings.inputs.statusText = L"Saved";
+    settings.inputs.windhawkHints = {
+        {L"Theme", g_settings.theme},
+        {L"Menu mode", g_settings.menuMode == 0 ? L"Custom" : L"Classic"},
+        {L"Show classic menu item",
+         g_settings.showMoreOptionsItem ? L"on" : L"off"},
+        {L"Submenu delay",
+         std::to_wstring(g_settings.submenuDelayMs) + L" ms"},
+        {L"Shift bypass", g_settings.enableShiftBypass ? L"on" : L"off"},
+        {L"Debug logging", g_settings.debugLogging ? L"on" : L"off"},
+        {L"Warmup delay",
+         std::to_wstring(g_settings.warmupDelaySeconds) + L" s"},
+    };
+    settings.model = BuildSettingsTree(settings.inputs);
+
+    MenuModel model;
+    model.items = settings.model;
+    LayoutKey key;
+    key.dpi = owner ? DpiForWindow(owner) : 96;
+    key.darkTheme = settings.darkSystemTheme;
+    ShowCustomMenu(model, key, owner, pt, &settings);
 }
 
 // ---------------------------------------------------------------------------

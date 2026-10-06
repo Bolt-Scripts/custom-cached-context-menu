@@ -2806,6 +2806,18 @@ int main() {
         DeleteFileW(first.c_str());
     }
 
+    // v2.8 invoke resolution: live menu offsets win over cached ones.
+    {
+        HMENU menu = CreatePopupMenu();
+        AppendMenuW(menu, MF_STRING, 30977 + 19, L"P&roperties");
+        AppendMenuW(menu, MF_STRING, 30977 + 27, L"Restore previous &versions");
+        cmo::MenuItem target{};
+        target.label = L"Restore previous &versions";
+        const auto found = cmo::FindNativeOffsetInMenu(menu, 30977, nullptr, target);
+        CHECK(found.has_value() && *found == 27);
+        DestroyMenu(menu);
+    }
+
     // v2 cache keys include config revisions; device loss clears layouts.
     {
         cmo::RulesConfig config;

@@ -12000,6 +12000,10 @@ bool EnsureContextPopulated(PendingCapture& capture) {
 
 // Invokes a cached extension item through the live context object, preferring
 // its native offset (verb strings are rejected by the shell's own menu).
+std::optional<uint32_t> FindNativeOffsetInMenu(HMENU menu, UINT idCmdFirst,
+                                               IContextMenu* context,
+                                               const MenuItem& target);
+
 InvokeResult InvokeExtensionItem(const MenuItem& item, const InvocationContext& ctx,
                                  PendingCapture& capture) {
     if (item.flags & kModelOwnerDraw) {
@@ -12009,15 +12013,26 @@ InvokeResult InvokeExtensionItem(const MenuItem& item, const InvocationContext& 
         return InvokeResult::FallbackNative;
     }
 
-    if (item.flags & kModelHasOffset) {
+    // Resolve the item in the live menu; the cached offset is from discovery
+    // time and a shifted layout would invoke the wrong command (e.g. "Restore
+    // previous versions" hitting Properties).
+    if (auto nativeOffset = FindNativeOffsetInMenu(
+            capture.populatedMenu, capture.idCmdFirst, ctx.liveContext, item)) {
         MenuItem offsetItem = item;
         offsetItem.canonicalVerb.clear();
+        offsetItem.verbOffset = *nativeOffset;
         if (InvokeContextItem(ctx.liveContext, offsetItem, ctx)) {
             return InvokeResult::Handled;
         }
     }
-    if (InvokeContextItem(ctx.liveContext, item, ctx)) {
+    if (!item.canonicalVerb.empty() &&
+        InvokeContextItem(ctx.liveContext, item, ctx)) {
         return InvokeResult::Handled;
+    }
+    if (g_settings.debugLogging) {
+        Wh_Log(L"Extension '%s': no live match (verb '%s'); using the native "
+               L"menu",
+               item.label.c_str(), item.canonicalVerb.c_str());
     }
     return InvokeResult::FallbackNative;
 }
@@ -12208,15 +12223,13 @@ InvokeResult InvokeItem(const MenuItem& item, const InvocationContext& ctx,
             if (!EnsureContextPopulated(capture)) {
                 return InvokeResult::FallbackNative;
             }
-            if (item.flags & kModelHasOffset) {
-                MenuItem offsetItem = item;
-                offsetItem.canonicalVerb.clear();
-                if (InvokeContextItem(ctx.liveContext, offsetItem, ctx)) {
-                    return InvokeResult::Handled;
-                }
-            } else if (auto nativeOffset = FindNativeOffsetInMenu(
-                           capture.populatedMenu, capture.idCmdFirst, ctx.liveContext,
-                           item)) {
+            // The cached offset comes from the discovery-time menu layout,
+            // which can differ from the current population (dynamic items
+            // shift positions), so resolve the item in the live menu first and
+            // only fall back to the cached offset.
+            if (auto nativeOffset = FindNativeOffsetInMenu(
+                    capture.populatedMenu, capture.idCmdFirst, ctx.liveContext,
+                    item)) {
                 MenuItem offsetItem = item;
                 offsetItem.canonicalVerb.clear();
                 offsetItem.verbOffset = *nativeOffset;
@@ -12227,6 +12240,11 @@ InvokeResult InvokeItem(const MenuItem& item, const InvocationContext& ctx,
             if (!item.canonicalVerb.empty() &&
                 InvokeContextItem(ctx.liveContext, item, ctx)) {
                 return InvokeResult::Handled;
+            }
+            if (g_settings.debugLogging) {
+                Wh_Log(L"Invoke '%s': no live match (verb '%s'); using the "
+                       L"native menu",
+                       item.label.c_str(), item.canonicalVerb.c_str());
             }
             return InvokeResult::FallbackNative;
     }

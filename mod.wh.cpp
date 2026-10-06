@@ -5966,7 +5966,7 @@ void DrawSubmenuArrow(ID2D1DeviceContext* dc, const LayoutItem& item,
 void DrawPanel(ID2D1DeviceContext* dc, const LayoutPanel& panel,
                const MenuInputState& state, const LayoutMetrics& metrics,
                const Appearance& appearance, const BackdropBitmap* backdrop,
-               int margin = 0) {
+               int margin = 0, int shadowClipSide = 0) {
     if (!dc) {
         return;
     }
@@ -6001,6 +6001,44 @@ void DrawPanel(ID2D1DeviceContext* dc, const LayoutPanel& panel,
         if (BuildShadowBitmap(panel.size.cx, panel.size.cy, radii, spread, blur,
                               metrics.shadowOpacity, metrics.shadowColor, 4,
                               shadowPixels, shadowW, shadowH)) {
+            const float maskW = static_cast<float>(
+                panel.size.cx + 2 * spread + 2 * blur);
+            const float maskH = static_cast<float>(
+                panel.size.cy + 2 * spread + 2 * blur);
+            // DrawPanel runs under a translate(margin, margin) transform,
+            // so these are panel-relative coordinates.
+            const float left =
+                static_cast<float>(-spread - blur + metrics.shadowOffsetX);
+            const float top =
+                static_cast<float>(-spread - blur + metrics.shadowOffsetY);
+            if ((shadowClipSide == 1 || shadowClipSide == 2) && shadowW > 0 &&
+                shadowH > 0) {
+                // Cut the bitmap at the panel edge on the parent-facing side.
+                const float panelLeftCol =
+                    (0.0f - left) * static_cast<float>(shadowW) / maskW;
+                const float panelRightCol =
+                    (static_cast<float>(panel.size.cx) - left) *
+                    static_cast<float>(shadowW) / maskW;
+                for (int y = 0; y < shadowH; ++y) {
+                    uint32_t* row =
+                        &shadowPixels[static_cast<size_t>(y) * shadowW];
+                    if (shadowClipSide == 1) {
+                        const int end = std::clamp(
+                            static_cast<int>(std::ceil(panelLeftCol)), 0,
+                            shadowW);
+                        for (int x = 0; x < end; ++x) {
+                            row[x] = 0;
+                        }
+                    } else {
+                        const int start = std::clamp(
+                            static_cast<int>(std::floor(panelRightCol)), 0,
+                            shadowW);
+                        for (int x = start; x < shadowW; ++x) {
+                            row[x] = 0;
+                        }
+                    }
+                }
+            }
             ID2D1Bitmap* bitmap = nullptr;
             const D2D1_SIZE_U size = {static_cast<UINT32>(shadowW),
                                       static_cast<UINT32>(shadowH)};
@@ -6012,16 +6050,6 @@ void DrawPanel(ID2D1DeviceContext* dc, const LayoutPanel& panel,
                     static_cast<UINT32>(shadowW * sizeof(uint32_t)), props,
                     &bitmap)) &&
                 bitmap) {
-                const float maskW = static_cast<float>(
-                    panel.size.cx + 2 * spread + 2 * blur);
-                const float maskH = static_cast<float>(
-                    panel.size.cy + 2 * spread + 2 * blur);
-                // DrawPanel runs under a translate(margin, margin) transform,
-                // so these are panel-relative coordinates.
-                const float left =
-                    static_cast<float>(-spread - blur + metrics.shadowOffsetX);
-                const float top =
-                    static_cast<float>(-spread - blur + metrics.shadowOffsetY);
                 const D2D1_RECT_F dest = {left, top, left + maskW, top + maskH};
                 dc->DrawBitmap(bitmap, dest, 1.0f, D2D1_INTERPOLATION_MODE_LINEAR);
                 bitmap->Release();
@@ -6531,6 +6559,9 @@ struct MenuSession {
     std::vector<MenuWindow*> windows;
     std::vector<MenuInputState> states;
     std::vector<BackdropBitmap> backdrops;
+    // Per level: 0 = draw the full shadow, 1 = clip the left side, 2 = clip the
+    // right side (submenus do not cast a shadow onto their parent menu).
+    std::vector<uint8_t> shadowClipSides;
     int active = 0;
     int maxHeight = 0;
     int margin = 0;
@@ -6699,7 +6730,8 @@ void ApplyWindowAnimation(IDCompositionVisual* visual, const AnimationSpec& spec
 void RenderMenuWindow(MenuWindow* window, const LayoutPanel& panel,
                       const MenuInputState& state, const LayoutMetrics& metrics,
                       const Appearance& appearance,
-                      const BackdropBitmap* backdrop, int margin) {
+                      const BackdropBitmap* backdrop, int margin,
+                      int shadowClipSide) {
     if (!window || !window->SwapChain() || !g_renderDevice.D2DDevice()) {
         return;
     }    IDXGISurface* surface = nullptr;
@@ -6724,7 +6756,8 @@ void RenderMenuWindow(MenuWindow* window, const LayoutPanel& panel,
         dc->SetTarget(target);
         dc->BeginDraw();
         dc->Clear(nullptr);
-        DrawPanel(dc, panel, state, metrics, appearance, backdrop, margin);
+        DrawPanel(dc, panel, state, metrics, appearance, backdrop, margin,
+                  shadowClipSide);
         const HRESULT drawResult = dc->EndDraw();
         target->Release();
         if (drawResult == D2DERR_RECREATE_TARGET) {
@@ -6750,9 +6783,13 @@ void RepaintMenuWindow(MenuSession* session, int index) {
         session->backdrops[index].width > 0) {
         backdrop = &session->backdrops[index];
     }
+    const int shadowClipSide =
+        index < static_cast<int>(session->shadowClipSides.size())
+            ? session->shadowClipSides[index]
+            : 0;
     RenderMenuWindow(window, *window->Panel(), session->states[index],
                      session->metrics, session->appearance, backdrop,
-                     session->margin);
+                     session->margin, shadowClipSide);
 }
 
 void CloseSubmenusBelow(MenuSession* session, int index) {
@@ -6760,6 +6797,9 @@ void CloseSubmenusBelow(MenuSession* session, int index) {
         MenuWindow* window = session->windows.back();
         session->windows.pop_back();
         session->states.pop_back();
+        if (!session->shadowClipSides.empty()) {
+            session->shadowClipSides.pop_back();
+        }
         if (session->backdrops.size() >= session->windows.size() + 1) {
             session->backdrops.pop_back();
         }
@@ -6828,6 +6868,12 @@ void OpenSubmenu(MenuSession* session, int index, int itemIndex) {
 
     session->windows.push_back(child);
     session->states.push_back(MenuInputState{});
+    // A submenu does not cast its shadow onto the parent menu: clip the
+    // parent-facing side so the items underneath stay readable.
+    session->shadowClipSides.push_back(childPos.x + session->margin >=
+                                               itemScreen.left
+                                           ? 1
+                                           : 2);
     session->backdrops.push_back(hasBackdrop ? std::move(backdrop)
                                              : BackdropBitmap{});
     session->active = static_cast<int>(session->windows.size()) - 1;
@@ -6838,7 +6884,7 @@ void OpenSubmenu(MenuSession* session, int index, int itemIndex) {
     RenderMenuWindow(child, childPanel, session->states.back(), session->metrics,
                      session->appearance,
                      hasBackdrop ? &session->backdrops.back() : nullptr,
-                     session->margin);
+                     session->margin, session->shadowClipSides.back());
     ApplyWindowAnimation(child->CompVisual(),
                          ResolveAnimationSpec(session->appearance), true);
     child->Show();
@@ -7101,10 +7147,13 @@ LRESULT CustomMenuWindowProc(MenuWindow* window, HWND hwnd, UINT msg,
             return HTCLIENT;
         }
         case WM_MOUSEMOVE: {
-            const std::vector<RECT> rects = SessionWindowRects(session);
+            const std::vector<RECT> windowRects = SessionWindowRects(session);
+            const std::vector<RECT> panelRects = SessionPanelRects(session);
             POINT screen = clientPoint;
             ClientToScreen(hwnd, &screen);
-            const int level = SessionLevelAtPoint(rects, screen);
+            // The hovered level comes from the panels: a window's shadow
+            // margin is click-through and must not claim the cursor.
+            const int level = SessionLevelAtPoint(panelRects, screen);
             if (level < 0) {
                 if (session->active >= 0 &&
                     session->active < static_cast<int>(session->states.size())) {
@@ -7124,7 +7173,7 @@ LRESULT CustomMenuWindowProc(MenuWindow* window, HWND hwnd, UINT msg,
             const LayoutPanel& levelPanel = *session->windows[level]->Panel();
             MenuInputState& levelState = session->states[level];
             const POINT levelPoint =
-                PanelPointForWindow(rects[level], session->margin, screen);
+                PanelPointForWindow(windowRects[level], session->margin, screen);
 
             const int hit = MenuStateItemAt(levelPanel, levelState, levelPoint);
             const bool isSubmenu =
@@ -7165,24 +7214,25 @@ LRESULT CustomMenuWindowProc(MenuWindow* window, HWND hwnd, UINT msg,
         case WM_RBUTTONDOWN: {
             // Clicks inside our windows land here; outside clicks are handled
             // by the low-level hook, which replays right-clicks to the target.
-            const std::vector<RECT> rects = SessionWindowRects(session);
+            const std::vector<RECT> panelRects = SessionPanelRects(session);
             POINT screen = clientPoint;
             ClientToScreen(hwnd, &screen);
-            if (SessionLevelAtPoint(rects, screen) < 0) {
+            if (SessionLevelAtPoint(panelRects, screen) < 0) {
                 session->done = true;
             }
             return 0;
         }
         case WM_LBUTTONUP: {
-            const std::vector<RECT> rects = SessionWindowRects(session);
+            const std::vector<RECT> windowRects = SessionWindowRects(session);
+            const std::vector<RECT> panelRects = SessionPanelRects(session);
             POINT screen = clientPoint;
             ClientToScreen(hwnd, &screen);
-            const int level = SessionLevelAtPoint(rects, screen);
+            const int level = SessionLevelAtPoint(panelRects, screen);
             if (level >= 0) {
                 const LayoutPanel& levelPanel = *session->windows[level]->Panel();
                 MenuInputState& levelState = session->states[level];
                 const POINT levelPoint =
-                    PanelPointForWindow(rects[level], session->margin, screen);
+                    PanelPointForWindow(windowRects[level], session->margin, screen);
                 const int hit = MenuStateItemAt(levelPanel, levelState, levelPoint);
                 if (hit >= 0) {
                     const LayoutItem& item = levelPanel.items[hit];
@@ -7199,10 +7249,10 @@ LRESULT CustomMenuWindowProc(MenuWindow* window, HWND hwnd, UINT msg,
         case WM_RBUTTONUP:
             return 0;
         case WM_MOUSEWHEEL: {
-            const std::vector<RECT> rects = SessionWindowRects(session);
+            const std::vector<RECT> panelRects = SessionPanelRects(session);
             const POINT screen = {static_cast<short>(LOWORD(lParam)),
                                   static_cast<short>(HIWORD(lParam))};
-            const int level = SessionLevelAtPoint(rects, screen);
+            const int level = SessionLevelAtPoint(panelRects, screen);
             if (level >= 0) {
                 const LayoutPanel& levelPanel = *session->windows[level]->Panel();
                 MenuStateWheel(session->states[level], levelPanel,
@@ -7338,6 +7388,7 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
     session.margin = margin;
     session.windows.push_back(root);
     session.states.push_back(MenuInputState{});
+    session.shadowClipSides.push_back(0);
 
     BackdropBitmap backdrop;
     const RECT captureRect = {panelPos.x, panelPos.y,
@@ -7359,7 +7410,7 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
 
     root->Move(POINT{panelPos.x - margin, panelPos.y - margin});
     RenderMenuWindow(root, *panel, session.states[0], metrics, appearance,
-                     hasBackdrop ? &session.backdrops[0] : nullptr, margin);
+                     hasBackdrop ? &session.backdrops[0] : nullptr, margin, 0);
     ApplyWindowAnimation(root->CompVisual(), ResolveAnimationSpec(appearance), true);
     root->Show();
     if (!g_menuMouseHook.load()) {

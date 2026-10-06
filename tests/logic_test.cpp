@@ -2787,6 +2787,21 @@ int main() {
               L"fade, slide");
     }
 
+    // v2.8 paste helpers: unique shortcut names in the destination folder.
+    {
+        const std::wstring dir = L"cmo-test-storage\\paste-test";
+        CreateDirectoryW(L"cmo-test-storage", nullptr);
+        CreateDirectoryW(dir.c_str(), nullptr);
+        const std::wstring first = dir + L"\\a - Shortcut.lnk";
+        const std::wstring second = dir + L"\\a - Shortcut (2).lnk";
+        DeleteFileW(first.c_str());
+        DeleteFileW(second.c_str());
+        CHECK(cmo::MakeShortcutPath(dir, L"a.txt") == first);
+        CHECK(cmo::WriteConfigFile(first, L"x"));
+        CHECK(cmo::MakeShortcutPath(dir, L"a.txt") == second);
+        DeleteFileW(first.c_str());
+    }
+
     // v2 cache keys include config revisions; device loss clears layouts.
     {
         cmo::RulesConfig config;

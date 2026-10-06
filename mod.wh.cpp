@@ -11621,6 +11621,170 @@ bool ComputePasteEnabled(DWORD sequenceAtOpen, DWORD currentSequence,
     return sequenceAtOpen == currentSequence ? cachedHadData : currentHasData;
 }
 
+// Reads the clipboard's CF_HDROP file list plus the preferred drop effect
+// (DROPEFFECT_MOVE means the files were cut).
+bool ReadClipboardFiles(std::vector<std::wstring>& paths, DWORD& dropEffect) {
+    paths.clear();
+    dropEffect = DROPEFFECT_COPY;
+    if (!OpenClipboard(nullptr)) {
+        return false;
+    }
+    bool ok = false;
+    if (HANDLE handle = GetClipboardData(CF_HDROP)) {
+        HDROP drop = static_cast<HDROP>(handle);
+        const UINT count = DragQueryFileW(drop, 0xFFFFFFFF, nullptr, 0);
+        for (UINT i = 0; i < count; ++i) {
+            const UINT length = DragQueryFileW(drop, i, nullptr, 0);
+            std::vector<wchar_t> buffer(static_cast<size_t>(length) + 1);
+            if (DragQueryFileW(drop, i, buffer.data(), length + 1) == length) {
+                paths.emplace_back(buffer.data());
+            }
+        }
+        ok = !paths.empty();
+    }
+    if (HANDLE handle = GetClipboardData(
+            RegisterClipboardFormatW(L"Preferred DropEffect"))) {
+        if (const DWORD* effect =
+                static_cast<const DWORD*>(GlobalLock(handle))) {
+            dropEffect = *effect;
+            GlobalUnlock(handle);
+        }
+    }
+    CloseClipboard();
+    return ok;
+}
+
+// Unique "<name> - Shortcut.lnk" path in a directory.
+std::wstring MakeShortcutPath(const std::wstring& directory,
+                              const std::wstring& sourceName) {
+    std::wstring base = sourceName;
+    const size_t dot = base.find_last_of(L'.');
+    if (dot != std::wstring::npos && dot > 0) {
+        base.resize(dot);
+    }
+    std::wstring candidate =
+        directory + L"\\" + base + L" - Shortcut.lnk";
+    for (int i = 2;
+         i < 1000 &&
+         GetFileAttributesW(candidate.c_str()) != INVALID_FILE_ATTRIBUTES;
+         ++i) {
+        candidate = directory + L"\\" + base + L" - Shortcut (" +
+                    std::to_wstring(i) + L").lnk";
+    }
+    return candidate;
+}
+
+// Paste: copies (or moves, when the clipboard was cut) the clipboard files
+// into the view's current folder. Explorer's view adds the standard Paste item
+// itself, so the captured shell menu never contains it and the mod performs
+// the operation directly.
+bool InvokePaste(const InvocationContext& ctx) {
+    if (ctx.directory.empty()) {
+        return false;
+    }
+    std::vector<std::wstring> sources;
+    DWORD dropEffect = DROPEFFECT_COPY;
+    if (!ReadClipboardFiles(sources, dropEffect)) {
+        return false;
+    }
+
+    IFileOperation* operation = nullptr;
+    if (FAILED(CoCreateInstance(CLSID_FileOperation, nullptr, CLSCTX_ALL,
+                                IID_IFileOperation,
+                                reinterpret_cast<void**>(&operation))) ||
+        !operation) {
+        return false;
+    }
+    operation->SetOperationFlags(FOF_ALLOWUNDO | FOF_NOCONFIRMMKDIR);
+
+    IShellItem* destination = nullptr;
+    bool ok = false;
+    if (SUCCEEDED(SHCreateItemFromParsingName(ctx.directory.c_str(), nullptr,
+                                              IID_IShellItem,
+                                              reinterpret_cast<void**>(&destination))) &&
+        destination) {
+        const bool move = (dropEffect & DROPEFFECT_MOVE) != 0;
+        ok = true;
+        for (const std::wstring& source : sources) {
+            IShellItem* item = nullptr;
+            if (FAILED(SHCreateItemFromParsingName(
+                    source.c_str(), nullptr, IID_IShellItem,
+                    reinterpret_cast<void**>(&item))) ||
+                !item) {
+                ok = false;
+                continue;
+            }
+            const HRESULT hr =
+                move ? operation->MoveItem(item, destination, nullptr, nullptr)
+                     : operation->CopyItem(item, destination, nullptr, nullptr);
+            if (FAILED(hr)) {
+                ok = false;
+            }
+            item->Release();
+        }
+        destination->Release();
+    }
+    if (ok) {
+        ok = SUCCEEDED(operation->PerformOperations());
+        BOOL aborted = FALSE;
+        if (ok && SUCCEEDED(operation->GetAnyOperationsAborted(&aborted)) &&
+            aborted) {
+            ok = false;
+        }
+    }
+    operation->Release();
+    if (g_settings.debugLogging) {
+        Wh_Log(L"Paste: %zu item(s) -> %s (move=%d, ok=%d)", sources.size(),
+               ctx.directory.c_str(), (dropEffect & DROPEFFECT_MOVE) ? 1 : 0,
+               ok ? 1 : 0);
+    }
+    return ok;
+}
+
+// Paste shortcut: creates .lnk files in the current folder for the clipboard
+// files.
+bool InvokePasteShortcut(const InvocationContext& ctx) {
+    if (ctx.directory.empty()) {
+        return false;
+    }
+    std::vector<std::wstring> sources;
+    DWORD dropEffect = DROPEFFECT_COPY;
+    if (!ReadClipboardFiles(sources, dropEffect)) {
+        return false;
+    }
+    bool ok = false;
+    for (const std::wstring& source : sources) {
+        const size_t slash = source.find_last_of(L"\\/");
+        const std::wstring name =
+            source.substr(slash == std::wstring::npos ? 0 : slash + 1);
+        const std::wstring target = MakeShortcutPath(ctx.directory, name);
+
+        IShellLinkW* link = nullptr;
+        if (FAILED(CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER,
+                                    IID_IShellLinkW,
+                                    reinterpret_cast<void**>(&link))) ||
+            !link) {
+            continue;
+        }
+        link->SetPath(source.c_str());
+        IPersistFile* file = nullptr;
+        if (SUCCEEDED(link->QueryInterface(IID_IPersistFile,
+                                           reinterpret_cast<void**>(&file))) &&
+            file) {
+            if (SUCCEEDED(file->Save(target.c_str(), TRUE))) {
+                ok = true;
+            }
+            file->Release();
+        }
+        link->Release();
+    }
+    if (g_settings.debugLogging) {
+        Wh_Log(L"Paste shortcut: %zu item(s) -> %s (ok=%d)", sources.size(),
+               ctx.directory.c_str(), ok ? 1 : 0);
+    }
+    return ok;
+}
+
 // Executes a SendTo shortcut with the selected paths as arguments.
 bool InvokeSendTo(const std::wstring& target, const std::vector<std::wstring>& paths) {
     if (target.empty() || paths.empty()) {
@@ -11912,6 +12076,14 @@ InvokeResult InvokeItem(const MenuItem& item, const InvocationContext& ctx,
                                          ctx.clipboardHadData, currentHasData)) {
                     return InvokeResult::Handled;
                 }
+                // The captured shell menu never contains the view's standard
+                // Paste item, so perform it ourselves.
+                return InvokePaste(ctx) ? InvokeResult::Handled
+                                        : InvokeResult::FallbackNative;
+            }
+            if (item.canonicalVerb == L"pastelink") {
+                return InvokePasteShortcut(ctx) ? InvokeResult::Handled
+                                                : InvokeResult::FallbackNative;
             }
             // The shell only knows its own commands once the object has been
             // populated. Verb strings are rejected by the default context

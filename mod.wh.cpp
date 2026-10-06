@@ -2700,11 +2700,11 @@ std::wstring NormalizeAppearanceValue(const ConfigSchemaEntry& entry,
             break;
         }
         case SettingType::EffectList: {
+            // Keep the recognized subset so the rewrite matches what the
+            // parser actually applied (invalid tokens are dropped).
             uint32_t effects = 0;
-            if (ParseAnimationEffects(value, effects)) {
-                return AnimationEffectsText(effects);
-            }
-            break;
+            ParseAnimationEffects(value, effects);
+            return AnimationEffectsText(effects);
         }
     }
     if (entry.type == SettingType::Color) {

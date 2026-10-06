@@ -2767,6 +2767,14 @@ int main() {
         CHECK(explicitConfig.appearance.animationOpen == kAnimFade);
         CHECK(explicitConfig.appearance.animationClose == kAnimSlide);
         CHECK(kConfigSchemaVersion == 6);
+
+        // Canonical rewrites keep the recognized effect subset.
+        const ConfigSchemaEntry* openRow = SchemaFind(L"animationOpen");
+        CHECK(openRow != nullptr);
+        CHECK(NormalizeAppearanceValue(*openRow, L"scale, bogus") == L"scale");
+        CHECK(NormalizeAppearanceValue(*openRow, L"bogus") == L"none");
+        CHECK(NormalizeAppearanceValue(*openRow, L"fade, slide") ==
+              L"fade, slide");
     }
 
     // v2 cache keys include config revisions; device loss clears layouts.

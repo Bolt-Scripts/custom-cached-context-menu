@@ -4961,6 +4961,79 @@ private:
 inline ThemeStore g_themeStore;
 
 // ===========================================================================
+// [CMO:SettingsUI] Schema-driven appearance settings menu.
+// ===========================================================================
+
+enum class SettingsTargetKind : uint8_t {
+    ThemeFile,
+    MenuIniBase,
+    MenuIniLight,
+    MenuIniDark,
+};
+
+struct SettingsTarget {
+    SettingsTargetKind kind = SettingsTargetKind::MenuIniBase;
+    int themeIndex = 0;
+    std::wstring section = L"appearance";
+};
+
+// The section the user is currently seeing: the active override when it
+// exists, else the base section.
+SettingsTargetKind DefaultSettingsTargetKind(bool hasLight, bool hasDark,
+                                             bool darkSystemTheme) {
+    if (darkSystemTheme && hasDark) {
+        return SettingsTargetKind::MenuIniDark;
+    }
+    if (!darkSystemTheme && hasLight) {
+        return SettingsTargetKind::MenuIniLight;
+    }
+    return SettingsTargetKind::MenuIniBase;
+}
+
+SettingsTarget ResolveSettingsTarget(int themeIndex, SettingsTargetKind kind) {
+    SettingsTarget target;
+    if (themeIndex > 0) {
+        target.kind = SettingsTargetKind::ThemeFile;
+        target.themeIndex = themeIndex;
+        target.section = L"appearance";
+        return target;
+    }
+    target.kind = kind;
+    switch (kind) {
+        case SettingsTargetKind::MenuIniLight:
+            target.section = L"appearance.light";
+            break;
+        case SettingsTargetKind::MenuIniDark:
+            target.section = L"appearance.dark";
+            break;
+        default:
+            target.section = L"appearance";
+            break;
+    }
+    return target;
+}
+
+// Reset restores inheritance: remove the key when something can be inherited
+// (theme preset, light/dark base, derived unset defaults), else write the
+// schema default.
+ConfigOverride ResetOverrideForTarget(const SettingsTarget& target,
+                                      const ConfigSchemaEntry& entry) {
+    ConfigOverride change;
+    change.section = target.section;
+    change.key = entry.key;
+    const bool inherits = target.kind == SettingsTargetKind::ThemeFile ||
+                          target.kind == SettingsTargetKind::MenuIniLight ||
+                          target.kind == SettingsTargetKind::MenuIniDark ||
+                          entry.unset;
+    if (inherits) {
+        change.remove = true;
+        return change;
+    }
+    change.value = NormalizeAppearanceValue(entry, entry.defaultValue);
+    return change;
+}
+
+// ===========================================================================
 // [CMO:Layout] Appearance resolution, metrics, and render-ready layout.
 // ===========================================================================
 

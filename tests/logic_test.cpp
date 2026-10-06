@@ -4009,6 +4009,49 @@ int main() {
     }
 
     {
+        using cmo::SettingsTargetKind;
+        CHECK(cmo::DefaultSettingsTargetKind(false, false, false) ==
+              SettingsTargetKind::MenuIniBase);
+        CHECK(cmo::DefaultSettingsTargetKind(false, false, true) ==
+              SettingsTargetKind::MenuIniBase);
+        CHECK(cmo::DefaultSettingsTargetKind(true, true, true) ==
+              SettingsTargetKind::MenuIniDark);
+        CHECK(cmo::DefaultSettingsTargetKind(true, true, false) ==
+              SettingsTargetKind::MenuIniLight);
+        CHECK(cmo::DefaultSettingsTargetKind(true, false, true) ==
+              SettingsTargetKind::MenuIniBase);
+
+        cmo::SettingsTarget t =
+            cmo::ResolveSettingsTarget(0, SettingsTargetKind::MenuIniDark);
+        CHECK(t.kind == SettingsTargetKind::MenuIniDark);
+        CHECK_EQ(t.section, std::wstring(L"appearance.dark"));
+        t = cmo::ResolveSettingsTarget(0, SettingsTargetKind::MenuIniBase);
+        CHECK_EQ(t.section, std::wstring(L"appearance"));
+        t = cmo::ResolveSettingsTarget(4, SettingsTargetKind::MenuIniDark);
+        CHECK(t.kind == SettingsTargetKind::ThemeFile);
+        CHECK_EQ(t.themeIndex, 4);
+        CHECK_EQ(t.section, std::wstring(L"appearance"));
+
+        const cmo::ConfigSchemaEntry& itemHeight =
+            *cmo::SchemaFind(L"itemHeight");
+        cmo::ConfigOverride r = cmo::ResetOverrideForTarget(t, itemHeight);
+        CHECK(r.remove);
+        r = cmo::ResetOverrideForTarget(
+            cmo::ResolveSettingsTarget(0, SettingsTargetKind::MenuIniBase),
+            itemHeight);
+        CHECK(!r.remove);
+        CHECK_EQ(r.value, std::wstring(L"28"));
+        r = cmo::ResetOverrideForTarget(
+            cmo::ResolveSettingsTarget(0, SettingsTargetKind::MenuIniDark),
+            itemHeight);
+        CHECK(r.remove);
+        r = cmo::ResetOverrideForTarget(
+            cmo::ResolveSettingsTarget(0, SettingsTargetKind::MenuIniBase),
+            *cmo::SchemaFind(L"itemPadding"));
+        CHECK(r.remove);  // unset-capable base key restores the derived default
+    }
+
+    {
         wchar_t tempDir[MAX_PATH] = {};
         GetTempPathW(MAX_PATH, tempDir);
         const std::wstring path =

@@ -6826,7 +6826,6 @@ void OpenSubmenu(MenuSession* session, int index, int itemIndex) {
     ApplyWindowAnimation(child->CompVisual(),
                          ResolveAnimationSpec(session->appearance), true);
     child->Show();
-    SetFocus(child->Handle());
 }
 
 constexpr UINT_PTR kMenuSubmenuTimerId = 1;
@@ -6836,9 +6835,9 @@ std::vector<RECT> SessionWindowRects(const MenuSession* session);
 inline std::atomic<HHOOK> g_menuMouseHook{nullptr};
 
 // Observes clicks while a menu is open without capturing the mouse, so hover
-// feedback keeps working everywhere. Outside clicks are consumed like native
-// menus do; an outside right-click is replayed to the target so it opens its
-// menu at the new point.
+// feedback keeps working everywhere. An outside right-click is replayed to the
+// target so it opens its menu at the new point; outside left/middle clicks
+// pass through so the target still acts on them.
 LRESULT CALLBACK MenuMouseHookProc(int code, WPARAM wParam, LPARAM lParam) {
     MenuSession* session = g_menuSession;
     if (code == HC_ACTION && session && !session->done &&
@@ -6851,8 +6850,7 @@ LRESULT CALLBACK MenuMouseHookProc(int code, WPARAM wParam, LPARAM lParam) {
             if (g_settings.debugLogging) {
                 Wh_Log(L"Outside click closes the session (hook)");
             }
-            // Wake the modal loop first so the session tears down immediately
-            // even though the input event that triggered this is consumed.
+            // Wake the modal loop first so the session tears down immediately.
             PostThreadMessageW(GetCurrentThreadId(), WM_NULL, 0, 0);
             if (wParam == WM_RBUTTONDOWN) {
                 // Consume the real button-down and replay it to the window
@@ -6879,8 +6877,12 @@ LRESULT CALLBACK MenuMouseHookProc(int code, WPARAM wParam, LPARAM lParam) {
                         Wh_Log(L"Replaying the right-click down for %p", target);
                     }
                 }
+                return 1;
             }
-            return 1;
+            // Left/middle clicks pass through: the menu closes and the target
+            // still receives the click, so the clicked item is selected just
+            // like it would be without a menu.
+            return CallNextHookEx(nullptr, code, wParam, lParam);
         }
     }
     return CallNextHookEx(nullptr, code, wParam, lParam);
@@ -6895,6 +6897,87 @@ std::vector<RECT> SessionWindowRects(const MenuSession* session) {
         rects.push_back(rect);
     }
     return rects;
+}
+
+// Handles a key press for the active (deepest open) panel. The modal loop
+// calls this for keyboard messages while the owner keeps focus, so Explorer
+// never loses its active look; the window procedure calls it as a fallback if
+// a key is ever sent directly to one of our windows.
+bool HandleMenuKey(MenuSession* session, UINT vk) {
+    if (!session || session->done) {
+        return false;
+    }
+    const int level = session->active;
+    if (level < 0 || level >= static_cast<int>(session->windows.size()) ||
+        !session->windows[level]->Panel()) {
+        return false;
+    }
+    const LayoutPanel& panel = *session->windows[level]->Panel();
+    MenuInputState& state = session->states[level];
+
+    switch (vk) {
+        case VK_ESCAPE:
+            if (level > 0) {
+                CloseSubmenusBelow(session, level - 1);
+            } else {
+                session->done = true;
+            }
+            return true;
+        case VK_LEFT:
+            if (level > 0) {
+                CloseSubmenusBelow(session, level - 1);
+            } else {
+                MenuStateKey(state, panel, MenuInputEvent::KeyLeft);
+            }
+            return true;
+        case VK_RIGHT: {
+            const int activeIndex =
+                state.hoverIndex >= 0 ? state.hoverIndex : state.keyboardIndex;
+            if (activeIndex >= 0 &&
+                activeIndex < static_cast<int>(panel.items.size()) &&
+                panel.items[activeIndex].kind == ItemKind::Submenu) {
+                OpenSubmenu(session, level, activeIndex);
+            }
+            return true;
+        }
+        case VK_RETURN: {
+            const LayoutItem* activeItem = MenuStateActiveItem(panel, state);
+            if (activeItem) {
+                const int activeIndex =
+                    static_cast<int>(activeItem - &panel.items[0]);
+                if (activeItem->kind == ItemKind::Submenu) {
+                    OpenSubmenu(session, level, activeIndex);
+                } else {
+                    session->result.chosenItemId = activeItem->invocation.id;
+                    session->done = true;
+                }
+            }
+            return true;
+        }
+        default:
+            break;
+    }
+
+    MenuInputEvent event;
+    switch (vk) {
+        case VK_UP:
+            event = MenuInputEvent::KeyUp;
+            break;
+        case VK_DOWN:
+            event = MenuInputEvent::KeyDown;
+            break;
+        case VK_HOME:
+            event = MenuInputEvent::KeyHome;
+            break;
+        case VK_END:
+            event = MenuInputEvent::KeyEnd;
+            break;
+        default:
+            return false;
+    }
+    MenuStateKey(state, panel, event);
+    RepaintMenuWindow(session, level);
+    return true;
 }
 
 LRESULT CustomMenuWindowProc(MenuWindow* window, HWND hwnd, UINT msg,
@@ -7052,78 +7135,12 @@ LRESULT CustomMenuWindowProc(MenuWindow* window, HWND hwnd, UINT msg,
             }
             return 0;
         }
-        case WM_KEYDOWN: {
-            if (index != session->active) {
-                return 0;
-            }
-            switch (wParam) {
-                case VK_ESCAPE: {
-                    if (index > 0) {
-                        CloseSubmenusBelow(session, index - 1);
-                    } else {
-                        session->done = true;
-                    }
-                    return 0;
-                }
-                case VK_LEFT: {
-                    if (index > 0) {
-                        CloseSubmenusBelow(session, index - 1);
-                    } else {
-                        MenuStateKey(state, panel, MenuInputEvent::KeyLeft);
-                    }
-                    return 0;
-                }
-                case VK_RIGHT: {
-                    const int activeIndex =
-                        state.hoverIndex >= 0 ? state.hoverIndex : state.keyboardIndex;
-                    if (activeIndex >= 0 &&
-                        activeIndex < static_cast<int>(panel.items.size()) &&
-                        panel.items[activeIndex].kind == ItemKind::Submenu) {
-                        OpenSubmenu(session, index, activeIndex);
-                    }
-                    return 0;
-                }
-                case VK_RETURN: {
-                    const LayoutItem* activeItem =
-                        MenuStateActiveItem(panel, state);
-                    if (activeItem) {
-                        const int activeIndex = static_cast<int>(
-                            activeItem - &panel.items[0]);
-                        if (activeItem->kind == ItemKind::Submenu) {
-                            OpenSubmenu(session, index, activeIndex);
-                        } else {
-                            session->result.chosenItemId =
-                                activeItem->invocation.id;
-                            session->done = true;
-                        }
-                    }
-                    return 0;
-                }
-                default:
-                    break;
-            }
-
-            MenuInputEvent event;
-            switch (wParam) {
-                case VK_UP:
-                    event = MenuInputEvent::KeyUp;
-                    break;
-                case VK_DOWN:
-                    event = MenuInputEvent::KeyDown;
-                    break;
-                case VK_HOME:
-                    event = MenuInputEvent::KeyHome;
-                    break;
-                case VK_END:
-                    event = MenuInputEvent::KeyEnd;
-                    break;
-                default:
-                    return 0;
-            }
-            MenuStateKey(state, panel, event);
-            RepaintMenuWindow(session, index);
+        case WM_KEYDOWN:
+            HandleMenuKey(session, static_cast<UINT>(wParam));
             return 0;
-        }
+        case WM_MOUSEACTIVATE:
+            // Never activate on click; the owner stays active.
+            return MA_NOACTIVATE;
         case WM_ACTIVATE: {
             if (LOWORD(wParam) == WA_INACTIVE && index == 0) {
                 const HWND newActive = reinterpret_cast<HWND>(lParam);
@@ -7253,7 +7270,6 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
                      hasBackdrop ? &session.backdrops[0] : nullptr, margin);
     ApplyWindowAnimation(root->CompVisual(), ResolveAnimationSpec(appearance), true);
     root->Show();
-    SetFocus(root->Handle());
     if (!g_menuMouseHook.load()) {
         HHOOK hook = SetWindowsHookExW(WH_MOUSE_LL, MenuMouseHookProc,
                                        GetModuleHandleW(nullptr), 0);
@@ -7272,6 +7288,18 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
                 PostQuitMessage(static_cast<int>(msg.wParam));
             }
             break;
+        }
+        // The owner keeps focus while the menu is open, so keyboard messages
+        // are addressed to it. Handle them here, exactly like a native menu
+        // loop, and swallow the rest instead of stealing focus from the owner.
+        if (msg.message == WM_KEYDOWN || msg.message == WM_SYSKEYDOWN) {
+            HandleMenuKey(&session, static_cast<UINT>(msg.wParam));
+            continue;
+        }
+        if (msg.message == WM_KEYUP || msg.message == WM_SYSKEYUP ||
+            msg.message == WM_CHAR || msg.message == WM_SYSCHAR ||
+            msg.message == WM_DEADCHAR) {
+            continue;
         }
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
@@ -7293,9 +7321,6 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
         if (hook) {
             UnhookWindowsHookEx(hook);
         }
-    }
-    if (owner && IsWindow(owner)) {
-        SetFocus(owner);
     }
     for (size_t i = session.windows.size(); i > 1; --i) {
         g_menuWindowPool.Release(session.windows[i - 1]);

@@ -5305,6 +5305,10 @@ public:
     }
 
     void Destroy() {
+        for (IUnknown* object : compRefs_) {
+            object->Release();
+        }
+        compRefs_.clear();
         if (visual_) {
             visual_->Release();
             visual_ = nullptr;
@@ -5335,6 +5339,15 @@ public:
     void Present() {
         if (swapChain_) {
             swapChain_->Present(1, 0);
+        }
+    }
+
+    // Takes ownership of a composition object (effect group, animation) and
+    // releases it when the window is destroyed. DirectComposition may need
+    // these objects alive for the whole animation, not just until Commit.
+    void Adopt(IUnknown* object) {
+        if (object) {
+            compRefs_.push_back(object);
         }
     }
 
@@ -5448,6 +5461,7 @@ private:
     IDXGISwapChain1* swapChain_ = nullptr;
     IDCompositionTarget* target_ = nullptr;
     IDCompositionVisual* visual_ = nullptr;
+    std::vector<IUnknown*> compRefs_;
 };
 
 // Set while Wh_ModUninit tears the mod down. New sessions are refused and
@@ -6993,6 +7007,39 @@ struct IDCompositionEffectGroupCorrect : public IDCompositionEffect {
         IDCompositionTransform3D* transform) = 0;
 };
 
+// IDCompositionVisual3, so the visual's own Opacity property can be animated.
+// The vtable chain is Visual + Visual2 + VisualDebug + Visual3 in the Windows
+// SDK order; MinGW's dcomp.h omits the interface entirely.
+const GUID kIidIDCompositionVisual3 = {
+    0x2775f462, 0xb6c1, 0x4015, {0xb0, 0xbe, 0xb3, 0xe7, 0xd6, 0xa4, 0x97, 0x6d}};
+
+struct IDCompositionVisual3Correct : public IDCompositionVisualCorrect {
+    // IDCompositionVisual2
+    virtual HRESULT STDMETHODCALLTYPE SetOpacityMode(
+        DCOMPOSITION_OPACITY_MODE mode) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetBackFaceVisibility(
+        DCOMPOSITION_BACKFACE_VISIBILITY visibility) = 0;
+    // IDCompositionVisualDebug
+    virtual HRESULT STDMETHODCALLTYPE EnableHeatMap(
+        const D2D1_COLOR_F& color) = 0;
+    virtual HRESULT STDMETHODCALLTYPE DisableHeatMap() = 0;
+    virtual HRESULT STDMETHODCALLTYPE EnableRedrawRegions() = 0;
+    virtual HRESULT STDMETHODCALLTYPE DisableRedrawRegions() = 0;
+    // IDCompositionVisual3
+    virtual HRESULT STDMETHODCALLTYPE SetDepthMode(int mode) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetOffsetZ(float offsetZ) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetOffsetZ(
+        IDCompositionAnimation* animation) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetOpacity(float opacity) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetOpacity(
+        IDCompositionAnimation* animation) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetTransform(
+        const D2D_MATRIX_4X4_F& matrix) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetTransform(
+        IDCompositionTransform3D* transform) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetVisible(BOOL visible) = 0;
+};
+
 AnimationSpec ResolveAnimationSpec(const Appearance& appearance) {
     AnimationSpec spec;
     switch (appearance.animation) {
@@ -7014,8 +7061,9 @@ AnimationSpec ResolveAnimationSpec(const Appearance& appearance) {
     return spec;
 }
 
-bool ApplyWindowAnimation(IDCompositionVisual* visual, const AnimationSpec& spec,
+bool ApplyWindowAnimation(MenuWindow* window, const AnimationSpec& spec,
                           bool opening) {
+    IDCompositionVisual* visual = window ? window->CompVisual() : nullptr;
     if (!visual) {
         return false;
     }
@@ -7029,30 +7077,55 @@ bool ApplyWindowAnimation(IDCompositionVisual* visual, const AnimationSpec& spec
         return false;
     }
 
-    IDCompositionEffectGroup* group = nullptr;
-    const HRESULT groupHr = comp->CreateEffectGroup(&group);
-    if (FAILED(groupHr) || !group) {
-        if (g_settings.debugLogging) {
-            Wh_Log(L"Animation: CreateEffectGroup failed %08X",
-                   static_cast<unsigned>(groupHr));
-        }
-        return false;
-    }
-    auto* groupCorrect = reinterpret_cast<IDCompositionEffectGroupCorrect*>(group);
     auto* visualCorrect = reinterpret_cast<IDCompositionVisualCorrect*>(visual);
-
     const double duration = static_cast<double>(spec.durationMs) / 1000.0;
+
+    // Prefer the visual's own Opacity property (IDCompositionVisual3): the
+    // effect-group opacity is a bitmap effect and is not applied to swap-chain
+    // content on every system. Fall back to an effect group when the visual
+    // does not expose the interface.
     HRESULT opacityHr = E_FAIL;
-    IDCompositionAnimation* opacity = nullptr;
-    if (SUCCEEDED(comp->CreateAnimation(&opacity)) && opacity) {
-        opacity->AddCubic(0.0, opening ? 0.0 : 1.0,
-                          (opening ? 1.0 : -1.0) / duration, 0.0, 0.0);
-        opacity->End(duration, opening ? 1.0 : 0.0);
-        opacityHr = groupCorrect->SetOpacity(opacity);
-        opacity->Release();
+    HRESULT groupHr = S_FALSE;
+    HRESULT effectHr = S_FALSE;
+    bool usedVisual3 = false;
+    IDCompositionVisual3Correct* visual3 = nullptr;
+    if (SUCCEEDED(visual->QueryInterface(
+            kIidIDCompositionVisual3, reinterpret_cast<void**>(&visual3))) &&
+        visual3) {
+        IDCompositionAnimation* opacity = nullptr;
+        if (SUCCEEDED(comp->CreateAnimation(&opacity)) && opacity) {
+            opacity->AddCubic(0.0, opening ? 0.0 : 1.0,
+                              (opening ? 1.0 : -1.0) / duration, 0.0, 0.0);
+            opacity->End(duration, opening ? 1.0 : 0.0);
+            opacityHr = visual3->SetOpacity(opacity);
+            window->Adopt(opacity);
+            usedVisual3 = true;
+        }
+        visual3->Release();
     }
-    const HRESULT effectHr = visualCorrect->SetEffect(group);
-    group->Release();
+    if (!usedVisual3) {
+        IDCompositionEffectGroup* group = nullptr;
+        groupHr = comp->CreateEffectGroup(&group);
+        if (FAILED(groupHr) || !group) {
+            if (g_settings.debugLogging) {
+                Wh_Log(L"Animation: CreateEffectGroup failed %08X",
+                       static_cast<unsigned>(groupHr));
+            }
+            return false;
+        }
+        auto* groupCorrect =
+            reinterpret_cast<IDCompositionEffectGroupCorrect*>(group);
+        IDCompositionAnimation* opacity = nullptr;
+        if (SUCCEEDED(comp->CreateAnimation(&opacity)) && opacity) {
+            opacity->AddCubic(0.0, opening ? 0.0 : 1.0,
+                              (opening ? 1.0 : -1.0) / duration, 0.0, 0.0);
+            opacity->End(duration, opening ? 1.0 : 0.0);
+            opacityHr = groupCorrect->SetOpacity(opacity);
+            window->Adopt(opacity);
+        }
+        effectHr = visualCorrect->SetEffect(group);
+        window->Adopt(group);
+    }
 
     HRESULT offsetHr = S_FALSE;
     if (spec.slide) {
@@ -7062,23 +7135,23 @@ bool ApplyWindowAnimation(IDCompositionVisual* visual, const AnimationSpec& spec
                             (opening ? -12.0 : 12.0) / duration, 0.0, 0.0);
             slide->End(duration, opening ? 0.0 : 12.0);
             offsetHr = visualCorrect->SetOffsetX(slide);
-            slide->Release();
+            window->Adopt(slide);
         }
     }
-    comp->Commit();
+    const HRESULT commitHr = comp->Commit();
     if (g_settings.debugLogging) {
-        Wh_Log(L"Animation: opening=%d slide=%d duration=%d group=%08X "
-               L"opacity=%08X effect=%08X offset=%08X",
+        Wh_Log(L"Animation: opening=%d slide=%d duration=%d v3=%d group=%08X "
+               L"opacity=%08X effect=%08X offset=%08X commit=%08X",
                opening ? 1 : 0, spec.slide ? 1 : 0, spec.durationMs,
-               static_cast<unsigned>(groupHr),
+               usedVisual3 ? 1 : 0, static_cast<unsigned>(groupHr),
                static_cast<unsigned>(opacityHr),
                static_cast<unsigned>(effectHr),
-               static_cast<unsigned>(offsetHr));
+               static_cast<unsigned>(offsetHr),
+               static_cast<unsigned>(commitHr));
     }
-    // Only report an applied animation when a sub-animation actually ran:
-    // SetEffect alone (with a failed opacity/offset) must not add a close wait.
-    return SUCCEEDED(effectHr) &&
-           (SUCCEEDED(opacityHr) || SUCCEEDED(offsetHr));
+    // Only report an applied animation when a sub-animation actually ran, so
+    // a failed animation never adds a close wait.
+    return opacityHr == S_OK || offsetHr == S_OK;
 }
 
 void RenderMenuWindow(MenuWindow* window, const LayoutPanel& panel,
@@ -7157,8 +7230,8 @@ void CloseSubmenusBelow(MenuSession* session, int index) {
         if (session->backdrops.size() >= session->windows.size() + 1) {
             session->backdrops.pop_back();
         }
-        ApplyWindowAnimation(window->CompVisual(),
-                             ResolveAnimationSpec(session->appearance), false);
+        ApplyWindowAnimation(window, ResolveAnimationSpec(session->appearance),
+                             false);
         g_menuWindowPool.Release(window);
     }
     session->active = index;
@@ -7240,8 +7313,7 @@ void OpenSubmenu(MenuSession* session, int index, int itemIndex) {
                      hasBackdrop ? &session->backdrops.back() : nullptr,
                      session->margin, session->shadowClipSides.back());
     child->Show();
-    ApplyWindowAnimation(child->CompVisual(),
-                         ResolveAnimationSpec(session->appearance), true);
+    ApplyWindowAnimation(child, ResolveAnimationSpec(session->appearance), true);
 }
 
 constexpr UINT_PTR kMenuSubmenuTimerId = 1;
@@ -7766,7 +7838,7 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
     RenderMenuWindow(root, *panel, session.states[0], metrics, appearance,
                      hasBackdrop ? &session.backdrops[0] : nullptr, margin, 0);
     root->Show();
-    ApplyWindowAnimation(root->CompVisual(), ResolveAnimationSpec(appearance), true);
+    ApplyWindowAnimation(root, ResolveAnimationSpec(appearance), true);
     if (!g_menuMouseHook.load()) {
         HHOOK hook = SetWindowsHookExW(WH_MOUSE_LL, MenuMouseHookProc,
                                        GetModuleHandleW(nullptr), 0);
@@ -7809,8 +7881,7 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
     const AnimationSpec closing = ResolveAnimationSpec(appearance);
     bool closingAnimated = false;
     for (MenuWindow* window : session.windows) {
-        closingAnimated |=
-            ApplyWindowAnimation(window->CompVisual(), closing, false);
+        closingAnimated |= ApplyWindowAnimation(window, closing, false);
     }
     if (closingAnimated) {
         Sleep(static_cast<DWORD>(closing.durationMs));

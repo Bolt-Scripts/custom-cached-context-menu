@@ -49,6 +49,25 @@ untouched native menu, including extended verbs.
 | Keep in the main menu | empty | Comma-separated labels or verbs that stay in the main menu instead of moving into the submenu. |
 | More options submenu label | `More options` | Label of that submenu. |
 | Windows items to move | Share, Add to Favorites, … | Comma-separated labels or verbs of Windows items to move into the submenu. |
+| Settings hotkey | empty | Optional global hotkey that opens the settings menu (for example `Ctrl+Alt+M`). Empty disables it. |
+
+### The settings menu
+
+Every custom menu's **More options** submenu ends with **Menu settings…** (or,
+when that submenu is absent, the main menu does), and the optional hotkey above
+opens the same session. The settings menu is a normal menu rendered by the mod,
+so it inherits the theme, animations, and blur.
+
+It edits the **appearance only** — the keys in `[appearance]` — with live
+preview: colors, layout, shadows, typography, and animations change as you
+edit. Sliders apply spacing changes when you release them, and every slider has
+a typed field for exact values; colors use an HSV picker with hex and R/G/B/A
+fields. Edits are written back canonically: to the active theme file when a
+theme is selected, otherwise to the effective `menu.ini` section (Base / Light
+/ Dark, selectable at the top). Saves are debounced and atomic, and the status
+row shows `Saved` or `Save failed`. Behavior settings (theme selection, menu
+mode, logging, delays, and so on) are Windhawk settings the mod cannot write;
+they appear in the menu as read-only hints.
 
 ## Menu configuration (`menu.ini`)
 

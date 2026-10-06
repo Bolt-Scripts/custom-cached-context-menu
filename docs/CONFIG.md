@@ -230,6 +230,25 @@ Solarized Dark, Gruvbox Dark, One Dark, Cyberpunk, Synthwave, Terminal Green,
 Amber CRT, Tokyo Night, AMOLED Black, High Contrast. Windows 11 Dark/Light are
 fixed palettes and do not follow the system theme.
 
+## Settings menu
+
+The custom menu's advanced submenu ends with **Menu settings…**, and an
+optional global hotkey (`settingsHotkey` in the Windhawk settings) opens the
+same session. It edits the appearance live and writes through the same
+canonical, atomic path as this file:
+
+- With a theme selected, edits go to that theme file (the bundled preset fills
+  any key the file does not set).
+- Otherwise edits go to the effective `menu.ini` section; the **Target** row
+  switches between Base, Light, and Dark. The first edit in a missing section
+  creates it with just that key, so the rest still inherits from
+  `[appearance]`.
+- **Reset** restores inheritance: keys are removed when something can be
+  inherited (theme preset, light/dark base, derived defaults), otherwise the
+  schema default is written.
+- Canonical rewrites regenerate the `[appearance]` comments, so hand-written
+  comments in that section are replaced; structured sections are preserved.
+
 ## Predicates
 
 `label:` (glob with `*`; `&` accelerators and trailing ellipses ignored),

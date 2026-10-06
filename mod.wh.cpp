@@ -385,6 +385,33 @@ enum ModelFlags : uint32_t {
     kModelThirdParty = 1u << 9,
 };
 
+// Settings-UI controls attached to menu items. ControlKind::None is an
+// ordinary menu item.
+enum class ControlKind : uint8_t {
+    None,
+    Toggle,
+    IntSlider,
+    Enum,
+    ColorSwatch,
+    TextField,
+    ColorArea,
+    HueStrip,
+    AlphaStrip,
+    Action,
+    Info,
+};
+
+struct ControlSpec {
+    ControlKind kind = ControlKind::None;
+    std::wstring key;  // schema key, or a reserved @-id
+    int minValue = 0;
+    int maxValue = 0;
+    int step = 1;
+    int coarseStep = 10;
+    bool unsetCapable = false;
+    std::vector<std::wstring> options;  // enums
+};
+
 struct MenuItem {
     uint32_t id = 0;
     ItemKind kind = ItemKind::Command;
@@ -412,6 +439,12 @@ struct MenuItem {
     int32_t iconSize = -1;
     // 16x16 BGRA icon captured from the shell's own menu bitmap.
     std::vector<uint8_t> iconPixels;
+    // Settings-UI control state (ControlKind::None for ordinary items).
+    ControlSpec control;
+    std::wstring controlText;
+    int controlValue = 0;
+    uint32_t controlColor = 0;
+    int controlHeight = -1;  // row height override, -1 = metrics.itemHeight
     std::vector<MenuItem> children;
 };
 
@@ -5270,6 +5303,505 @@ uint32_t ToggleAnimationEffect(uint32_t effects, uint32_t effect) {
         return 0;
     }
     return effects ^ effect;
+}
+
+// --- Settings model mapping ------------------------------------------------
+
+uint32_t AppearanceColorValue(const Appearance& appearance,
+                              const std::wstring& key) {
+    const std::wstring k = ToLowerCopy(key);
+    if (k == L"background") return appearance.background;
+    if (k == L"border") return appearance.border;
+    if (k == L"separator") return appearance.separator;
+    if (k == L"hoverbackground") return appearance.hoverBackground;
+    if (k == L"pressedbackground") return appearance.pressedBackground;
+    if (k == L"textcolor") return appearance.textColor;
+    if (k == L"disabledtextcolor") return appearance.disabledTextColor;
+    if (k == L"submenuarrow") return appearance.submenuArrow;
+    if (k == L"shadowcolor") return appearance.shadowColor;
+    if (k == L"markercolor") return appearance.markerColor;
+    if (k == L"headercolor") return appearance.headerColor;
+    return 0;
+}
+
+int AppearanceIntValue(const Appearance& appearance, const std::wstring& key) {
+    const std::wstring k = ToLowerCopy(key);
+    if (k == L"blurstrength") return appearance.blurStrength;
+    if (k == L"cornerradius") return appearance.cornerRadius;
+    if (k == L"borderwidth") return appearance.borderWidth;
+    if (k == L"shadowsize") return appearance.shadowSize;
+    if (k == L"shadowoffsetx") return appearance.shadowOffsetX;
+    if (k == L"shadowoffsety") return appearance.shadowOffsetY;
+    if (k == L"itemheight") return appearance.itemHeight;
+    if (k == L"iconsize") return appearance.iconSize;
+    if (k == L"padding") return appearance.padding;
+    if (k == L"animationduration") return appearance.animationDuration;
+    if (k == L"animationcloseduration") {
+        return appearance.animationCloseDuration;
+    }
+    if (k == L"animationframems") return appearance.animationFrameMs;
+    if (k == L"slideoffsetx") return appearance.slideOffsetX;
+    if (k == L"slideoffsety") return appearance.slideOffsetY;
+    if (k == L"scalefrom") return appearance.scaleFrom;
+    if (k == L"verticalpadding") return appearance.verticalPadding;
+    if (k == L"minwidth") return appearance.minWidth;
+    if (k == L"maxwidth") return appearance.maxWidth;
+    if (k == L"itempadding") return appearance.itemPadding;
+    if (k == L"separatorspacing") return appearance.separatorSpacing;
+    if (k == L"markerwidth") return appearance.markerWidth;
+    if (k == L"shadowopacity") return appearance.shadowOpacity;
+    if (k == L"shadowblur") return appearance.shadowBlur;
+    return 0;
+}
+
+std::wstring FormatColorHex(uint32_t argb) {
+    wchar_t buffer[16] = {};
+    if ((argb >> 24) == 0xFF) {
+        swprintf(buffer, 16, L"#%02X%02X%02X", (argb >> 16) & 0xFF,
+                 (argb >> 8) & 0xFF, argb & 0xFF);
+    } else {
+        swprintf(buffer, 16, L"#%02X%02X%02X%02X", (argb >> 24) & 0xFF,
+                 (argb >> 16) & 0xFF, (argb >> 8) & 0xFF, argb & 0xFF);
+    }
+    return buffer;
+}
+
+ControlSpec MakeControlSpec(const ConfigSchemaEntry& entry) {
+    ControlSpec spec;
+    spec.key = entry.key;
+    spec.unsetCapable = entry.unset;
+    if (ToLowerCopy(entry.key) == L"animation") {
+        spec.kind = ControlKind::Info;
+        return spec;
+    }
+    switch (entry.type) {
+        case SettingType::Bool:
+            spec.kind = ControlKind::Toggle;
+            break;
+        case SettingType::Int:
+            spec.kind = ControlKind::IntSlider;
+            spec.minValue = entry.minValue;
+            spec.maxValue = entry.maxValue;
+            spec.step = 1;
+            spec.coarseStep =
+                (entry.maxValue - entry.minValue) > 512 ? 10 : 1;
+            break;
+        case SettingType::Enum: {
+            spec.kind = ControlKind::Enum;
+            const std::wstring valid(entry.validValues);
+            size_t start = 0;
+            while (start <= valid.size()) {
+                const size_t bar = valid.find(L'|', start);
+                spec.options.push_back(valid.substr(
+                    start, bar == std::wstring::npos ? std::wstring::npos
+                                                     : bar - start));
+                if (bar == std::wstring::npos) {
+                    break;
+                }
+                start = bar + 1;
+            }
+            break;
+        }
+        case SettingType::Color:
+            spec.kind = ControlKind::ColorSwatch;
+            break;
+        case SettingType::Font:
+        case SettingType::IntList:
+        case SettingType::EffectList:
+            spec.kind = ControlKind::Info;
+            break;
+    }
+    return spec;
+}
+
+struct SettingsModelInputs {
+    Appearance working;
+    SettingsTarget target;
+    bool themeActive = false;
+    int themeIndex = 0;
+    std::wstring themeName;
+    bool darkSystemTheme = false;
+    bool hasLight = false;
+    bool hasDark = false;
+    uint32_t selectedEffects = 0;
+    std::wstring statusText;
+    std::vector<std::pair<std::wstring, std::wstring>> windhawkHints;
+};
+
+MenuItem MakeSettingsItem(ItemKind kind, std::wstring label) {
+    MenuItem item;
+    item.kind = kind;
+    item.action = ActionKind::Builtin;
+    item.builtinAction = BuiltinAction::None;
+    item.label = std::move(label);
+    return item;
+}
+
+struct SettingsEffectName {
+    const wchar_t* name;
+    uint32_t bit;
+};
+
+const SettingsEffectName kSettingsEffectNames[] = {
+    {L"none", 0},           {L"fade", kAnimFade},
+    {L"slide", kAnimSlide}, {L"scale", kAnimScale},
+    {L"dissolve", kAnimDissolve}, {L"crt", kAnimCrt},
+    {L"unfold", kAnimUnfold},
+};
+
+MenuItem MakeIntSliderRow(const wchar_t* label, std::wstring key, int minValue,
+                          int maxValue, int value) {
+    MenuItem item = MakeSettingsItem(ItemKind::Command, label);
+    item.control.kind = ControlKind::IntSlider;
+    item.control.key = std::move(key);
+    item.control.minValue = minValue;
+    item.control.maxValue = maxValue;
+    item.controlValue = value;
+    item.controlText = std::to_wstring(value);
+    return item;
+}
+
+MenuItem BuildSettingsRow(const Appearance& working,
+                          const ConfigSchemaEntry& entry) {
+    const std::wstring key = ToLowerCopy(entry.key);
+    if (key == L"animation") {
+        MenuItem row = MakeSettingsItem(ItemKind::Command, entry.key);
+        row.control.kind = ControlKind::Info;
+        row.control.key = entry.key;
+        row.controlText = L"deprecated \u2014 use animationOpen/Close";
+        return row;
+    }
+    const ControlSpec spec = MakeControlSpec(entry);
+    if (spec.kind == ControlKind::ColorSwatch) {
+        MenuItem row = MakeSettingsItem(ItemKind::Submenu, entry.key);
+        row.action = ActionKind::Submenu;
+        row.control = spec;
+        row.controlColor = AppearanceColorValue(working, entry.key);
+        std::wstring text;
+        if (AppearanceValueText(working, entry, text)) {
+            row.controlText = text;
+        }
+        auto colorChild = [&](const wchar_t* id, const wchar_t* label,
+                              ControlKind kind, int height) {
+            MenuItem child = MakeSettingsItem(ItemKind::Command, label);
+            child.control.kind = kind;
+            child.control.key = id;
+            child.controlColor = row.controlColor;
+            child.controlHeight = height;
+            return child;
+        };
+        row.children.push_back(colorChild(L"@color:area", L"Saturation / value",
+                                          ControlKind::ColorArea, 120));
+        row.children.push_back(
+            colorChild(L"@color:hue", L"Hue", ControlKind::HueStrip, 24));
+        row.children.push_back(
+            colorChild(L"@color:alpha", L"Alpha", ControlKind::AlphaStrip, 24));
+        MenuItem hex = MakeSettingsItem(ItemKind::Command, L"Hex");
+        hex.control.kind = ControlKind::TextField;
+        hex.control.key = L"@color:hex";
+        hex.controlText = FormatColorHex(row.controlColor);
+        row.children.push_back(std::move(hex));
+        const wchar_t* channelIds[] = {L"@color:r", L"@color:g", L"@color:b",
+                                       L"@color:a"};
+        const wchar_t* channelLabels[] = {L"Red", L"Green", L"Blue",
+                                          L"Alpha value"};
+        const int channels[] = {
+            static_cast<int>((row.controlColor >> 16) & 0xFF),
+            static_cast<int>((row.controlColor >> 8) & 0xFF),
+            static_cast<int>(row.controlColor & 0xFF),
+            static_cast<int>((row.controlColor >> 24) & 0xFF)};
+        for (int i = 0; i < 4; ++i) {
+            MenuItem channel = MakeIntSliderRow(channelLabels[i], channelIds[i],
+                                                0, 255, channels[i]);
+            row.children.push_back(std::move(channel));
+        }
+        if (spec.unsetCapable) {
+            MenuItem unset =
+                MakeSettingsItem(ItemKind::Command, L"Default (unset)");
+            unset.control.kind = ControlKind::Toggle;
+            unset.control.key = L"@color:unset";
+            const bool has = key == L"markercolor" ? working.hasMarkerColor
+                                                   : working.hasHeaderColor;
+            unset.controlValue = has ? 0 : 1;
+            unset.controlText = has ? L"off" : L"on";
+            row.children.push_back(std::move(unset));
+        }
+        return row;
+    }
+    if (spec.kind == ControlKind::Enum) {
+        MenuItem row = MakeSettingsItem(ItemKind::Submenu, entry.key);
+        row.action = ActionKind::Submenu;
+        row.control = spec;
+        std::wstring current;
+        AppearanceValueText(working, entry, current);
+        row.controlText = current;
+        for (const std::wstring& option : spec.options) {
+            MenuItem child = MakeSettingsItem(ItemKind::Command, option);
+            child.control.kind = ControlKind::Action;
+            child.control.key =
+                L"@enum:" + std::wstring(entry.key) + L":" + option;
+            if (_wcsicmp(option.c_str(), current.c_str()) == 0) {
+                child.flags |= kModelChecked;
+            }
+            row.children.push_back(std::move(child));
+        }
+        return row;
+    }
+    if (entry.type == SettingType::EffectList) {
+        MenuItem row = MakeSettingsItem(ItemKind::Submenu, entry.key);
+        row.action = ActionKind::Submenu;
+        row.control = spec;
+        const bool opening = key == L"animationopen";
+        const uint32_t effects =
+            opening ? working.animationOpen : working.animationClose;
+        row.controlText = AnimationEffectsText(effects);
+        for (const SettingsEffectName& effect : kSettingsEffectNames) {
+            MenuItem child = MakeSettingsItem(ItemKind::Command, effect.name);
+            child.control.kind = ControlKind::Action;
+            child.control.key =
+                std::wstring(opening ? L"@effect:open:" : L"@effect:close:") +
+                effect.name;
+            const bool checked =
+                effect.bit == 0 ? effects == 0 : (effects & effect.bit) != 0;
+            if (checked) {
+                child.flags |= kModelChecked;
+            }
+            row.children.push_back(std::move(child));
+        }
+        return row;
+    }
+    if (entry.type == SettingType::IntList) {
+        MenuItem row = MakeSettingsItem(ItemKind::Submenu, entry.key);
+        row.action = ActionKind::Submenu;
+        row.control = spec;
+        CornerRadii radii = working.cornerRadii;
+        if (!working.hasCornerRadii) {
+            ParseCornerRadii(entry.defaultValue, radii);
+        }
+        row.controlText = working.hasCornerRadii ? L"custom" : L"default";
+        const wchar_t* ids[] = {L"tl", L"tr", L"br", L"bl"};
+        const wchar_t* labels[] = {L"Top left", L"Top right", L"Bottom right",
+                                   L"Bottom left"};
+        const int values[] = {radii.topLeft, radii.topRight, radii.bottomRight,
+                              radii.bottomLeft};
+        for (int i = 0; i < 4; ++i) {
+            MenuItem child = MakeIntSliderRow(
+                labels[i], std::wstring(L"@cornerRadii:") + ids[i], 0, 256,
+                values[i]);
+            row.children.push_back(std::move(child));
+        }
+        MenuItem unset = MakeSettingsItem(
+            ItemKind::Command, L"Use cornerRadius (unset)");
+        unset.control.kind = ControlKind::Toggle;
+        unset.control.key = L"@cornerRadii:unset";
+        unset.controlValue = working.hasCornerRadii ? 0 : 1;
+        unset.controlText = working.hasCornerRadii ? L"off" : L"on";
+        row.children.push_back(std::move(unset));
+        return row;
+    }
+    if (entry.type == SettingType::Font) {
+        MenuItem row = MakeSettingsItem(ItemKind::Submenu, entry.key);
+        row.action = ActionKind::Submenu;
+        row.control = spec;
+        row.controlText =
+            working.fontFace + L", " + FormatFontSize(working.fontSize);
+        MenuItem face = MakeSettingsItem(ItemKind::Command, L"Face");
+        face.control.kind = ControlKind::Info;
+        face.control.key = L"@font:face";
+        face.controlText = working.fontFace;
+        row.children.push_back(std::move(face));
+        MenuItem size = MakeIntSliderRow(
+            L"Size", L"@font:size", 6, 72,
+            static_cast<int>(std::lround(working.fontSize)));
+        row.children.push_back(std::move(size));
+        return row;
+    }
+    MenuItem row = MakeSettingsItem(ItemKind::Command, entry.key);
+    row.control = spec;
+    if (spec.kind == ControlKind::Toggle) {
+        bool value = false;
+        if (key == L"blur") {
+            value = working.blur;
+        } else if (key == L"shadow") {
+            value = working.shadow;
+        } else if (key == L"animatesubmenus") {
+            value = working.animateSubmenus;
+        }
+        row.controlValue = value ? 1 : 0;
+        row.controlText = value ? L"on" : L"off";
+    } else if (spec.kind == ControlKind::IntSlider) {
+        row.controlValue = AppearanceIntValue(working, entry.key);
+        row.controlText = std::to_wstring(row.controlValue);
+    }
+    return row;
+}
+
+std::vector<MenuItem> BuildSettingsTree(const SettingsModelInputs& inputs) {
+    const Appearance& working = inputs.working;
+    std::vector<MenuItem> root;
+
+    root.push_back(MakeSettingsItem(ItemKind::Header, L"Menu settings"));
+
+    MenuItem status = MakeSettingsItem(ItemKind::Command, L"Status");
+    status.control.kind = ControlKind::Info;
+    status.control.key = L"@status";
+    status.controlText =
+        inputs.statusText.empty() ? L"Saved" : inputs.statusText;
+    root.push_back(std::move(status));
+
+    if (inputs.themeActive) {
+        MenuItem theme = MakeSettingsItem(ItemKind::Command, L"Theme");
+        theme.control.kind = ControlKind::Info;
+        theme.control.key = L"@target";
+        theme.controlText =
+            inputs.themeName + L" \u2014 editing theme file";
+        root.push_back(std::move(theme));
+    } else {
+        MenuItem target = MakeSettingsItem(ItemKind::Submenu, L"Target");
+        target.action = ActionKind::Submenu;
+        target.control.kind = ControlKind::Info;
+        target.control.key = L"@target";
+        struct TargetChoice {
+            const wchar_t* id;
+            const wchar_t* label;
+            SettingsTargetKind kind;
+        };
+        const TargetChoice choices[] = {
+            {L"@target:base", L"Base appearance",
+             SettingsTargetKind::MenuIniBase},
+            {L"@target:light", L"Light appearance",
+             SettingsTargetKind::MenuIniLight},
+            {L"@target:dark", L"Dark appearance",
+             SettingsTargetKind::MenuIniDark},
+        };
+        for (const TargetChoice& choice : choices) {
+            MenuItem child = MakeSettingsItem(ItemKind::Command, choice.label);
+            child.control.kind = ControlKind::Action;
+            child.control.key = choice.id;
+            if (choice.kind == inputs.target.kind) {
+                child.flags |= kModelChecked;
+                target.controlText = choice.label;
+            }
+            target.children.push_back(std::move(child));
+        }
+        root.push_back(std::move(target));
+    }
+
+    // Groups in the schema's first-occurrence order.
+    std::vector<std::wstring> groups;
+    for (const ConfigSchemaEntry& entry : kAppearanceSchema) {
+        const std::wstring group = entry.group;
+        bool found = false;
+        for (const std::wstring& existing : groups) {
+            if (existing == group) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            groups.push_back(group);
+        }
+    }
+
+    for (const std::wstring& group : groups) {
+        MenuItem groupItem = MakeSettingsItem(ItemKind::Submenu, group);
+        groupItem.action = ActionKind::Submenu;
+        for (const ConfigSchemaEntry& entry : kAppearanceSchema) {
+            if (group != entry.group) {
+                continue;
+            }
+            const std::wstring key = ToLowerCopy(entry.key);
+            if (key == L"slideoffsetx" || key == L"slideoffsety" ||
+                key == L"scalefrom") {
+                continue;  // conditional pages below
+            }
+            groupItem.children.push_back(BuildSettingsRow(working, entry));
+        }
+        if (group == L"Animation") {
+            if ((inputs.selectedEffects & kAnimSlide) != 0) {
+                MenuItem page = MakeSettingsItem(ItemKind::Submenu,
+                                                 L"Slide options\u2026");
+                page.action = ActionKind::Submenu;
+                page.control.kind = ControlKind::Info;
+                page.control.key = L"@page:slide";
+                page.children.push_back(
+                    BuildSettingsRow(working, *SchemaFind(L"slideOffsetX")));
+                page.children.push_back(
+                    BuildSettingsRow(working, *SchemaFind(L"slideOffsetY")));
+                groupItem.children.push_back(std::move(page));
+            }
+            if ((inputs.selectedEffects &
+                 (kAnimScale | kAnimCrt | kAnimUnfold)) != 0) {
+                MenuItem page = MakeSettingsItem(ItemKind::Submenu,
+                                                 L"Scale options\u2026");
+                page.action = ActionKind::Submenu;
+                page.control.kind = ControlKind::Info;
+                page.control.key = L"@page:scale";
+                page.children.push_back(
+                    BuildSettingsRow(working, *SchemaFind(L"scaleFrom")));
+                groupItem.children.push_back(std::move(page));
+            }
+            MenuItem replay =
+                MakeSettingsItem(ItemKind::Command, L"Replay open animation");
+            replay.control.kind = ControlKind::Action;
+            replay.control.key = L"@preview-open";
+            groupItem.children.push_back(std::move(replay));
+        }
+        MenuItem reset =
+            MakeSettingsItem(ItemKind::Command, L"Reset " + group + L"\u2026");
+        reset.control.kind = ControlKind::Action;
+        reset.control.key = L"@reset:" + group;
+        groupItem.children.push_back(std::move(reset));
+        root.push_back(std::move(groupItem));
+    }
+
+    MenuItem windhawk =
+        MakeSettingsItem(ItemKind::Submenu, L"Windhawk settings\u2026");
+    windhawk.action = ActionKind::Submenu;
+    for (const std::pair<std::wstring, std::wstring>& hint :
+         inputs.windhawkHints) {
+        MenuItem row = MakeSettingsItem(ItemKind::Command, hint.first);
+        row.control.kind = ControlKind::Info;
+        row.control.key = L"@hint:" + hint.first;
+        row.controlText = hint.second;
+        windhawk.children.push_back(std::move(row));
+    }
+    MenuItem openWindhawk = MakeSettingsItem(ItemKind::Command, L"Open Windhawk");
+    openWindhawk.control.kind = ControlKind::Action;
+    openWindhawk.control.key = L"@open:windhawk";
+    windhawk.children.push_back(std::move(openWindhawk));
+    root.push_back(std::move(windhawk));
+
+    MenuItem resetAll =
+        MakeSettingsItem(ItemKind::Submenu, L"Reset all appearance\u2026");
+    resetAll.action = ActionKind::Submenu;
+    MenuItem resetAllAction =
+        MakeSettingsItem(ItemKind::Command, L"Reset all appearance");
+    resetAllAction.control.kind = ControlKind::Action;
+    resetAllAction.control.key = L"@reset:all";
+    resetAll.children.push_back(std::move(resetAllAction));
+    root.push_back(std::move(resetAll));
+
+    MenuItem openIni = MakeSettingsItem(ItemKind::Command, L"Open menu.ini");
+    openIni.control.kind = ControlKind::Action;
+    openIni.control.key = L"@open:ini";
+    root.push_back(std::move(openIni));
+
+    if (inputs.themeActive) {
+        MenuItem openTheme =
+            MakeSettingsItem(ItemKind::Command, L"Open theme file");
+        openTheme.control.kind = ControlKind::Action;
+        openTheme.control.key = L"@open:theme";
+        root.push_back(std::move(openTheme));
+    }
+
+    MenuItem about = MakeSettingsItem(ItemKind::Command, L"About");
+    about.control.kind = ControlKind::Info;
+    about.control.key = L"@about";
+    about.controlText = L"schema " + std::to_wstring(kConfigSchemaVersion);
+    root.push_back(std::move(about));
+
+    return root;
 }
 
 // ===========================================================================

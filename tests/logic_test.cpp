@@ -1,6 +1,7 @@
 #define CMO_TESTING 1
 #include "wh_api_stub.h"
 #include "../mod.wh.cpp"
+#include <functional>
 
 static int g_failures = 0;
 
@@ -4006,6 +4007,90 @@ int main() {
         command.canonicalVerb = L"WinRAR.ExtractHere";
         command.flags = cmo::kModelExtension;
         CHECK(cmo::IsThirdPartyItem(command));
+    }
+
+    {
+        const cmo::ControlSpec slider =
+            cmo::MakeControlSpec(*cmo::SchemaFind(L"blurStrength"));
+        CHECK(slider.kind == cmo::ControlKind::IntSlider);
+        CHECK_EQ(slider.minValue, 0);
+        CHECK_EQ(slider.maxValue, 64);
+        CHECK(cmo::MakeControlSpec(*cmo::SchemaFind(L"blur")).kind ==
+              cmo::ControlKind::Toggle);
+        CHECK(cmo::MakeControlSpec(*cmo::SchemaFind(L"background")).kind ==
+              cmo::ControlKind::ColorSwatch);
+        const cmo::ControlSpec easing =
+            cmo::MakeControlSpec(*cmo::SchemaFind(L"animationEasing"));
+        CHECK(easing.kind == cmo::ControlKind::Enum);
+        CHECK_EQ(easing.options.size(), size_t(6));
+        CHECK(cmo::MakeControlSpec(*cmo::SchemaFind(L"markerColor")).unsetCapable);
+
+        auto findChild = [](const std::vector<cmo::MenuItem>& items,
+                            const std::wstring& label) -> const cmo::MenuItem* {
+            for (const cmo::MenuItem& item : items) {
+                if (item.label == label) return &item;
+            }
+            return nullptr;
+        };
+
+        cmo::SettingsModelInputs in;
+        // All conditional pages present so every schema key is reachable once.
+        in.selectedEffects = cmo::kAnimFade | cmo::kAnimSlide | cmo::kAnimScale;
+        std::vector<cmo::MenuItem> root = cmo::BuildSettingsTree(in);
+        // Root order: header, status, target, seven groups, windhawk, actions.
+        CHECK(root.size() >= 12);
+        CHECK_EQ(root[0].label, std::wstring(L"Menu settings"));
+        CHECK(root[2].kind == cmo::ItemKind::Submenu);  // target
+        // Group order follows the schema's first-occurrence order.
+        CHECK_EQ(root[3].label, std::wstring(L"Colors"));
+        CHECK_EQ(root[4].label, std::wstring(L"Layout"));
+        CHECK_EQ(root[5].label, std::wstring(L"Selection marker"));
+        CHECK_EQ(root[6].label, std::wstring(L"Text"));
+        CHECK_EQ(root[7].label, std::wstring(L"Shadow"));
+        CHECK_EQ(root[8].label, std::wstring(L"Effects"));
+        CHECK_EQ(root[9].label, std::wstring(L"Animation"));
+        CHECK_EQ(root[10].label, std::wstring(L"Windhawk settings\u2026"));
+
+        // Every schema key appears exactly once in the tree.
+        std::map<std::wstring, int> seen;
+        std::function<void(const std::vector<cmo::MenuItem>&)> walk =
+            [&](const std::vector<cmo::MenuItem>& items) {
+                for (const cmo::MenuItem& item : items) {
+                    if (!item.control.key.empty() &&
+                        item.control.key[0] != L'@') {
+                        ++seen[item.control.key];
+                    }
+                    walk(item.children);
+                }
+            };
+        walk(root);
+        for (const cmo::ConfigSchemaEntry& row : cmo::kAppearanceSchema) {
+            CHECK_EQ(seen[row.key], 1);
+        }
+
+        const cmo::MenuItem* colorsGroup = findChild(root, L"Colors");
+        CHECK(colorsGroup != nullptr);
+        CHECK(colorsGroup->children.back().control.key.rfind(L"@reset:", 0) ==
+              0);
+
+        // Conditional pages follow the selected effects.
+        in.selectedEffects = cmo::kAnimFade;
+        root = cmo::BuildSettingsTree(in);
+        const cmo::MenuItem* animation = findChild(root, L"Animation");
+        CHECK(animation != nullptr);
+        CHECK(findChild(animation->children, L"Slide options\u2026") == nullptr);
+        CHECK(findChild(animation->children, L"Scale options\u2026") == nullptr);
+        in.selectedEffects = cmo::kAnimSlide;
+        root = cmo::BuildSettingsTree(in);
+        animation = findChild(root, L"Animation");
+        CHECK(animation != nullptr);
+        CHECK(findChild(animation->children, L"Slide options\u2026") != nullptr);
+        CHECK(findChild(animation->children, L"Replay open animation") !=
+              nullptr);
+        in.selectedEffects = cmo::kAnimScale | cmo::kAnimCrt;
+        root = cmo::BuildSettingsTree(in);
+        animation = findChild(root, L"Animation");
+        CHECK(findChild(animation->children, L"Scale options\u2026") != nullptr);
     }
 
     {

@@ -12012,6 +12012,12 @@ InvokeResult InvokeExtensionItem(const MenuItem& item, const InvocationContext& 
     if (!ctx.liveContext || !EnsureContextPopulated(capture)) {
         return InvokeResult::FallbackNative;
     }
+    // Submenus are populated lazily; initialize them so items nested in a
+    // submenu (e.g. "Give access to" children) can be resolved.
+    if (!capture.menuInitialized) {
+        InitializeMenuRecursive(capture, capture.populatedMenu, 0);
+        capture.menuInitialized = true;
+    }
 
     // Resolve the item in the live menu; the cached offset is from discovery
     // time and a shifted layout would invoke the wrong command (e.g. "Restore
@@ -12222,6 +12228,10 @@ InvokeResult InvokeItem(const MenuItem& item, const InvocationContext& ctx,
             // so prefer the offset and fall back to the verb last.
             if (!EnsureContextPopulated(capture)) {
                 return InvokeResult::FallbackNative;
+            }
+            if (!capture.menuInitialized) {
+                InitializeMenuRecursive(capture, capture.populatedMenu, 0);
+                capture.menuInitialized = true;
             }
             // The cached offset comes from the discovery-time menu layout,
             // which can differ from the current population (dynamic items

@@ -2736,8 +2736,18 @@ int main() {
         CHECK(std::fabs(ComputeAnimationFrame(single, 1.0f, true).scaleX - 1.0f) <
               0.001f);
         single.effects = kAnimCrt;
-        CHECK(ComputeAnimationFrame(single, 0.0f, true).scaleY < 0.1f);
-        CHECK(ComputeAnimationFrame(single, 1.0f, true).scaleY == 1.0f);
+        const cmo::AnimationFrame crtStart =
+            ComputeAnimationFrame(single, 0.0f, true);
+        CHECK(crtStart.center);
+        CHECK(crtStart.scaleY < 0.1f);
+        CHECK(crtStart.scaleX < 1.0f);
+        CHECK(crtStart.brightness > 0.9f);
+        const cmo::AnimationFrame crtEnd =
+            ComputeAnimationFrame(single, 1.0f, true);
+        CHECK(crtEnd.center);
+        CHECK(crtEnd.scaleY == 1.0f);
+        CHECK(std::fabs(crtEnd.scaleX - 1.0f) < 0.001f);
+        CHECK(crtEnd.brightness == 0.0f);
         single.effects = kAnimUnfold;
         CHECK(ComputeAnimationFrame(single, 0.0f, true).scaleX < 0.1f);
         CHECK(ComputeAnimationFrame(single, 1.0f, true).scaleX == 1.0f);

@@ -143,7 +143,10 @@ effects combine (opacities multiply, translations add, scales multiply):
 - `scale` — scales from `scaleFrom`% to 100% about `animationAnchor`.
 - `dissolve` — the panel fades first, then the item content follows (and
   leaves first on close).
-- `crt` — opens vertically from a thin line, like a CRT powering on.
+- `crt` — a CRT power-on: a bright line in the panel center blooms open
+  vertically (with a slight horizontal settle) and flashes a white
+  brightness/glow that decays as it opens (and returns as it closes). Expands
+  from the panel center regardless of `animationAnchor`.
 - `unfold` — unfolds horizontally from the cursor-side edge.
 - `none` — no animation.
 

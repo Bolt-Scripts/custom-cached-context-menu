@@ -1161,6 +1161,10 @@ struct AnimationFrame {
     float translateY = 0.0f;
     float scaleX = 1.0f;
     float scaleY = 1.0f;
+    // CRT-style flash/glow intensity (0 = none).
+    float brightness = 0.0f;
+    // Scale about the panel center instead of the configured anchor.
+    bool center = false;
 };
 
 struct ConfigParseError {
@@ -6556,10 +6560,14 @@ void DrawPanel(ID2D1DeviceContext* dc, const LayoutPanel& panel,
     // the dissolve opacity.
     if (margin > 0 || frame.translateX != 0.0f || frame.translateY != 0.0f ||
         frame.scaleX != 1.0f || frame.scaleY != 1.0f) {
+        const float anchorX = frame.center
+                                  ? static_cast<float>(panel.size.cx) / 2.0f
+                                  : static_cast<float>(anchor.x);
+        const float anchorY = frame.center
+                                  ? static_cast<float>(panel.size.cy) / 2.0f
+                                  : static_cast<float>(anchor.y);
         const D2D1_MATRIX_3X2_F scale = D2D1::Matrix3x2F::Scale(
-            frame.scaleX, frame.scaleY,
-            D2D1::Point2F(static_cast<float>(anchor.x),
-                          static_cast<float>(anchor.y)));
+            frame.scaleX, frame.scaleY, D2D1::Point2F(anchorX, anchorY));
         const D2D1_MATRIX_3X2_F translate = D2D1::Matrix3x2F::Translation(
             static_cast<float>(margin) + frame.translateX,
             static_cast<float>(margin) + frame.translateY);
@@ -6860,6 +6868,44 @@ void DrawPanel(ID2D1DeviceContext* dc, const LayoutPanel& panel,
             brush->Release();
         }
     }
+    // CRT-style brightness and glow: additive white halo strokes plus a flash
+    // over the panel, fading as the animation completes.
+    if (frame.brightness > 0.001f) {
+        const float brightness = std::clamp(frame.brightness, 0.0f, 1.0f);
+        dc->SetPrimitiveBlend(D2D1_PRIMITIVE_BLEND_ADD);
+        const float widths[3] = {2.0f + 3.0f * brightness,
+                                 6.0f + 10.0f * brightness,
+                                 14.0f + 18.0f * brightness};
+        const float alphas[3] = {0.45f * brightness, 0.25f * brightness,
+                                 0.12f * brightness};
+        for (int i = 0; i < 3; ++i) {
+            ID2D1SolidColorBrush* brush = nullptr;
+            if (SUCCEEDED(dc->CreateSolidColorBrush(
+                    D2D1::ColorF(1.0f, 1.0f, 1.0f, alphas[i]), &brush)) &&
+                brush) {
+                if (panelGeometry) {
+                    dc->DrawGeometry(panelGeometry, brush, widths[i]);
+                } else {
+                    dc->DrawRoundedRectangle(&rounded, brush, widths[i]);
+                }
+                brush->Release();
+            }
+        }
+        ID2D1SolidColorBrush* flash = nullptr;
+        if (SUCCEEDED(dc->CreateSolidColorBrush(
+                D2D1::ColorF(1.0f, 1.0f, 1.0f, 0.35f * brightness),
+                &flash)) &&
+            flash) {
+            if (panelGeometry) {
+                dc->FillGeometry(panelGeometry, flash);
+            } else {
+                dc->FillRoundedRectangle(&rounded, flash);
+            }
+            flash->Release();
+        }
+        dc->SetPrimitiveBlend(D2D1_PRIMITIVE_BLEND_SOURCE_OVER);
+    }
+
     if (panelGeometry) {
         panelGeometry->Release();
     }
@@ -7346,8 +7392,14 @@ AnimationFrame ComputeAnimationFrame(const AnimationSpec& spec, float t,
         frame.opacity *= std::min(1.0f, v * 4.0f);
     }
     if (spec.effects & kAnimCrt) {
+        // CRT power-on: a bright line in the panel center blooms open, with a
+        // slight horizontal settle and a flash that decays as it opens (and
+        // returns as it closes).
+        frame.center = true;
         frame.scaleY *= (2.0f + 98.0f * v) / 100.0f;
-        frame.opacity *= std::min(1.0f, v * 4.0f);
+        frame.scaleX *= (85.0f + 15.0f * v) / 100.0f;
+        frame.brightness =
+            std::max(frame.brightness, (1.0f - v) * (1.0f - v));
     }
     if (spec.effects & kAnimDissolve) {
         frame.contentOpacity *= std::clamp((v - 0.35f) / 0.65f, 0.0f, 1.0f);

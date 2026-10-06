@@ -4009,6 +4009,24 @@ int main() {
     }
 
     {
+        cmo::HotkeySpec hk{};
+        CHECK(cmo::ParseHotkey(L"Ctrl+Alt+M", hk));
+        CHECK_EQ(hk.modifiers, static_cast<UINT>(MOD_CONTROL | MOD_ALT));
+        CHECK_EQ(hk.virtualKey, static_cast<UINT>('M'));
+        CHECK(cmo::ParseHotkey(L" ctrl + shift + f12 ", hk));
+        CHECK_EQ(hk.modifiers, static_cast<UINT>(MOD_CONTROL | MOD_SHIFT));
+        CHECK_EQ(hk.virtualKey, static_cast<UINT>(VK_F12));
+        CHECK(cmo::ParseHotkey(L"Win+1", hk));
+        CHECK_EQ(hk.modifiers, static_cast<UINT>(MOD_WIN));
+        CHECK_EQ(hk.virtualKey, static_cast<UINT>('1'));
+        CHECK(!cmo::ParseHotkey(L"", hk));
+        CHECK(!cmo::ParseHotkey(L"Ctrl", hk));
+        CHECK(!cmo::ParseHotkey(L"F12", hk));
+        CHECK(!cmo::ParseHotkey(L"Ctrl+Banana", hk));
+        CHECK(!cmo::ParseHotkey(L"Ctrl+Alt", hk));
+    }
+
+    {
         cmo::HsvColor h = cmo::RgbToHsv(0xFFFF0000u);
         CHECK(std::fabs(h.h - 0.0f) < 0.5f);
         CHECK(std::fabs(h.s - 1.0f) < 0.001f);

@@ -5201,6 +5201,68 @@ std::vector<uint8_t> BuildSvSquarePixels(float hue, int width, int height) {
     return pixels;
 }
 
+struct HotkeySpec {
+    UINT modifiers = 0;   // MOD_CONTROL / MOD_ALT / MOD_SHIFT / MOD_WIN
+    UINT virtualKey = 0;  // VK code
+};
+
+// "Ctrl+Alt+M" / "Win+Shift+F12". At least one modifier and exactly one key
+// are required, so a bare "F12" cannot hijack a global key.
+bool ParseHotkey(const std::wstring& text, HotkeySpec& out) {
+    HotkeySpec spec;
+    bool haveKey = false;
+    size_t pos = 0;
+    while (pos <= text.size()) {
+        const size_t plus = text.find(L'+', pos);
+        const std::wstring token = TrimWhitespace(
+            plus == std::wstring::npos ? text.substr(pos)
+                                       : text.substr(pos, plus - pos));
+        pos = plus == std::wstring::npos ? text.size() + 1 : plus + 1;
+        if (token.empty()) {
+            return false;
+        }
+        const std::wstring lower = ToLowerCopy(token);
+        if (lower == L"ctrl" || lower == L"control") {
+            spec.modifiers |= MOD_CONTROL;
+        } else if (lower == L"alt") {
+            spec.modifiers |= MOD_ALT;
+        } else if (lower == L"shift") {
+            spec.modifiers |= MOD_SHIFT;
+        } else if (lower == L"win") {
+            spec.modifiers |= MOD_WIN;
+        } else if (haveKey) {
+            return false;
+        } else if (token.size() == 1) {
+            const wchar_t c = static_cast<wchar_t>(towupper(token[0]));
+            if ((c >= L'A' && c <= L'Z') || (c >= L'0' && c <= L'9')) {
+                spec.virtualKey = c;
+                haveKey = true;
+            } else {
+                return false;
+            }
+        } else if (lower.size() >= 2 && lower[0] == L'f') {
+            for (size_t i = 1; i < lower.size(); ++i) {
+                if (lower[i] < L'0' || lower[i] > L'9') {
+                    return false;
+                }
+            }
+            const int number = _wtoi(lower.c_str() + 1);
+            if (number < 1 || number > 24) {
+                return false;
+            }
+            spec.virtualKey = VK_F1 + static_cast<UINT>(number - 1);
+            haveKey = true;
+        } else {
+            return false;
+        }
+    }
+    if (!haveKey || spec.modifiers == 0) {
+        return false;
+    }
+    out = spec;
+    return true;
+}
+
 // ===========================================================================
 // [CMO:Layout] Appearance resolution, metrics, and render-ready layout.
 // ===========================================================================

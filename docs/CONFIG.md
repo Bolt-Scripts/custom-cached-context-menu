@@ -101,8 +101,17 @@ rewritten.
 | textColor | color | `#FFFFFFFF` | item text |
 | disabledTextColor | color | `#66FFFFFF` | disabled item text |
 | submenuArrow | color | `#99FFFFFF` | submenu arrow |
-| animation | enum | `none` | none, fade, slide |
-| animationDuration | int | `120` | 0–10000 ms |
+| animationOpen | effect list | `fade` | none, fade, slide, scale, dissolve, crt, unfold; combinable |
+| animationClose | effect list | `fade` | same vocabulary as animationOpen |
+| animationDuration | int | `120` | 0–10000 ms (open) |
+| animationCloseDuration | int | `0` | 0–10000 ms; 0 uses animationDuration |
+| animationFrameMs | int | `15` | 1–100 ms between frames (lower = smoother) |
+| animationEasing | enum | `linear` | linear, easeOut, easeInOut, back, bounce, elastic |
+| slideOffsetX | int | `12` | -400–400 px the menu slides from |
+| slideOffsetY | int | `0` | -400–400 px the menu slides from |
+| scaleFrom | int | `92` | 10–200 % start scale for scale/unfold/crt |
+| animationAnchor | enum | `cursor` | cursor (nearest panel corner) or center |
+| animation | enum | `none` | deprecated; maps to animationOpen/Close when unset |
 | verticalPadding | int | `4` | 0–256 px above/below items |
 | minWidth | int | `0` | 0–4096 px (0 = automatic) |
 | maxWidth | int | `0` | 0–4096 px (0 = unlimited) |

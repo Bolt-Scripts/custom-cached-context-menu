@@ -1076,7 +1076,15 @@ void DumpSuspiciousItems(const std::vector<MenuItem>& items, int depth) {
 // [CMO:CustomConfig] v2 config file structures and parser.
 // ===========================================================================
 
-enum class AnimationKind : uint8_t { None, Fade, Slide };
+// Animation effects combine as a bitmask; easings shape the progress curve.
+constexpr uint32_t kAnimFade = 1u << 0;
+constexpr uint32_t kAnimSlide = 1u << 1;
+constexpr uint32_t kAnimScale = 1u << 2;
+constexpr uint32_t kAnimDissolve = 1u << 3;
+constexpr uint32_t kAnimCrt = 1u << 4;
+constexpr uint32_t kAnimUnfold = 1u << 5;
+
+enum class AnimEasing : uint8_t { Linear, EaseOut, EaseInOut, Back, Bounce, Elastic };
 enum class MarkerStyle : uint8_t { Dot, Check, Bar, None };
 enum class FontWeightKind : uint8_t { Normal, Semibold, Bold };
 enum class FontStyleKind : uint8_t { Normal, Italic };
@@ -1111,8 +1119,19 @@ struct Appearance {
     uint32_t textColor = 0xFFFFFFFF;
     uint32_t disabledTextColor = 0x66FFFFFF;
     uint32_t submenuArrow = 0x99FFFFFF;
-    AnimationKind animation = AnimationKind::None;
+    uint32_t animationOpen = kAnimFade;
+    uint32_t animationClose = kAnimFade;
+    // Parser state for the deprecated `animation` alias; not schema values.
+    bool hasAnimationOpen = false;
+    bool hasAnimationClose = false;
     int animationDuration = 120;
+    int animationCloseDuration = 0;
+    int animationFrameMs = 15;
+    AnimEasing animationEasing = AnimEasing::Linear;
+    int slideOffsetX = 12;
+    int slideOffsetY = 0;
+    int scaleFrom = 92;
+    bool animationAnchorAtCursor = true;
     int verticalPadding = 4;
     int minWidth = 0;
     int maxWidth = 0;
@@ -1132,6 +1151,16 @@ struct Appearance {
     uint32_t headerColor = 0x66FFFFFF;
     bool hasHeaderColor = false;
     AcceleratorMode acceleratorMode = AcceleratorMode::Underline;
+};
+
+// One animation frame: opacities, translation, and scale for the panel.
+struct AnimationFrame {
+    float opacity = 1.0f;
+    float contentOpacity = 1.0f;
+    float translateX = 0.0f;
+    float translateY = 0.0f;
+    float scaleX = 1.0f;
+    float scaleY = 1.0f;
 };
 
 struct ConfigParseError {
@@ -1336,18 +1365,102 @@ bool ParseFont(const std::wstring& text, std::wstring& face, float& size) {
     return true;
 }
 
-bool ParseAnimationKind(const std::wstring& text, AnimationKind& kind) {
+// Parses a comma-separated effect list ("fade, slide"). Returns false when a
+// token is unknown; recognized tokens are still stored so the caller can warn
+// and keep them.
+bool ParseAnimationEffects(const std::wstring& text, uint32_t& effects) {
+    effects = 0;
+    const std::wstring trimmed = TrimWhitespace(text);
+    if (trimmed.empty() || ToLowerCopy(trimmed) == L"none") {
+        return true;
+    }
+    bool allKnown = true;
+    size_t pos = 0;
+    while (pos <= trimmed.size()) {
+        const size_t comma = trimmed.find(L',', pos);
+        const std::wstring token = ToLowerCopy(TrimWhitespace(
+            comma == std::wstring::npos ? trimmed.substr(pos)
+                                        : trimmed.substr(pos, comma - pos)));
+        if (token == L"fade") {
+            effects |= kAnimFade;
+        } else if (token == L"slide") {
+            effects |= kAnimSlide;
+        } else if (token == L"scale") {
+            effects |= kAnimScale;
+        } else if (token == L"dissolve") {
+            effects |= kAnimDissolve;
+        } else if (token == L"crt") {
+            effects |= kAnimCrt;
+        } else if (token == L"unfold") {
+            effects |= kAnimUnfold;
+        } else if (token != L"none" && !token.empty()) {
+            allKnown = false;
+        }
+        if (comma == std::wstring::npos) {
+            break;
+        }
+        pos = comma + 1;
+    }
+    return allKnown;
+}
+
+std::wstring AnimationEffectsText(uint32_t effects) {
+    std::wstring text;
+    auto append = [&](uint32_t bit, const wchar_t* name) {
+        if ((effects & bit) == 0) {
+            return;
+        }
+        if (!text.empty()) {
+            text += L", ";
+        }
+        text += name;
+    };
+    append(kAnimFade, L"fade");
+    append(kAnimSlide, L"slide");
+    append(kAnimScale, L"scale");
+    append(kAnimDissolve, L"dissolve");
+    append(kAnimCrt, L"crt");
+    append(kAnimUnfold, L"unfold");
+    return text.empty() ? std::wstring(L"none") : text;
+}
+
+bool ParseAnimEasing(const std::wstring& text, AnimEasing& easing) {
     const std::wstring lower = ToLowerCopy(TrimWhitespace(text));
-    if (lower == L"none") {
-        kind = AnimationKind::None;
+    if (lower == L"linear") {
+        easing = AnimEasing::Linear;
         return true;
     }
-    if (lower == L"fade") {
-        kind = AnimationKind::Fade;
+    if (lower == L"easeout") {
+        easing = AnimEasing::EaseOut;
         return true;
     }
-    if (lower == L"slide") {
-        kind = AnimationKind::Slide;
+    if (lower == L"easeinout") {
+        easing = AnimEasing::EaseInOut;
+        return true;
+    }
+    if (lower == L"back") {
+        easing = AnimEasing::Back;
+        return true;
+    }
+    if (lower == L"bounce") {
+        easing = AnimEasing::Bounce;
+        return true;
+    }
+    if (lower == L"elastic") {
+        easing = AnimEasing::Elastic;
+        return true;
+    }
+    return false;
+}
+
+bool ParseAnimationAnchor(const std::wstring& text, bool& atCursor) {
+    const std::wstring lower = ToLowerCopy(TrimWhitespace(text));
+    if (lower == L"cursor") {
+        atCursor = true;
+        return true;
+    }
+    if (lower == L"center") {
+        atCursor = false;
         return true;
     }
     return false;
@@ -1459,10 +1572,10 @@ bool ParseCornerRadii(const std::wstring& value, CornerRadii& radii) {
     return true;
 }
 
-enum class SettingType : uint8_t { Bool, Int, Color, Font, Enum, IntList };
+enum class SettingType : uint8_t { Bool, Int, Color, Font, Enum, IntList, EffectList };
 
 // The build's schema version; bump when a row is added.
-constexpr int kConfigSchemaVersion = 5;
+constexpr int kConfigSchemaVersion = 6;
 
 struct ConfigSchemaEntry {
     const wchar_t* section;
@@ -1551,10 +1664,34 @@ const ConfigSchemaEntry kAppearanceSchema[] = {
      L"Blur the screen behind the menu.", 1, false},
     {L"appearance", L"blurStrength", L"Effects", SettingType::Int, L"12", nullptr, 0, 64,
      L"Blur strength.", 1, false},
-    {L"appearance", L"animation", L"Effects", SettingType::Enum, L"none", L"none|fade|slide", 0, 0,
-     L"Menu open/close animation.", 1, false},
-    {L"appearance", L"animationDuration", L"Effects", SettingType::Int, L"120", nullptr, 0, 10000,
-     L"Animation duration in milliseconds.", 1, false},
+    {L"appearance", L"animationOpen", L"Animation", SettingType::EffectList, L"fade",
+     L"none|fade|slide|scale|dissolve|crt|unfold", 0, 0,
+     L"Open animation effects (comma separated, combinable).", 6, false},
+    {L"appearance", L"animationClose", L"Animation", SettingType::EffectList, L"fade",
+     L"none|fade|slide|scale|dissolve|crt|unfold", 0, 0,
+     L"Close animation effects (comma separated, combinable).", 6, false},
+    {L"appearance", L"animationDuration", L"Animation", SettingType::Int, L"120", nullptr, 0, 10000,
+     L"Open animation duration in milliseconds.", 1, false},
+    {L"appearance", L"animationCloseDuration", L"Animation", SettingType::Int, L"0", nullptr, 0, 10000,
+     L"Close animation duration; 0 uses the open duration.", 6, false},
+    {L"appearance", L"animationFrameMs", L"Animation", SettingType::Int, L"15", nullptr, 1, 100,
+     L"Milliseconds between animation frames (lower = smoother).", 6, false},
+    {L"appearance", L"animationEasing", L"Animation", SettingType::Enum, L"linear",
+     L"linear|easeOut|easeInOut|back|bounce|elastic", 0, 0,
+     L"Animation easing curve.", 6, false},
+    {L"appearance", L"slideOffsetX", L"Animation", SettingType::Int, L"12", nullptr, -400, 400,
+     L"Horizontal distance the menu slides from, in pixels.", 6, false},
+    {L"appearance", L"slideOffsetY", L"Animation", SettingType::Int, L"0", nullptr, -400, 400,
+     L"Vertical distance the menu slides from, in pixels.", 6, false},
+    {L"appearance", L"scaleFrom", L"Animation", SettingType::Int, L"92", nullptr, 10, 200,
+     L"Scale percentage scale/unfold/crt start from.", 6, false},
+    {L"appearance", L"animationAnchor", L"Animation", SettingType::Enum, L"cursor",
+     L"cursor|center", 0, 0,
+     L"Scale origin: nearest panel corner to the cursor, or the panel center.", 6, false},
+    {L"appearance", L"animation", L"Animation", SettingType::Enum, L"none",
+     L"none|fade|slide", 0, 0,
+     L"Deprecated; maps to animationOpen and animationClose when they are unset.",
+     1, true},
 };
 const ConfigSchemaEntry* SchemaFind(const std::wstring& key) {
     for (const ConfigSchemaEntry& entry : kAppearanceSchema) {
@@ -1644,6 +1781,17 @@ bool ApplyAppearanceValue(Appearance& appearance, const std::wstring& key,
         }
         return true;
     };
+    auto applyEffects = [&](uint32_t& field, bool* hasFlag) {
+        uint32_t parsed = 0;
+        if (!ParseAnimationEffects(value, parsed)) {
+            warn(L"unknown animation effect ignored; known effects kept");
+        }
+        field = parsed;
+        if (hasFlag) {
+            *hasFlag = true;
+        }
+        return true;
+    };
 
     if (normalized == L"background") return applyColor(appearance.background, nullptr);
     if (normalized == L"blur") {
@@ -1701,13 +1849,55 @@ bool ApplyAppearanceValue(Appearance& appearance, const std::wstring& key,
     if (normalized == L"submenuarrow") {
         return applyColor(appearance.submenuArrow, nullptr);
     }
+    if (normalized == L"animationopen") {
+        return applyEffects(appearance.animationOpen, &appearance.hasAnimationOpen);
+    }
+    if (normalized == L"animationclose") {
+        return applyEffects(appearance.animationClose, &appearance.hasAnimationClose);
+    }
     if (normalized == L"animation") {
-        AnimationKind fallback = AnimationKind::None;
-        ParseAnimationKind(row->defaultValue, fallback);
-        return applyEnum(ParseAnimationKind, appearance.animation, fallback);
+        // Deprecated alias: applies to open/close only while those keys have
+        // not been seen, so order in the file does not matter.
+        uint32_t effects = 0;
+        if (!ParseAnimationEffects(value, effects)) {
+            warn(L"unknown animation effect ignored");
+        }
+        if (!appearance.hasAnimationOpen) {
+            appearance.animationOpen = effects;
+        }
+        if (!appearance.hasAnimationClose) {
+            appearance.animationClose = effects;
+        }
+        return true;
     }
     if (normalized == L"animationduration") {
         return applyInt(appearance.animationDuration, _wtoi(row->defaultValue));
+    }
+    if (normalized == L"animationcloseduration") {
+        return applyInt(appearance.animationCloseDuration, _wtoi(row->defaultValue));
+    }
+    if (normalized == L"animationframems") {
+        return applyInt(appearance.animationFrameMs, _wtoi(row->defaultValue));
+    }
+    if (normalized == L"animationeasing") {
+        AnimEasing fallback = AnimEasing::Linear;
+        ParseAnimEasing(row->defaultValue, fallback);
+        return applyEnum(ParseAnimEasing, appearance.animationEasing, fallback);
+    }
+    if (normalized == L"slideoffsetx") {
+        return applyInt(appearance.slideOffsetX, _wtoi(row->defaultValue));
+    }
+    if (normalized == L"slideoffsety") {
+        return applyInt(appearance.slideOffsetY, _wtoi(row->defaultValue));
+    }
+    if (normalized == L"scalefrom") {
+        return applyInt(appearance.scaleFrom, _wtoi(row->defaultValue));
+    }
+    if (normalized == L"animationanchor") {
+        bool fallback = true;
+        ParseAnimationAnchor(row->defaultValue, fallback);
+        return applyEnum(ParseAnimationAnchor, appearance.animationAnchorAtCursor,
+                         fallback);
     }
     if (normalized == L"verticalpadding") {
         return applyInt(appearance.verticalPadding, _wtoi(row->defaultValue));
@@ -2420,6 +2610,10 @@ bool AppearanceValueIsValid(const ConfigSchemaEntry& entry,
             CornerRadii radii;
             return ParseCornerRadii(value, radii);
         }
+        case SettingType::EffectList: {
+            uint32_t effects = 0;
+            return ParseAnimationEffects(value, effects);
+        }
     }
     return false;
 }
@@ -2502,6 +2696,13 @@ std::wstring NormalizeAppearanceValue(const ConfigSchemaEntry& entry,
                        std::to_wstring(radii.topRight) + L", " +
                        std::to_wstring(radii.bottomRight) + L", " +
                        std::to_wstring(radii.bottomLeft);
+            }
+            break;
+        }
+        case SettingType::EffectList: {
+            uint32_t effects = 0;
+            if (ParseAnimationEffects(value, effects)) {
+                return AnimationEffectsText(effects);
             }
             break;
         }
@@ -6300,30 +6501,37 @@ void DrawSubmenuArrow(ID2D1DeviceContext* dc, const LayoutItem& item,
 void DrawPanel(ID2D1DeviceContext* dc, const LayoutPanel& panel,
                const MenuInputState& state, const LayoutMetrics& metrics,
                const Appearance& appearance, const BackdropBitmap* backdrop,
-               int margin = 0, int shadowClipSide = 0, float opacity = 1.0f,
-               int slideOffsetX = 0) {
+               int margin = 0, int shadowClipSide = 0,
+               const AnimationFrame& frame = AnimationFrame{},
+               POINT anchor = POINT{0, 0}) {
     if (!dc) {
         return;
     }
 
-    if (margin > 0 || slideOffsetX != 0) {
-        const D2D1_MATRIX_3X2_F transform = {
-            1.0f, 0.0f, 0.0f, 1.0f,
-            static_cast<float>(margin + slideOffsetX),
-            static_cast<float>(margin)};
+    // Animation frames are drawn by the UI thread (DirectComposition
+    // animations are not evaluated for this target): the transform carries
+    // slide/scale, the outer layer the panel opacity, and the content layer
+    // the dissolve opacity.
+    if (margin > 0 || frame.translateX != 0.0f || frame.translateY != 0.0f ||
+        frame.scaleX != 1.0f || frame.scaleY != 1.0f) {
+        const D2D1_MATRIX_3X2_F scale = D2D1::Matrix3x2F::Scale(
+            frame.scaleX, frame.scaleY,
+            D2D1::Point2F(static_cast<float>(anchor.x),
+                          static_cast<float>(anchor.y)));
+        const D2D1_MATRIX_3X2_F translate = D2D1::Matrix3x2F::Translation(
+            static_cast<float>(margin) + frame.translateX,
+            static_cast<float>(margin) + frame.translateY);
+        const D2D1_MATRIX_3X2_F transform = scale * translate;
         dc->SetTransform(&transform);
     }
 
-    // Animation frames are drawn by the UI thread (DirectComposition
-    // animations are not evaluated for this target), so the fade is a layer
-    // opacity applied to the whole panel.
-    const bool fading = opacity < 0.999f;
+    const bool fading = frame.opacity < 0.999f;
     if (fading) {
         D2D1_LAYER_PARAMETERS1 layer = {};
         layer.contentBounds = D2D1::InfiniteRect();
         layer.maskAntialiasMode = D2D1_ANTIALIAS_MODE_PER_PRIMITIVE;
         layer.maskTransform = D2D1::IdentityMatrix();
-        layer.opacity = opacity;
+        layer.opacity = frame.opacity;
         layer.layerOptions = D2D1_LAYER_OPTIONS1_NONE;
         dc->PushLayer(layer, nullptr);
     }
@@ -6471,6 +6679,16 @@ void DrawPanel(ID2D1DeviceContext* dc, const LayoutPanel& panel,
         }
     }
 
+    const bool contentFading = frame.contentOpacity < 0.999f;
+    if (contentFading) {
+        D2D1_LAYER_PARAMETERS1 layer = {};
+        layer.contentBounds = D2D1::InfiniteRect();
+        layer.maskAntialiasMode = D2D1_ANTIALIAS_MODE_PER_PRIMITIVE;
+        layer.maskTransform = D2D1::IdentityMatrix();
+        layer.opacity = frame.contentOpacity;
+        layer.layerOptions = D2D1_LAYER_OPTIONS1_NONE;
+        dc->PushLayer(layer, nullptr);
+    }
     for (size_t i = 0; i < panel.items.size(); ++i) {
         const LayoutItem& item = panel.items[i];
         const bool hovered = static_cast<int>(i) == state.hoverIndex ||
@@ -6580,6 +6798,9 @@ void DrawPanel(ID2D1DeviceContext* dc, const LayoutPanel& panel,
         if (item.kind == ItemKind::Submenu) {
             DrawSubmenuArrow(dc, item, panel.size.cx, metrics, metrics.submenuArrow);
         }
+    }
+    if (contentFading) {
+        dc->PopLayer();
     }
 
     if (metrics.borderWidth > 0 && (appearance.border >> 24) != 0) {
@@ -6925,8 +7146,8 @@ struct MenuSession {
     bool submenuTimerActive = false;
     bool done = false;
     // Current render-driven animation frame (1.0 = fully visible, 0 offset).
-    float animationOpacity = 1.0f;
-    int animationOffsetX = 0;
+    AnimationFrame animationFrame;
+    POINT animationAnchor = {0, 0};
     LayoutMetrics metrics;
     Appearance appearance;
 };
@@ -6971,38 +7192,138 @@ int MeasureTextWidthDirectWrite(const wchar_t* label, size_t length,
 }
 
 struct AnimationSpec {
-    bool animate = false;
-    bool slide = false;
+    uint32_t effects = 0;
     int durationMs = 0;
+    int frameMs = 15;
+    AnimEasing easing = AnimEasing::Linear;
+    int slideOffsetX = 12;
+    int slideOffsetY = 0;
+    int scaleFrom = 92;
+    bool anchorAtCursor = true;
+    bool animate = false;
 };
 
-AnimationSpec ResolveAnimationSpec(const Appearance& appearance) {
+AnimationSpec ResolveAnimationSpec(const Appearance& appearance, bool opening) {
     AnimationSpec spec;
-    switch (appearance.animation) {
-        case AnimationKind::None:
-            break;
-        case AnimationKind::Fade:
-            spec.animate = true;
-            spec.durationMs = appearance.animationDuration;
-            break;
-        case AnimationKind::Slide:
-            spec.animate = true;
-            spec.slide = true;
-            spec.durationMs = appearance.animationDuration;
-            break;
+    spec.effects = opening ? appearance.animationOpen : appearance.animationClose;
+    int duration = opening ? appearance.animationDuration
+                           : appearance.animationCloseDuration;
+    if (duration <= 0) {
+        duration = appearance.animationDuration;
     }
-    if (spec.durationMs < 0) {
-        spec.durationMs = 0;
-    }
+    spec.durationMs = duration < 0 ? 0 : duration;
+    spec.frameMs = std::clamp(appearance.animationFrameMs, 1, 100);
+    spec.easing = appearance.animationEasing;
+    spec.slideOffsetX = appearance.slideOffsetX;
+    spec.slideOffsetY = appearance.slideOffsetY;
+    spec.scaleFrom = std::clamp(appearance.scaleFrom, 10, 200);
+    spec.anchorAtCursor = appearance.animationAnchorAtCursor;
+    spec.animate = spec.effects != 0 && spec.durationMs > 0;
     return spec;
+}
+
+float ApplyAnimationEasing(AnimEasing easing, float t) {
+    if (t <= 0.0f) {
+        return 0.0f;
+    }
+    if (t >= 1.0f) {
+        return 1.0f;
+    }
+    switch (easing) {
+        case AnimEasing::Linear:
+            return t;
+        case AnimEasing::EaseOut: {
+            const float u = 1.0f - t;
+            return 1.0f - u * u * u;
+        }
+        case AnimEasing::EaseInOut:
+            return t < 0.5f
+                       ? 4.0f * t * t * t
+                       : 1.0f - std::pow(-2.0f * t + 2.0f, 3.0f) / 2.0f;
+        case AnimEasing::Back: {
+            constexpr float c1 = 1.70158f;
+            constexpr float c3 = c1 + 1.0f;
+            const float u = t - 1.0f;
+            return 1.0f + c3 * u * u * u + c1 * u * u;
+        }
+        case AnimEasing::Bounce: {
+            constexpr float n1 = 7.5625f;
+            constexpr float d1 = 2.75f;
+            if (t < 1.0f / d1) {
+                return n1 * t * t;
+            }
+            if (t < 2.0f / d1) {
+                t -= 1.5f / d1;
+                return n1 * t * t + 0.75f;
+            }
+            if (t < 2.5f / d1) {
+                t -= 2.25f / d1;
+                return n1 * t * t + 0.9375f;
+            }
+            t -= 2.625f / d1;
+            return n1 * t * t + 0.984375f;
+        }
+        case AnimEasing::Elastic: {
+            constexpr float c4 = 2.0943951023931953f;  // 2*pi/3
+            return std::pow(2.0f, -10.0f * t) *
+                       std::sin((t * 10.0f - 0.75f) * c4) +
+                   1.0f;
+        }
+    }
+    return t;
+}
+
+// Visibility for a frame: open ramps 0->1, close mirrors it. Effects combine:
+// opacities multiply, scales multiply, translations add.
+AnimationFrame ComputeAnimationFrame(const AnimationSpec& spec, float t,
+                                     bool opening) {
+    AnimationFrame frame;
+    if (!spec.animate) {
+        return frame;
+    }
+    t = std::clamp(t, 0.0f, 1.0f);
+    const float eased = ApplyAnimationEasing(spec.easing, t);
+    const float v = opening ? eased : 1.0f - eased;
+    if (spec.effects & kAnimFade) {
+        frame.opacity *= v;
+    }
+    if (spec.effects & kAnimSlide) {
+        frame.translateX += static_cast<float>(spec.slideOffsetX) * (1.0f - v);
+        frame.translateY += static_cast<float>(spec.slideOffsetY) * (1.0f - v);
+    }
+    if (spec.effects & kAnimScale) {
+        const float s =
+            (static_cast<float>(spec.scaleFrom) +
+             (100.0f - static_cast<float>(spec.scaleFrom)) * v) /
+            100.0f;
+        frame.scaleX *= s;
+        frame.scaleY *= s;
+    }
+    if (spec.effects & kAnimUnfold) {
+        frame.scaleX *= (2.0f + 98.0f * v) / 100.0f;
+        frame.opacity *= std::min(1.0f, v * 4.0f);
+    }
+    if (spec.effects & kAnimCrt) {
+        frame.scaleY *= (2.0f + 98.0f * v) / 100.0f;
+        frame.opacity *= std::min(1.0f, v * 4.0f);
+    }
+    if (spec.effects & kAnimDissolve) {
+        frame.contentOpacity *= std::clamp((v - 0.35f) / 0.65f, 0.0f, 1.0f);
+    }
+    frame.opacity = std::clamp(frame.opacity, 0.0f, 1.0f);
+    frame.contentOpacity = std::clamp(frame.contentOpacity, 0.0f, 1.0f);
+    frame.scaleX = std::max(frame.scaleX, 0.0f);
+    frame.scaleY = std::max(frame.scaleY, 0.0f);
+    return frame;
 }
 
 void RenderMenuWindow(MenuWindow* window, const LayoutPanel& panel,
                       const MenuInputState& state, const LayoutMetrics& metrics,
                       const Appearance& appearance,
                       const BackdropBitmap* backdrop, int margin,
-                      int shadowClipSide, float opacity = 1.0f,
-                      int slideOffsetX = 0) {
+                      int shadowClipSide,
+                      const AnimationFrame& frame = AnimationFrame{},
+                      POINT anchor = POINT{0, 0}) {
     if (!window || !window->SwapChain() || !g_renderDevice.D2DDevice()) {
         return;
     }    IDXGISurface* surface = nullptr;
@@ -7028,7 +7349,7 @@ void RenderMenuWindow(MenuWindow* window, const LayoutPanel& panel,
         dc->BeginDraw();
         dc->Clear(nullptr);
         DrawPanel(dc, panel, state, metrics, appearance, backdrop, margin,
-                  shadowClipSide, opacity, slideOffsetX);
+                  shadowClipSide, frame, anchor);
         const HRESULT drawResult = dc->EndDraw();
         target->Release();
         if (drawResult == D2DERR_RECREATE_TARGET) {
@@ -7041,9 +7362,8 @@ void RenderMenuWindow(MenuWindow* window, const LayoutPanel& panel,
 }
 
 // Renders every window of the session at one animation frame.
-void RenderSessionFrame(MenuSession& session, float opacity, int slideOffsetX) {
-    session.animationOpacity = opacity;
-    session.animationOffsetX = slideOffsetX;
+void RenderSessionFrame(MenuSession& session, const AnimationFrame& frame) {
+    session.animationFrame = frame;
     for (size_t i = 0; i < session.windows.size(); ++i) {
         MenuWindow* window = session.windows[i];
         if (!window || !window->Panel()) {
@@ -7057,7 +7377,8 @@ void RenderSessionFrame(MenuSession& session, float opacity, int slideOffsetX) {
             i < session.shadowClipSides.size() ? session.shadowClipSides[i] : 0;
         RenderMenuWindow(window, *window->Panel(), session.states[i],
                          session.metrics, session.appearance, backdrop,
-                         session.margin, shadowClipSide, opacity, slideOffsetX);
+                         session.margin, shadowClipSide, frame,
+                         session.animationAnchor);
     }
 }
 
@@ -7071,8 +7392,10 @@ void RunSessionAnimation(MenuSession& session, const AnimationSpec& spec,
         return;
     }
     if (g_settings.debugLogging) {
-        Wh_Log(L"Menu animation: opening=%d slide=%d duration=%d (render)",
-               opening ? 1 : 0, spec.slide ? 1 : 0, spec.durationMs);
+        Wh_Log(L"Menu animation: opening=%d effects=%08X duration=%d frame=%d "
+               L"easing=%d",
+               opening ? 1 : 0, spec.effects, spec.durationMs, spec.frameMs,
+               static_cast<int>(spec.easing));
     }
     const ULONGLONG start = GetTickCount64();
     for (;;) {
@@ -7082,13 +7405,10 @@ void RunSessionAnimation(MenuSession& session, const AnimationSpec& spec,
         if (t > 1.0f) {
             t = 1.0f;
         }
-        const float opacity = opening ? t : 1.0f - t;
-        const int offset =
-            spec.slide
-                ? static_cast<int>((opening ? 1.0f - t : t) * 12.0f)
-                : 0;
-        RenderSessionFrame(session, opacity, offset);
-        if (t >= 1.0f || session.done) {
+        RenderSessionFrame(session, ComputeAnimationFrame(spec, t, opening));
+        // A closing animation must run to the end even though the session is
+        // already marked done.
+        if (t >= 1.0f || (opening && session.done)) {
             break;
         }
         MSG msg = {};
@@ -7102,7 +7422,7 @@ void RunSessionAnimation(MenuSession& session, const AnimationSpec& spec,
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }
-        Sleep(15);
+        Sleep(static_cast<DWORD>(std::clamp(spec.frameMs, 1, 100)));
     }
 }
 
@@ -7126,8 +7446,8 @@ void RepaintMenuWindow(MenuSession* session, int index) {
             : 0;
     RenderMenuWindow(window, *window->Panel(), session->states[index],
                      session->metrics, session->appearance, backdrop,
-                     session->margin, shadowClipSide, session->animationOpacity,
-                     session->animationOffsetX);
+                     session->margin, shadowClipSide, session->animationFrame,
+                     session->animationAnchor);
 }
 
 void CloseSubmenusBelow(MenuSession* session, int index) {
@@ -7742,13 +8062,20 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
         Wh_Log(L"Custom menu session start (margin=%d dpi=%u)", margin, key.dpi);
     }
 
-    const AnimationSpec opening = ResolveAnimationSpec(appearance);
-    const bool openingAnimated = opening.animate && opening.durationMs > 0;
+    const AnimationSpec opening = ResolveAnimationSpec(appearance, true);
+    // Anchor for scale/crt/unfold: the panel corner nearest the invocation
+    // point, or the panel center.
+    if (appearance.animationAnchorAtCursor) {
+        session.animationAnchor = {
+            pt.x < panelPos.x + panel->size.cx / 2 ? 0 : panel->size.cx,
+            pt.y < panelPos.y + panel->size.cy / 2 ? 0 : panel->size.cy};
+    } else {
+        session.animationAnchor = {panel->size.cx / 2, panel->size.cy / 2};
+    }
     root->Move(POINT{panelPos.x - margin, panelPos.y - margin});
     // Draw the first animation frame before showing so the menu never flashes
     // at full opacity.
-    RenderSessionFrame(session, openingAnimated ? 0.0f : 1.0f,
-                       openingAnimated && opening.slide ? 12 : 0);
+    RenderSessionFrame(session, ComputeAnimationFrame(opening, 0.0f, true));
     root->Show();
     if (!g_menuMouseHook.load()) {
         HHOOK hook = SetWindowsHookExW(WH_MOUSE_LL, MenuMouseHookProc,
@@ -7790,7 +8117,7 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
         KillTimer(root->Handle(), kMenuSubmenuTimerId);
         session.submenuTimerActive = false;
     }
-    const AnimationSpec closing = ResolveAnimationSpec(appearance);
+    const AnimationSpec closing = ResolveAnimationSpec(appearance, false);
     RunSessionAnimation(session, closing, false);
     if (session.ownsMouseHook) {
         HHOOK hook = g_menuMouseHook.exchange(nullptr);

@@ -2668,19 +2668,105 @@ int main() {
         CHECK(mask[19] == 0);
     }
 
-    // v2 animation spec resolution.
+    // v2.8 animation config and frame math.
     {
-        cmo::Appearance appearance{};
-        appearance.animation = cmo::AnimationKind::None;
-        cmo::AnimationSpec spec = cmo::ResolveAnimationSpec(appearance);
-        CHECK(!spec.animate && !spec.slide && spec.durationMs == 0);
-        appearance.animation = cmo::AnimationKind::Fade;
-        appearance.animationDuration = 120;
-        spec = cmo::ResolveAnimationSpec(appearance);
-        CHECK(spec.animate && !spec.slide && spec.durationMs == 120);
-        appearance.animation = cmo::AnimationKind::Slide;
-        spec = cmo::ResolveAnimationSpec(appearance);
-        CHECK(spec.animate && spec.slide && spec.durationMs == 120);
+        using namespace cmo;
+        // Effect list parsing.
+        uint32_t effects = 0;
+        CHECK(ParseAnimationEffects(L"fade, slide", effects));
+        CHECK(effects == (kAnimFade | kAnimSlide));
+        CHECK(ParseAnimationEffects(L"none", effects) && effects == 0);
+        CHECK(ParseAnimationEffects(L"", effects) && effects == 0);
+        CHECK(!ParseAnimationEffects(L"fade, bogus", effects));
+        CHECK(effects == kAnimFade);
+        CHECK(ParseAnimationEffects(L"unfold", effects) && effects == kAnimUnfold);
+        CHECK(AnimationEffectsText(kAnimSlide | kAnimFade) == L"fade, slide");
+        CHECK(AnimationEffectsText(0) == L"none");
+        AnimEasing easing = AnimEasing::Linear;
+        CHECK(ParseAnimEasing(L"Bounce", easing) && easing == AnimEasing::Bounce);
+        CHECK(!ParseAnimEasing(L"nope", easing));
+
+        // Spec resolution: separate open/close, close duration fallback.
+        Appearance appearance{};
+        appearance.animationOpen = kAnimFade | kAnimSlide;
+        appearance.animationClose = kAnimUnfold;
+        appearance.animationDuration = 200;
+        appearance.animationCloseDuration = 0;
+        appearance.animationFrameMs = 8;
+        appearance.slideOffsetX = 20;
+        appearance.slideOffsetY = -4;
+        const AnimationSpec openSpec = ResolveAnimationSpec(appearance, true);
+        CHECK(openSpec.animate);
+        CHECK(openSpec.durationMs == 200);
+        CHECK(openSpec.frameMs == 8);
+        const AnimationSpec closeSpec = ResolveAnimationSpec(appearance, false);
+        CHECK(closeSpec.animate);
+        CHECK(closeSpec.durationMs == 200);
+        CHECK(closeSpec.effects == kAnimUnfold);
+
+        // Easing endpoints and overshoot.
+        CHECK(ApplyAnimationEasing(AnimEasing::Linear, 0.0f) == 0.0f);
+        CHECK(ApplyAnimationEasing(AnimEasing::Linear, 1.0f) == 1.0f);
+        CHECK(ApplyAnimationEasing(AnimEasing::Bounce, 1.0f) == 1.0f);
+        CHECK(ApplyAnimationEasing(AnimEasing::Elastic, 1.0f) == 1.0f);
+        CHECK(ApplyAnimationEasing(AnimEasing::Back, 0.8f) > 1.0f);
+
+        // Fade + slide endpoints (open and close mirror).
+        const AnimationFrame start = ComputeAnimationFrame(openSpec, 0.0f, true);
+        CHECK(start.opacity == 0.0f);
+        CHECK(start.translateX == 20.0f);
+        CHECK(start.translateY == -4.0f);
+        const AnimationFrame end = ComputeAnimationFrame(openSpec, 1.0f, true);
+        CHECK(end.opacity == 1.0f);
+        CHECK(end.translateX == 0.0f);
+        CHECK(end.translateY == 0.0f);
+        const AnimationFrame closeStart =
+            ComputeAnimationFrame(openSpec, 0.0f, false);
+        CHECK(closeStart.opacity == 1.0f);
+        CHECK(closeStart.translateX == 0.0f);
+
+        // Each effect at its endpoints.
+        AnimationSpec single{};
+        single.animate = true;
+        single.durationMs = 100;
+        single.effects = kAnimScale;
+        single.scaleFrom = 80;
+        CHECK(std::fabs(ComputeAnimationFrame(single, 0.0f, true).scaleX - 0.8f) <
+              0.001f);
+        CHECK(std::fabs(ComputeAnimationFrame(single, 1.0f, true).scaleX - 1.0f) <
+              0.001f);
+        single.effects = kAnimCrt;
+        CHECK(ComputeAnimationFrame(single, 0.0f, true).scaleY < 0.1f);
+        CHECK(ComputeAnimationFrame(single, 1.0f, true).scaleY == 1.0f);
+        single.effects = kAnimUnfold;
+        CHECK(ComputeAnimationFrame(single, 0.0f, true).scaleX < 0.1f);
+        CHECK(ComputeAnimationFrame(single, 1.0f, true).scaleX == 1.0f);
+        single.effects = kAnimDissolve;
+        CHECK(ComputeAnimationFrame(single, 0.0f, true).contentOpacity == 0.0f);
+        CHECK(ComputeAnimationFrame(single, 1.0f, true).contentOpacity == 1.0f);
+
+        // Overshoot easings keep opacity in range.
+        single.effects = kAnimFade;
+        single.easing = AnimEasing::Back;
+        for (float t = 0.0f; t <= 1.0f; t += 0.05f) {
+            const AnimationFrame f = ComputeAnimationFrame(single, t, true);
+            CHECK(f.opacity >= 0.0f && f.opacity <= 1.0f);
+        }
+
+        // Deprecated alias and explicit keys.
+        std::vector<ConfigParseError> warnings;
+        RulesConfig legacy;
+        CHECK(ParseRulesConfig(L"[appearance]\nanimation = slide\n", legacy,
+                               warnings));
+        CHECK(legacy.appearance.animationOpen == kAnimSlide);
+        CHECK(legacy.appearance.animationClose == kAnimSlide);
+        RulesConfig explicitConfig;
+        CHECK(ParseRulesConfig(
+            L"[appearance]\nanimation = slide\nanimationOpen = fade\n",
+            explicitConfig, warnings));
+        CHECK(explicitConfig.appearance.animationOpen == kAnimFade);
+        CHECK(explicitConfig.appearance.animationClose == kAnimSlide);
+        CHECK(kConfigSchemaVersion == 6);
     }
 
     // v2 cache keys include config revisions; device loss clears layouts.
@@ -3320,13 +3406,13 @@ int main() {
                       entry, entry.defaultValue)) != std::wstring::npos);
         }
         CHECK(text.find(L"[meta]") != std::wstring::npos);
-        CHECK(text.find(L"schemaVersion = 5") != std::wstring::npos);
+        CHECK(text.find(L"schemaVersion = 6") != std::wstring::npos);
         CHECK(text.find(L"[rules]") != std::wstring::npos);
         CHECK(text.find(L"[command ") != std::wstring::npos);
         cmo::RulesConfig config;
         std::vector<cmo::ConfigParseError> errors;
         CHECK(cmo::ParseRulesConfig(text, config, errors));
-        CHECK(config.schemaVersion == 5);
+        CHECK(config.schemaVersion == 6);
     }
 
     // v2.3/v2.4 review fixes: inert examples, '#' comments.
@@ -3384,13 +3470,13 @@ int main() {
             L"; my notes\n[appearance]\nitemHeight = 30\n[appearance]\n"
             L"background = #11223344\n[rules]\n; my rule\n"
             L"hide = label:\"Cast to Device\"\n[meta]\nschemaVersion = 0\n";
-        const std::wstring canonical = cmo::CanonicalizeConfig(legacy, 5);
+        const std::wstring canonical = cmo::CanonicalizeConfig(legacy, 6);
         CHECK(cmo::CountSubstring(canonical, L"[appearance]") == 1);
         CHECK(canonical.find(L"itemHeight = 30") != std::wstring::npos);
         CHECK(canonical.find(L"background = 34, 51, 68, 17") != std::wstring::npos);
         CHECK(canonical.find(L"hide = label:\"Cast to Device\"") != std::wstring::npos);
         CHECK(canonical.find(L"; my rule") != std::wstring::npos);
-        CHECK(canonical.find(L"schemaVersion = 5") != std::wstring::npos);
+        CHECK(canonical.find(L"schemaVersion = 6") != std::wstring::npos);
         cmo::RulesConfig reparsed;
         CHECK(cmo::ParseRulesConfig(canonical, reparsed, errors));
         CHECK(reparsed.appearance.itemHeight == 30);
@@ -3456,7 +3542,7 @@ int main() {
         CHECK(store.Snapshot()->appearance.itemHeight == 30);
         std::wstring text;
         CHECK(cmo::ReadConfigFile(path, text));
-        CHECK(text.find(L"schemaVersion = 5") != std::wstring::npos);
+        CHECK(text.find(L"schemaVersion = 6") != std::wstring::npos);
         CHECK(text.find(L"itemHeight = 30") != std::wstring::npos);
         CHECK(text.find(L"; itemPadding = 6") != std::wstring::npos);
 
@@ -3467,7 +3553,7 @@ int main() {
         std::wstring rewritten;
         CHECK(cmo::ReadConfigFile(path, rewritten));
         CHECK(rewritten.find(L"[appearance]") != std::wstring::npos);
-        CHECK(rewritten.find(L"schemaVersion = 5") != std::wstring::npos);
+        CHECK(rewritten.find(L"schemaVersion = 6") != std::wstring::npos);
         DeleteFileW(path.c_str());
     }
 
@@ -3593,7 +3679,7 @@ int main() {
         CHECK(text.find(L"none | fade | slide") != std::wstring::npos);
         CHECK(text.find(L"1-256") != std::wstring::npos);
         CHECK(text.find(L"dot | check | bar | none") != std::wstring::npos);
-        CHECK(text.find(L"schemaVersion = 5") != std::wstring::npos);
+        CHECK(text.find(L"schemaVersion = 6") != std::wstring::npos);
     }
 
     // v2.6 advanced grouping: toggles, exclude, keep.

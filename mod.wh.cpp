@@ -2727,6 +2727,188 @@ std::wstring NormalizeAppearanceValue(const ConfigSchemaEntry& entry,
     return entry.defaultValue;
 }
 
+// Canonical text for enum values, matching the schema's validValues casing.
+const wchar_t* FontWeightText(FontWeightKind value) {
+    switch (value) {
+        case FontWeightKind::Semibold:
+            return L"semibold";
+        case FontWeightKind::Bold:
+            return L"bold";
+        default:
+            return L"normal";
+    }
+}
+
+const wchar_t* FontStyleText(FontStyleKind value) {
+    return value == FontStyleKind::Italic ? L"italic" : L"normal";
+}
+
+const wchar_t* MarkerStyleText(MarkerStyle value) {
+    switch (value) {
+        case MarkerStyle::Check:
+            return L"check";
+        case MarkerStyle::Bar:
+            return L"bar";
+        case MarkerStyle::None:
+            return L"none";
+        default:
+            return L"dot";
+    }
+}
+
+const wchar_t* AcceleratorModeText(AcceleratorMode value) {
+    switch (value) {
+        case AcceleratorMode::Strip:
+            return L"strip";
+        case AcceleratorMode::Raw:
+            return L"raw";
+        default:
+            return L"underline";
+    }
+}
+
+const wchar_t* AnimEasingText(AnimEasing value) {
+    switch (value) {
+        case AnimEasing::EaseOut:
+            return L"easeOut";
+        case AnimEasing::EaseInOut:
+            return L"easeInOut";
+        case AnimEasing::Back:
+            return L"back";
+        case AnimEasing::Bounce:
+            return L"bounce";
+        case AnimEasing::Elastic:
+            return L"elastic";
+        default:
+            return L"linear";
+    }
+}
+
+// The reverse of ApplyAppearanceValue: canonical value text for one schema key
+// from an appearance snapshot. Returns false when the key is unset (so callers
+// emit a delete override) or when the row is the deprecated `animation` alias.
+bool AppearanceValueText(const Appearance& appearance,
+                         const ConfigSchemaEntry& entry, std::wstring& out) {
+    const std::wstring key = ToLowerCopy(entry.key);
+    auto color = [&](uint32_t value) {
+        out = FormatColorRgba(value);
+        return true;
+    };
+    auto number = [&](int value) {
+        out = std::to_wstring(value);
+        return true;
+    };
+    auto boolean = [&](bool value) {
+        out = value ? L"true" : L"false";
+        return true;
+    };
+
+    if (key == L"background") return color(appearance.background);
+    if (key == L"blur") return boolean(appearance.blur);
+    if (key == L"blurstrength") return number(appearance.blurStrength);
+    if (key == L"cornerradius") return number(appearance.cornerRadius);
+    if (key == L"border") return color(appearance.border);
+    if (key == L"borderwidth") return number(appearance.borderWidth);
+    if (key == L"shadow") return boolean(appearance.shadow);
+    if (key == L"shadowsize") return number(appearance.shadowSize);
+    if (key == L"shadowoffsetx") return number(appearance.shadowOffsetX);
+    if (key == L"shadowoffsety") return number(appearance.shadowOffsetY);
+    if (key == L"font") {
+        out = appearance.fontFace + L", " + FormatFontSize(appearance.fontSize);
+        return true;
+    }
+    if (key == L"itemheight") return number(appearance.itemHeight);
+    if (key == L"iconsize") return number(appearance.iconSize);
+    if (key == L"padding") return number(appearance.padding);
+    if (key == L"separator") return color(appearance.separator);
+    if (key == L"hoverbackground") return color(appearance.hoverBackground);
+    if (key == L"pressedbackground") return color(appearance.pressedBackground);
+    if (key == L"textcolor") return color(appearance.textColor);
+    if (key == L"disabledtextcolor") return color(appearance.disabledTextColor);
+    if (key == L"submenuarrow") return color(appearance.submenuArrow);
+    if (key == L"animationopen") {
+        out = AnimationEffectsText(appearance.animationOpen);
+        return true;
+    }
+    if (key == L"animationclose") {
+        out = AnimationEffectsText(appearance.animationClose);
+        return true;
+    }
+    if (key == L"animation") {
+        return false;  // deprecated alias, not editable
+    }
+    if (key == L"animationduration") return number(appearance.animationDuration);
+    if (key == L"animationcloseduration") {
+        return number(appearance.animationCloseDuration);
+    }
+    if (key == L"animationframems") return number(appearance.animationFrameMs);
+    if (key == L"animationeasing") {
+        out = AnimEasingText(appearance.animationEasing);
+        return true;
+    }
+    if (key == L"slideoffsetx") return number(appearance.slideOffsetX);
+    if (key == L"slideoffsety") return number(appearance.slideOffsetY);
+    if (key == L"scalefrom") return number(appearance.scaleFrom);
+    if (key == L"animationanchor") {
+        out = appearance.animationAnchorAtCursor ? L"cursor" : L"center";
+        return true;
+    }
+    if (key == L"animatesubmenus") return boolean(appearance.animateSubmenus);
+    if (key == L"verticalpadding") return number(appearance.verticalPadding);
+    if (key == L"minwidth") return number(appearance.minWidth);
+    if (key == L"maxwidth") return number(appearance.maxWidth);
+    if (key == L"itempadding") {
+        if (appearance.itemPadding < 0) {
+            return false;
+        }
+        return number(appearance.itemPadding);
+    }
+    if (key == L"separatorspacing") return number(appearance.separatorSpacing);
+    if (key == L"markerwidth") return number(appearance.markerWidth);
+    if (key == L"fontweight") {
+        out = FontWeightText(appearance.fontWeight);
+        return true;
+    }
+    if (key == L"fontstyle") {
+        out = FontStyleText(appearance.fontStyle);
+        return true;
+    }
+    if (key == L"cornerradii") {
+        if (!appearance.hasCornerRadii) {
+            return false;
+        }
+        out = std::to_wstring(appearance.cornerRadii.topLeft) + L", " +
+              std::to_wstring(appearance.cornerRadii.topRight) + L", " +
+              std::to_wstring(appearance.cornerRadii.bottomRight) + L", " +
+              std::to_wstring(appearance.cornerRadii.bottomLeft);
+        return true;
+    }
+    if (key == L"shadowopacity") return number(appearance.shadowOpacity);
+    if (key == L"shadowcolor") return color(appearance.shadowColor);
+    if (key == L"shadowblur") return number(appearance.shadowBlur);
+    if (key == L"marker") {
+        out = MarkerStyleText(appearance.marker);
+        return true;
+    }
+    if (key == L"markercolor") {
+        if (!appearance.hasMarkerColor) {
+            return false;
+        }
+        return color(appearance.markerColor);
+    }
+    if (key == L"headercolor") {
+        if (!appearance.hasHeaderColor) {
+            return false;
+        }
+        return color(appearance.headerColor);
+    }
+    if (key == L"showaccelerators") {
+        out = AcceleratorModeText(appearance.acceleratorMode);
+        return true;
+    }
+    return false;
+}
+
 struct CanonicalSource {
     std::unordered_map<std::wstring, std::wstring> baseValues;
     std::unordered_map<std::wstring, std::wstring> lightValues;

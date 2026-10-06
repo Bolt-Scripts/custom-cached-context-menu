@@ -4008,6 +4008,72 @@ int main() {
         CHECK(cmo::IsThirdPartyItem(command));
     }
 
+    {
+        cmo::Appearance a;
+        std::wstring out;
+        CHECK(cmo::AppearanceValueText(a, *cmo::SchemaFind(L"background"), out));
+        CHECK_EQ(out, std::wstring(L"30, 30, 30, 240"));
+        a.background = 0x11223344;
+        CHECK(cmo::AppearanceValueText(a, *cmo::SchemaFind(L"background"), out));
+        CHECK_EQ(out, std::wstring(L"34, 51, 68, 17"));
+
+        a.fontFace = L"Consolas";
+        a.fontSize = 11.0f;
+        CHECK(cmo::AppearanceValueText(a, *cmo::SchemaFind(L"font"), out));
+        CHECK_EQ(out, std::wstring(L"Consolas, 11"));
+
+        a.animationOpen = cmo::kAnimFade | cmo::kAnimSlide;
+        CHECK(cmo::AppearanceValueText(a, *cmo::SchemaFind(L"animationOpen"),
+                                       out));
+        CHECK_EQ(out, std::wstring(L"fade, slide"));
+
+        a.fontWeight = cmo::FontWeightKind::Bold;
+        CHECK(cmo::AppearanceValueText(a, *cmo::SchemaFind(L"fontWeight"), out));
+        CHECK_EQ(out, std::wstring(L"bold"));
+        a.animationAnchorAtCursor = false;
+        CHECK(cmo::AppearanceValueText(a, *cmo::SchemaFind(L"animationAnchor"),
+                                       out));
+        CHECK_EQ(out, std::wstring(L"center"));
+        a.marker = cmo::MarkerStyle::Bar;
+        CHECK(cmo::AppearanceValueText(a, *cmo::SchemaFind(L"marker"), out));
+        CHECK_EQ(out, std::wstring(L"bar"));
+        a.acceleratorMode = cmo::AcceleratorMode::Strip;
+        CHECK(cmo::AppearanceValueText(a, *cmo::SchemaFind(L"showAccelerators"),
+                                       out));
+        CHECK_EQ(out, std::wstring(L"strip"));
+        a.animationEasing = cmo::AnimEasing::Bounce;
+        CHECK(cmo::AppearanceValueText(a, *cmo::SchemaFind(L"animationEasing"),
+                                       out));
+        CHECK_EQ(out, std::wstring(L"bounce"));
+
+        a.itemPadding = -1;
+        CHECK(!cmo::AppearanceValueText(a, *cmo::SchemaFind(L"itemPadding"),
+                                        out));
+        a.hasCornerRadii = false;
+        CHECK(!cmo::AppearanceValueText(a, *cmo::SchemaFind(L"cornerRadii"),
+                                        out));
+        a.hasMarkerColor = false;
+        CHECK(!cmo::AppearanceValueText(a, *cmo::SchemaFind(L"markerColor"),
+                                        out));
+        a.hasHeaderColor = false;
+        CHECK(!cmo::AppearanceValueText(a, *cmo::SchemaFind(L"headerColor"),
+                                        out));
+
+        // Every settable key formats, re-applies, and formats identically.
+        for (const cmo::ConfigSchemaEntry& row : cmo::kAppearanceSchema) {
+            cmo::Appearance src;
+            std::wstring first;
+            if (!cmo::AppearanceValueText(src, row, first)) {
+                continue;
+            }
+            cmo::Appearance round;
+            CHECK(cmo::ApplyAppearanceValue(round, row.key, first, nullptr));
+            std::wstring second;
+            CHECK(cmo::AppearanceValueText(round, row, second));
+            CHECK_EQ(first, second);
+        }
+    }
+
     if (g_failures == 0) {
         wprintf(L"ALL TESTS PASSED\n");
         return 0;

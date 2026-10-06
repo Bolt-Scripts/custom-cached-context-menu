@@ -4010,6 +4010,67 @@ int main() {
     }
 
     {
+        cmo::SettingsWriteState st;
+        cmo::SettingsMarkDirty(st, 1000, 400);
+        CHECK(st.pending);
+        CHECK(!cmo::SettingsWriteDue(st, 1399));
+        CHECK(cmo::SettingsWriteDue(st, 1400));
+        cmo::SettingsMarkDirty(st, 1500, 400);  // debounce extends
+        CHECK(!cmo::SettingsWriteDue(st, 1800));
+        CHECK(cmo::SettingsWriteDue(st, 1900));
+        cmo::SettingsWriteFinished(st, true, 1900, 1000);
+        CHECK(!st.pending);
+        CHECK(!st.failed);
+        cmo::SettingsMarkDirty(st, 2000, 400);
+        cmo::SettingsWriteFinished(st, false, 2400, 1000);
+        CHECK(st.pending);
+        CHECK(st.failed);
+        CHECK(!cmo::SettingsWriteDue(st, 3399));
+        CHECK(cmo::SettingsWriteDue(st, 3400));
+        cmo::SettingsRequestFlush(st);
+        CHECK(cmo::SettingsWriteDue(st, 3400));
+
+        cmo::SettingsTarget target;
+        target.kind = cmo::SettingsTargetKind::MenuIniBase;
+        target.section = L"appearance";
+        cmo::Appearance working;
+        working.itemHeight = 33;
+        std::vector<cmo::ConfigOverride> changes =
+            cmo::BuildChangeOverrides(working, {L"itemHeight"}, target);
+        CHECK_EQ(changes.size(), size_t(1));
+        CHECK_EQ(changes[0].value, std::wstring(L"33"));
+        CHECK(!changes[0].remove);
+        working.itemPadding = -1;
+        changes = cmo::BuildChangeOverrides(working, {L"itemPadding"}, target);
+        CHECK(changes[0].remove);
+        target.section = L"appearance.dark";
+        changes = cmo::BuildChangeOverrides(working, {L"itemHeight"}, target);
+        CHECK_EQ(changes[0].section, std::wstring(L"appearance.dark"));
+
+        const std::wstring file =
+            L"[appearance]\nbackground = 9, 9, 9, 255\nitemHeight = 40\n"
+            L"[rules]\nhide = label:\"X\"\n";
+        const std::wstring out = cmo::BuildMenuIniTextWithChanges(
+            file, {{L"appearance", L"itemHeight", L"33", false}});
+        CHECK(out.find(L"itemHeight = 33") != std::wstring::npos);
+        CHECK(out.find(L"background = 9, 9, 9, 255") != std::wstring::npos);
+        CHECK(out.find(L"hide = label:\"X\"") != std::wstring::npos);
+
+        // Theme write: preset fallback survives, only [appearance] is kept.
+        // Real preset snippets start with an [appearance] header.
+        const std::wstring theme = cmo::BuildThemeTextWithChanges(
+            L"[appearance]\nitemHeight = 30\nbackground = 1, 2, 3, 255\n",
+            L"background = 10, 20, 30, 255\n",
+            {{L"appearance", L"background", L"40, 50, 60, 255", false}});
+        CHECK(theme.find(L"[appearance]") != std::wstring::npos);
+        CHECK(theme.find(L"[appearance.light]") == std::wstring::npos);
+        CHECK(theme.find(L"[rules]") == std::wstring::npos);
+        CHECK(theme.find(L"itemHeight = 30") != std::wstring::npos);
+        CHECK(theme.find(L"background = 40, 50, 60, 255") !=
+              std::wstring::npos);
+    }
+
+    {
         const cmo::ControlSpec slider =
             cmo::MakeControlSpec(*cmo::SchemaFind(L"blurStrength"));
         CHECK(slider.kind == cmo::ControlKind::IntSlider);

@@ -4679,9 +4679,9 @@ int ThemeIndexFromName(const std::wstring& name) {
 }
 
 // Canonical [appearance] block extracted from canonicalized config text.
-std::wstring CanonicalAppearanceBlock(const std::wstring& configText) {
-    const std::wstring canonical =
-        CanonicalizeConfig(configText, kConfigSchemaVersion);
+// The [appearance] block of an already-canonical config text, trimmed to the
+// section and terminated with a newline.
+std::wstring ExtractAppearanceBlock(const std::wstring& canonical) {
     const size_t start = canonical.find(L"[appearance]\n");
     if (start == std::wstring::npos) {
         return L"";
@@ -4696,6 +4696,11 @@ std::wstring CanonicalAppearanceBlock(const std::wstring& configText) {
     }
     block += L'\n';
     return block;
+}
+
+std::wstring CanonicalAppearanceBlock(const std::wstring& configText) {
+    return ExtractAppearanceBlock(
+        CanonicalizeConfig(configText, kConfigSchemaVersion));
 }
 
 // Canonical, complete [appearance] block for a theme: canonicalizing the
@@ -5802,6 +5807,89 @@ std::vector<MenuItem> BuildSettingsTree(const SettingsModelInputs& inputs) {
     root.push_back(std::move(about));
 
     return root;
+}
+
+// --- Settings persistence helpers ------------------------------------------
+
+struct SettingsWriteState {
+    bool pending = false;
+    bool failed = false;
+    uint64_t deadlineMs = 0;
+};
+
+void SettingsMarkDirty(SettingsWriteState& state, uint64_t nowMs,
+                       int debounceMs) {
+    state.pending = true;
+    state.failed = false;
+    state.deadlineMs = nowMs + static_cast<uint64_t>(debounceMs);
+}
+
+bool SettingsWriteDue(const SettingsWriteState& state, uint64_t nowMs) {
+    return state.pending && nowMs >= state.deadlineMs;
+}
+
+void SettingsWriteFinished(SettingsWriteState& state, bool ok, uint64_t nowMs,
+                           int retryMs) {
+    if (ok) {
+        state.pending = false;
+        state.failed = false;
+        return;
+    }
+    state.pending = true;
+    state.failed = true;
+    state.deadlineMs = nowMs + static_cast<uint64_t>(retryMs);
+}
+
+void SettingsRequestFlush(SettingsWriteState& state) {
+    if (state.pending) {
+        state.deadlineMs = 0;
+    }
+}
+
+// One override per dirty key in the target section; unset values remove the
+// key so the target's inheritance (theme preset, light/dark base, derived
+// default) applies again.
+std::vector<ConfigOverride> BuildChangeOverrides(
+    const Appearance& working, const std::vector<std::wstring>& dirtyKeys,
+    const SettingsTarget& target) {
+    std::vector<ConfigOverride> changes;
+    changes.reserve(dirtyKeys.size());
+    for (const std::wstring& key : dirtyKeys) {
+        const ConfigSchemaEntry* entry = SchemaFind(key);
+        if (!entry) {
+            continue;
+        }
+        ConfigOverride change;
+        change.section = target.section;
+        change.key = entry->key;
+        std::wstring value;
+        if (AppearanceValueText(working, *entry, value)) {
+            change.value = value;
+        } else {
+            change.remove = true;
+        }
+        changes.push_back(std::move(change));
+    }
+    return changes;
+}
+
+std::wstring BuildMenuIniTextWithChanges(
+    const std::wstring& fileText,
+    const std::vector<ConfigOverride>& changes) {
+    return CanonicalizeConfigWithOverrides(fileText, kConfigSchemaVersion,
+                                           changes);
+}
+
+// Theme files are complete [appearance] blocks; the preset snippet supplies
+// the fallback values for keys the file does not set (matching ThemeStore's
+// load merge), and only the [appearance] section is written back.
+std::wstring BuildThemeTextWithChanges(
+    const std::wstring& presetSnippet, const std::wstring& fileText,
+    const std::vector<ConfigOverride>& changes) {
+    const std::wstring combined = presetSnippet + L"\n" + fileText;
+    const std::wstring canonical = CanonicalizeConfigWithOverrides(
+        combined, kConfigSchemaVersion, changes);
+    return ExtractAppearanceBlock(canonical);
 }
 
 // ===========================================================================

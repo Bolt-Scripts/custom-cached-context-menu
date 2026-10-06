@@ -209,7 +209,9 @@ The built-in grouping is controlled by the Windhawk settings: **Move Windows
 extras**, **Move third-party handlers**, and **Keep in the main menu**
 (comma-separated labels or verbs). In `menu.ini`, `keep` rules also protect
 items from the built-in grouping, so `keep = label:"TortoiseSVN*"` keeps that
-handler in the main menu.
+handler in the main menu. The advanced submenu also hosts the mod's own
+built-ins: **Open in new process** (folder selections; opens the folder in an
+isolated Explorer process) and **Menu settings…**.
 
 ## Themes
 

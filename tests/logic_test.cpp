@@ -4010,6 +4010,57 @@ int main() {
     }
 
     {
+        // Shell-only open items join the open group instead of the tail.
+        cmo::MenuModel core = cmo::BuildCoreModel(
+            cmo::Scope::Folders, {L"C:\\dir"}, cmo::Shape::Single);
+        cmo::MenuModel cached{};
+        cmo::MenuItem tab{};
+        tab.kind = cmo::ItemKind::Command;
+        tab.action = cmo::ActionKind::ShellVerb;
+        tab.label = L"Open in new tab";
+        tab.canonicalVerb = L"opennewtab";
+        cached.items.push_back(tab);
+        cmo::MenuItem props{};
+        props.kind = cmo::ItemKind::Command;
+        props.action = cmo::ActionKind::ShellVerb;
+        props.label = L"Properties";
+        props.canonicalVerb = L"properties";
+        cached.items.push_back(props);
+        const cmo::MenuModel merged = cmo::MergeCoreWithCached(core, cached);
+        int tabIndex = -1;
+        int propsIndex = -1;
+        int openNewIndex = -1;
+        for (size_t i = 0; i < merged.items.size(); ++i) {
+            if (merged.items[i].canonicalVerb == L"opennewtab") {
+                tabIndex = static_cast<int>(i);
+            }
+            if (merged.items[i].canonicalVerb == L"properties") {
+                propsIndex = static_cast<int>(i);
+            }
+            if (merged.items[i].canonicalVerb == L"opennew") {
+                openNewIndex = static_cast<int>(i);
+            }
+        }
+        CHECK(tabIndex >= 0);
+        CHECK(openNewIndex >= 0);
+        CHECK(propsIndex >= 0);
+        CHECK(tabIndex > openNewIndex);
+        CHECK(tabIndex < propsIndex);
+    }
+
+    {
+        // The built-in "Open in new process" entry is appended once.
+        std::vector<cmo::MenuItem> items;
+        cmo::AppendOpenNewProcessEntry(items);
+        CHECK(items.size() >= 2);
+        CHECK(items.back().builtinAction == cmo::BuiltinAction::OpenNewProcess);
+        CHECK(items[items.size() - 2].kind == cmo::ItemKind::Separator);
+        const size_t before = items.size();
+        cmo::AppendOpenNewProcessEntry(items);
+        CHECK_EQ(items.size(), before);
+    }
+
+    {
         std::vector<cmo::MenuItem> items;
         cmo::AppendSettingsEntry(items);
         CHECK(items.size() >= 2);

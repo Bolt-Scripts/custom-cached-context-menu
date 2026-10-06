@@ -361,6 +361,7 @@ enum class BuiltinAction : uint8_t {
     None,
     CopyPath,
     OpenNewWindow,
+    OpenNewProcess,
     Properties,
     OpenSettings,
 };
@@ -5896,13 +5897,13 @@ std::vector<MenuItem> BuildSettingsTree(const SettingsModelInputs& inputs) {
     return root;
 }
 
-// Removes any existing settings entry (and its separator) from the tree, so
+// Removes any existing built-in entry (and its separator) from the tree, so
 // repeated assembly never duplicates or leaves a stale copy behind.
-bool StripSettingsEntry(std::vector<MenuItem>& items) {
+bool StripBuiltinAction(std::vector<MenuItem>& items, BuiltinAction action) {
     bool removed = false;
     for (size_t i = 0; i < items.size();) {
         if (items[i].action == ActionKind::Builtin &&
-            items[i].builtinAction == BuiltinAction::OpenSettings) {
+            items[i].builtinAction == action) {
             if (i > 0 && items[i - 1].kind == ItemKind::Separator) {
                 items.erase(items.begin() + (i - 1), items.begin() + (i + 1));
             } else {
@@ -5911,7 +5912,7 @@ bool StripSettingsEntry(std::vector<MenuItem>& items) {
             removed = true;
             continue;
         }
-        if (StripSettingsEntry(items[i].children)) {
+        if (StripBuiltinAction(items[i].children, action)) {
             removed = true;
         }
         ++i;
@@ -5919,11 +5920,26 @@ bool StripSettingsEntry(std::vector<MenuItem>& items) {
     return removed;
 }
 
+// Built-in folder action: opens the selection in an isolated Explorer process
+// (explorer.exe /separate). Appended with the other built-ins.
+void AppendOpenNewProcessEntry(std::vector<MenuItem>& items) {
+    StripBuiltinAction(items, BuiltinAction::OpenNewProcess);
+    MenuItem separator = MakeSettingsItem(ItemKind::Separator, L"");
+    separator.action = ActionKind::ViewAction;
+    items.push_back(std::move(separator));
+    MenuItem row = MakeSettingsItem(ItemKind::Command, L"Open in new process");
+    row.id = 0xF301;
+    row.action = ActionKind::Builtin;
+    row.builtinAction = BuiltinAction::OpenNewProcess;
+    row.iconRef = L"@icon:open";
+    items.push_back(std::move(row));
+}
+
 // Appends the "Menu settings..." entry (and a separator) to a list. Called
 // after rules, pruning, and advanced-submenu reorganization, so nothing can
 // hide it and the advanced submenu exists when it should.
 void AppendSettingsEntry(std::vector<MenuItem>& items) {
-    StripSettingsEntry(items);
+    StripBuiltinAction(items, BuiltinAction::OpenSettings);
     MenuItem separator = MakeSettingsItem(ItemKind::Separator, L"");
     separator.action = ActionKind::ViewAction;
     items.push_back(std::move(separator));
@@ -11817,6 +11833,26 @@ MenuModel BuildCoreFileModel(const std::vector<std::wstring>& paths, Shape shape
 // keep their order, native invocation descriptors are adopted for matching
 // items, duplicates are dropped, cached separators are skipped, and the
 // fallback item stays last.
+// Items that belong with the Open group at the top of a folder menu. Used to
+// place shell-only entries (for example "Open in new tab") correctly instead
+// of appending them after the tail group.
+bool IsOpenGroupItem(const MenuItem& item) {
+    static const wchar_t* kOpenVerbs[] = {
+        L"open",   L"opennew",  L"opennewtab", L"opennewwindow",
+        L"openwith", L"openas", L"edit",       L"print",
+        L"printto", L"preview",
+    };
+    if (!item.canonicalVerb.empty()) {
+        for (const wchar_t* verb : kOpenVerbs) {
+            if (_wcsicmp(item.canonicalVerb.c_str(), verb) == 0) {
+                return true;
+            }
+        }
+    }
+    const std::wstring normalized = NormalizeMenuLabel(item.label);
+    return normalized.rfind(L"Open", 0) == 0;
+}
+
 MenuModel MergeCoreWithCached(const MenuModel& core, const MenuModel& cached) {
     MenuModel result = core;
 
@@ -11850,6 +11886,7 @@ MenuModel MergeCoreWithCached(const MenuModel& core, const MenuModel& cached) {
     }
 
     std::vector<MenuItem> added;
+    std::vector<MenuItem> addedOpen;
     for (const MenuItem& item : cached.items) {
         if (item.kind == ItemKind::Separator) {
             continue;
@@ -11892,7 +11929,27 @@ MenuModel MergeCoreWithCached(const MenuModel& core, const MenuModel& cached) {
             (!item.canonicalVerb.empty() && coreVerbs.count(item.canonicalVerb))) {
             continue;
         }
-        added.push_back(item);
+        if (IsOpenGroupItem(item)) {
+            addedOpen.push_back(item);
+        } else {
+            added.push_back(item);
+        }
+    }
+
+    if (!addedOpen.empty()) {
+        size_t insertAt = 0;
+        bool found = false;
+        for (size_t i = 0; i < result.items.size(); ++i) {
+            if (IsOpenGroupItem(result.items[i])) {
+                insertAt = i + 1;
+                found = true;
+            }
+        }
+        if (!found) {
+            insertAt = std::min<size_t>(1, result.items.size());
+        }
+        result.items.insert(result.items.begin() + insertAt, addedOpen.begin(),
+                            addedOpen.end());
     }
 
     if (!added.empty()) {
@@ -15259,6 +15316,23 @@ bool InvokeBuiltinAction(const MenuItem& item, const InvocationContext& ctx) {
             }
             return any;
         }
+        case BuiltinAction::OpenNewProcess: {
+            // explorer.exe /separate starts an isolated process for the folder.
+            bool any = false;
+            for (const std::wstring& folder : targets) {
+                const std::wstring parameters =
+                    L"/separate,\"" + folder + L"\"";
+                SHELLEXECUTEINFOW info = {};
+                info.cbSize = sizeof(info);
+                info.fMask = SEE_MASK_FLAG_NO_UI;
+                info.hwnd = ctx.owner;
+                info.lpFile = L"explorer.exe";
+                info.lpParameters = parameters.c_str();
+                info.nShow = SW_SHOWNORMAL;
+                any = ShellExecuteExW(&info) != FALSE || any;
+            }
+            return any;
+        }
         case BuiltinAction::Properties: {
             if (SHObjectProperties(ctx.owner, SHOP_FILEPATH, targets.front().c_str(),
                                    nullptr)) {
@@ -17274,6 +17348,9 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
                     container = &item.children;
                     break;
                 }
+            }
+            if (scope == Scope::Folders || scope == Scope::Drive) {
+                AppendOpenNewProcessEntry(*container);
             }
             AppendSettingsEntry(*container);
         }

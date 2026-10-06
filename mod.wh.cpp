@@ -6988,51 +6988,68 @@ AnimationSpec ResolveAnimationSpec(const Appearance& appearance) {
     return spec;
 }
 
-void ApplyWindowAnimation(IDCompositionVisual* visual, const AnimationSpec& spec,
+bool ApplyWindowAnimation(IDCompositionVisual* visual, const AnimationSpec& spec,
                           bool opening) {
     if (!visual) {
-        return;
+        return false;
     }
     IDCompositionDevice* comp = g_renderDevice.CompDevice();
     if (!comp) {
-        return;
+        return false;
     }
 
     if (!spec.animate || spec.durationMs <= 0) {
         // Default opacity is 1; non-animated closes destroy the window.
-        return;
+        return false;
     }
 
     IDCompositionEffectGroup* group = nullptr;
-    if (FAILED(comp->CreateEffectGroup(&group)) || !group) {
-        return;
+    const HRESULT groupHr = comp->CreateEffectGroup(&group);
+    if (FAILED(groupHr) || !group) {
+        if (g_settings.debugLogging) {
+            Wh_Log(L"Animation: CreateEffectGroup failed %08X",
+                   static_cast<unsigned>(groupHr));
+        }
+        return false;
     }
     auto* groupCorrect = reinterpret_cast<IDCompositionEffectGroupCorrect*>(group);
     auto* visualCorrect = reinterpret_cast<IDCompositionVisualCorrect*>(visual);
 
     const double duration = static_cast<double>(spec.durationMs) / 1000.0;
+    HRESULT opacityHr = E_FAIL;
     IDCompositionAnimation* opacity = nullptr;
     if (SUCCEEDED(comp->CreateAnimation(&opacity)) && opacity) {
         opacity->AddCubic(0.0, opening ? 0.0 : 1.0,
                           (opening ? 1.0 : -1.0) / duration, 0.0, 0.0);
         opacity->End(duration, opening ? 1.0 : 0.0);
-        groupCorrect->SetOpacity(opacity);
+        opacityHr = groupCorrect->SetOpacity(opacity);
         opacity->Release();
     }
-    visualCorrect->SetEffect(group);
+    const HRESULT effectHr = visualCorrect->SetEffect(group);
     group->Release();
 
+    HRESULT offsetHr = S_FALSE;
     if (spec.slide) {
         IDCompositionAnimation* slide = nullptr;
         if (SUCCEEDED(comp->CreateAnimation(&slide)) && slide) {
             slide->AddCubic(0.0, opening ? 12.0 : 0.0,
                             (opening ? -12.0 : 12.0) / duration, 0.0, 0.0);
             slide->End(duration, opening ? 0.0 : 12.0);
-            visualCorrect->SetOffsetX(slide);
+            offsetHr = visualCorrect->SetOffsetX(slide);
             slide->Release();
         }
     }
     comp->Commit();
+    if (g_settings.debugLogging) {
+        Wh_Log(L"Animation: opening=%d slide=%d duration=%d group=%08X "
+               L"opacity=%08X effect=%08X offset=%08X",
+               opening ? 1 : 0, spec.slide ? 1 : 0, spec.durationMs,
+               static_cast<unsigned>(groupHr),
+               static_cast<unsigned>(opacityHr),
+               static_cast<unsigned>(effectHr),
+               static_cast<unsigned>(offsetHr));
+    }
+    return SUCCEEDED(effectHr);
 }
 
 void RenderMenuWindow(MenuWindow* window, const LayoutPanel& panel,
@@ -7193,9 +7210,9 @@ void OpenSubmenu(MenuSession* session, int index, int itemIndex) {
                      session->appearance,
                      hasBackdrop ? &session->backdrops.back() : nullptr,
                      session->margin, session->shadowClipSides.back());
+    child->Show();
     ApplyWindowAnimation(child->CompVisual(),
                          ResolveAnimationSpec(session->appearance), true);
-    child->Show();
 }
 
 constexpr UINT_PTR kMenuSubmenuTimerId = 1;
@@ -7719,8 +7736,8 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
     root->Move(POINT{panelPos.x - margin, panelPos.y - margin});
     RenderMenuWindow(root, *panel, session.states[0], metrics, appearance,
                      hasBackdrop ? &session.backdrops[0] : nullptr, margin, 0);
-    ApplyWindowAnimation(root->CompVisual(), ResolveAnimationSpec(appearance), true);
     root->Show();
+    ApplyWindowAnimation(root->CompVisual(), ResolveAnimationSpec(appearance), true);
     if (!g_menuMouseHook.load()) {
         HHOOK hook = SetWindowsHookExW(WH_MOUSE_LL, MenuMouseHookProc,
                                        GetModuleHandleW(nullptr), 0);
@@ -7761,10 +7778,12 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
         session.submenuTimerActive = false;
     }
     const AnimationSpec closing = ResolveAnimationSpec(appearance);
-    if (closing.animate && closing.durationMs > 0) {
-        for (MenuWindow* window : session.windows) {
+    bool closingAnimated = false;
+    for (MenuWindow* window : session.windows) {
+        closingAnimated |=
             ApplyWindowAnimation(window->CompVisual(), closing, false);
-        }
+    }
+    if (closingAnimated) {
         Sleep(static_cast<DWORD>(closing.durationMs));
     }
     if (session.ownsMouseHook) {

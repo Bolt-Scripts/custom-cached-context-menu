@@ -2043,25 +2043,25 @@ std::wstring GenerateDefaultConfigText() {
     std::wstring text = CanonicalizeConfig(L"", kConfigSchemaVersion);
     const std::wstring examples =
         L"\n; --- Examples (see docs/CONFIG.md) ---\n"
-        L"; [rules]\n"
-        L"; hide = label:\"Cast to Device\"\n"
-        L"; keep = label:Share\n"
-        L"; move = thirdParty -> \"More options\"\n"
+        L"; [rules]                             ; predicates: label / verb / ext / thirdParty / rule\n"
+        L"; hide = label:\"Cast to Device\"       ; drop matching items\n"
+        L"; keep = label:Share                  ; protect from the built-in grouping\n"
+        L"; move = thirdParty -> \"More options\"  ; move matches into a submenu\n"
         L";\n"
-        L"; [command \"Open in VS Code\"]\n"
+        L"; [command \"Open in VS Code\"]         ; custom command (%1 file, %* all, %dir% folder)\n"
         L"; command = code.exe \"%1\"\n"
         L"; workingDir = %dir%\n"
-        L"; match.ext = .cs, .cpp\n"
-        L"; menu = Tools\n"
+        L"; match.ext = .cs, .cpp               ; only for these extensions\n"
+        L"; menu = Tools                        ; place inside a custom submenu\n"
         L";\n"
-        L"; [submenu \"Tools\"]\n"
+        L"; [submenu \"Tools\"]                   ; custom submenu\n"
         L"; icon = @glyph:E712\n"
-        L"; position = top\n"
+        L"; position = top                      ; top / bottom / after:\"X\" / before:\"X\"\n"
         L";\n"
-        L"; [item \"TortoiseSVN*\"]\n"
+        L"; [item \"TortoiseSVN*\"]               ; per-item override; the last match wins\n"
         L"; label = SVN\n"
         L"; icon = C:\\Tools\\svn.ico,0\n"
-        L"; marker = bar\n";
+        L"; marker = bar                        ; dot / check / bar / none\n";
     const size_t metaPos = text.rfind(L"\n[meta]\n");
     if (metaPos != std::wstring::npos) {
         text.insert(metaPos, examples);
@@ -7805,6 +7805,7 @@ public:
     void SetDevice(ID2D1DeviceContext* dc, IDWriteFactory* dwrite) {
         dc_ = dc;
         dwrite_ = dwrite;
+        iconFontUnavailable_ = false;  // the collection may have changed
     }
 
     void Bind(LayoutPanel& panel, const LayoutMetrics& metrics,
@@ -7931,8 +7932,8 @@ private:
     }
 
     IDWriteTextFormat* CreateIconTextFormat(float size) {
-        if (!dwrite_) {
-            return nullptr;
+        if (!dwrite_ || iconFontUnavailable_) {
+            return nullptr;  // negative cache: no icon font on this system
         }
         static const wchar_t* kFamilies[] = {L"Segoe Fluent Icons",
                                              L"Segoe MDL2 Assets"};
@@ -7958,6 +7959,7 @@ private:
         if (collection) {
             collection->Release();
         }
+        iconFontUnavailable_ = true;
         return nullptr;
     }
 
@@ -8080,6 +8082,7 @@ private:
     LruMap<IDWriteTextLayout*> text_;
     LruMap<ID2D1Bitmap*> icons_;
     LruMap<IDWriteTextLayout*> glyphs_;
+    bool iconFontUnavailable_ = false;
 };
 
 inline ContentCaches g_contentCaches;
@@ -9492,6 +9495,45 @@ void SettingsFocusField(MenuSession& session, int level,
     }
 }
 
+// Values of the base [appearance] section of an appearance text (theme preset
+// or menu.ini), used to display inherited values after a reset. Commented rows
+// stay unset.
+Appearance AppearanceFromAppearanceText(const std::wstring& text) {
+    Appearance appearance;
+    bool inAppearance = false;
+    size_t pos = 0;
+    while (pos <= text.size()) {
+        const size_t newline = text.find(L'\n', pos);
+        const size_t lineEnd =
+            newline == std::wstring::npos ? text.size() : newline;
+        const std::wstring line =
+            text.substr(pos, lineEnd - pos);
+        const std::wstring trimmed =
+            TrimWhitespace(StripInlineComment(line));
+        if (!trimmed.empty() && trimmed[0] == L'[' && trimmed.back() == L']') {
+            const std::wstring name = ToLowerCopy(
+                TrimWhitespace(trimmed.substr(1, trimmed.size() - 2)));
+            inAppearance = name == L"appearance";
+        } else if (inAppearance) {
+            const size_t equals = trimmed.find(L'=');
+            if (equals != std::wstring::npos) {
+                const std::wstring key =
+                    TrimWhitespace(trimmed.substr(0, equals));
+                const std::wstring value =
+                    TrimWhitespace(trimmed.substr(equals + 1));
+                if (!key.empty() && !value.empty()) {
+                    ApplyAppearanceValue(appearance, key, value, nullptr);
+                }
+            }
+        }
+        if (newline == std::wstring::npos) {
+            break;
+        }
+        pos = newline + 1;
+    }
+    return appearance;
+}
+
 void RelayoutSession(MenuSession& session);
 void SettingsApplyReset(MenuSession& session, const std::wstring& key);
 void SettingsPerformWrite(SettingsSessionContext* settings);
@@ -10460,6 +10502,13 @@ void RepaintMenuWindow(MenuSession* session, int index) {
 void CloseSubmenusBelow(MenuSession* session, int index) {
     while (static_cast<int>(session->windows.size()) > index + 1) {
         MenuWindow* window = session->windows.back();
+        // A closed level must not keep blinking its caret from the pool.
+        if (!session->states.back().focusedControl.empty()) {
+            KillTimer(window->Handle(), kSettingsCaretTimerId);
+            session->states.back().focusedControl.clear();
+            session->states.back().editBuffer.clear();
+            session->states.back().caretVisible = false;
+        }
         session->windows.pop_back();
         session->states.pop_back();
         if (!session->shadowClipSides.empty()) {
@@ -11349,6 +11398,36 @@ void RelayoutSession(MenuSession& session) {
             pos = childPos;
         }
         session.windows[i]->SetBounds(pos, width, height);
+
+        // Refresh the blur backdrop only when the panel size changed.
+        const int expectedWidth =
+            levelPanel->size.cx / kBackdropDownscaleFactor;
+        const int expectedHeight =
+            levelPanel->size.cy / kBackdropDownscaleFactor;
+        const bool backdropStale =
+            i >= session.backdrops.size() ||
+            session.backdrops[i].width != expectedWidth ||
+            session.backdrops[i].height != expectedHeight;
+        if (backdropStale) {
+            const POINT panelTopLeft = {pos.x + session.margin,
+                                        pos.y + session.margin};
+            const RECT captureRect = {
+                panelTopLeft.x, panelTopLeft.y,
+                panelTopLeft.x + levelPanel->size.cx,
+                panelTopLeft.y + levelPanel->size.cy};
+            BackdropBitmap backdrop;
+            const bool hasBackdrop =
+                session.appearance.blur &&
+                session.appearance.blurStrength > 0 &&
+                CaptureBackdrop(captureRect, kBackdropDownscaleFactor,
+                                BlurPasses(session.appearance.blurStrength),
+                                backdrop);
+            if (i < session.backdrops.size()) {
+                session.backdrops[i] =
+                    hasBackdrop ? std::move(backdrop) : BackdropBitmap{};
+            }
+        }
+
         RepaintMenuWindow(&session, static_cast<int>(i));
     }
 }
@@ -11402,6 +11481,22 @@ void SettingsApplyReset(MenuSession& session, const std::wstring& key) {
     }
     const bool all = key == L"@reset:all";
     const std::wstring group = all ? std::wstring() : key.substr(7);
+
+    // What the reset keys inherit: the theme preset, or menu.ini's base
+    // section. Without this the menu would show the old value until reopen.
+    Appearance inherited;
+    bool haveInherited = false;
+    if (settings->target.kind == SettingsTargetKind::ThemeFile) {
+        inherited = AppearanceFromAppearanceText(
+            GenerateThemeText(settings->target.themeIndex));
+        haveInherited = true;
+    } else if (settings->target.kind != SettingsTargetKind::MenuIniBase) {
+        std::wstring fileText;
+        ReadConfigFile(ConfigFilePath(), fileText);
+        inherited = AppearanceFromAppearanceText(fileText);
+        haveInherited = true;
+    }
+
     for (const ConfigSchemaEntry& entry : kAppearanceSchema) {
         if (!all && group != entry.group) {
             continue;
@@ -11410,9 +11505,16 @@ void SettingsApplyReset(MenuSession& session, const std::wstring& key) {
             !entry.unset) {
             ApplyAppearanceValue(settings->working, entry.key,
                                  entry.defaultValue, nullptr);
+        } else if (haveInherited) {
+            std::wstring inheritedText;
+            if (AppearanceValueText(inherited, entry, inheritedText)) {
+                ApplyAppearanceValue(settings->working, entry.key,
+                                     inheritedText, nullptr);
+            } else {
+                ApplyAppearanceValue(settings->working, entry.key,
+                                     entry.defaultValue, nullptr);
+            }
         }
-        // Inherited targets (theme/light/dark) restore the value by removing
-        // the key on write; the display keeps the current value until reopen.
         if (std::find(settings->dirtyKeys.begin(), settings->dirtyKeys.end(),
                       std::wstring(entry.key)) == settings->dirtyKeys.end()) {
             settings->dirtyKeys.push_back(entry.key);
@@ -15126,20 +15228,17 @@ bool InvokeOpenWith(const InvocationContext& ctx) {
     if (ctx.paths.empty()) {
         return false;
     }
-    bool any = false;
-    for (const std::wstring& path : ctx.paths) {
-        OPENASINFO info = {};
-        info.pcszFile = path.c_str();
-        info.pcszClass = nullptr;
-        info.oaifInFlags = OAIF_ALLOW_REGISTRATION | OAIF_EXEC;
-        if (SUCCEEDED(SHOpenWithDialog(ctx.owner, &info))) {
-            any = true;
-        }
-    }
+    // The shell shows one dialog for the whole selection; SHOpenWithDialog
+    // takes a single file, so use the first path like the native verb does.
+    OPENASINFO info = {};
+    info.pcszFile = ctx.paths.front().c_str();
+    info.pcszClass = nullptr;
+    info.oaifInFlags = OAIF_ALLOW_REGISTRATION | OAIF_EXEC;
+    const bool ok = SUCCEEDED(SHOpenWithDialog(ctx.owner, &info));
     if (g_settings.debugLogging) {
-        Wh_Log(L"Open with: %zu file(s), ok=%d", ctx.paths.size(), any ? 1 : 0);
+        Wh_Log(L"Open with: %zu file(s), ok=%d", ctx.paths.size(), ok ? 1 : 0);
     }
-    return any;
+    return ok;
 }
 
 // Executes a SendTo shortcut with the selected paths as arguments.

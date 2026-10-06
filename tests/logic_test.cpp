@@ -4012,6 +4012,18 @@ int main() {
     }
 
     {
+        // Parsing an appearance text takes the base section only and skips
+        // commented (unset) rows.
+        const std::wstring text =
+            L"; comment\n[appearance]\nitemHeight = 30\n"
+            L"; itemPadding = 6   ; unset\n[appearance.light]\n"
+            L"itemHeight = 99\n";
+        const cmo::Appearance parsed = cmo::AppearanceFromAppearanceText(text);
+        CHECK_EQ(parsed.itemHeight, 30);
+        CHECK_EQ(parsed.itemPadding, -1);
+    }
+
+    {
         // A warned unknown-section header must take its body keys with it;
         // otherwise they attach to the previous section after the drop.
         const std::wstring text =

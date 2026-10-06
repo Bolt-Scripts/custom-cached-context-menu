@@ -36,7 +36,7 @@ untouched native menu, including extended verbs.
 |---|---|---|
 | Shift bypass | on | Hold Shift while right-clicking for the native menu. |
 | Menu mode | 0 (custom) | 0 = self-rendered menu (automatic fallback to the classic menu after 3 consecutive failures); 1 = classic owner-drawn menu. |
-| Theme | Custom (menu.ini) | Rewrites the appearance block of `menu.ini` with a bundled preset (Windows 11/10 dark and light, Nord, Dracula, Solarized, Gruvbox, One Dark, AMOLED, High Contrast). Applied when changed, never on restart. |
+| Theme | Custom (menu.ini) | Loads the appearance from `<mod storage>\themes\<name>.ini` (created from the bundled preset on first use; edit or copy it as a template). `menu.ini` is never modified, and themes never inherit from it. Includes Windows 11/10 dark and light, Nord, Dracula, Solarized, Gruvbox, One Dark, Cyberpunk, Synthwave, Terminal Green, Amber CRT, Tokyo Night, AMOLED, High Contrast. |
 | Show classic menu item | on | Adds a "Show classic menu" entry at the bottom of the menu. |
 | Warm-up extensions | common list | File types pre-built at Explorer startup. |
 | Warm-up delay | 5 s | Delay before background warm-up starts. |

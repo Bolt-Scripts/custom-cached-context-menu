@@ -31,7 +31,7 @@ Design document: `docs/superpowers/specs/2026-10-04-context-menu-overhaul-design
   $description: Hold Shift while right-clicking to show the untouched native menu.
 - theme: "Custom (menu.ini)"
   $name: Theme
-  $description: Rewrites the appearance block of menu.ini with a bundled preset (rules and commands are kept). Applied when changed, never on restart.
+  $description: Loads the appearance from <storage>\themes\<name>.ini (created from the bundled preset on first use). menu.ini is never modified.
   $options:
   - Custom (menu.ini): Use menu.ini as-is
   - Windows 11 Dark: Fluent dark with translucent blur

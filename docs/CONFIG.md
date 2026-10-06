@@ -171,11 +171,22 @@ handler in the main menu.
 
 ## Themes
 
-The **Theme** setting rewrites the appearance block of `menu.ini` with a
-bundled preset, keeping `[rules]`, `[command]`, `[submenu]`, and `[item]`
-sections. It is applied when the setting changes (and when the file is first
-created), never on restart — so edits made after selecting a theme survive.
-Switch to **Custom (menu.ini)** and back to re-apply.
+The **Theme** setting loads the appearance from a theme file, keeping
+`menu.ini`'s `[rules]`, `[command]`, `[submenu]`, and `[item]` sections. Theme
+files live in `<Windhawk mod storage>\themes\<name>.ini` and are created from
+the built-in preset the first time a theme is selected. Each file is a complete
+`[appearance]` block, so a theme never inherits values from `menu.ini`, and
+`menu.ini` is never modified by theme selection.
+
+Edit a theme file to customize it (it is re-read when the file changes), or
+copy one as the starting point for your own palette. Missing keys fall back to
+the built-in preset's value; invalid values warn in the log and fall back too.
+**Custom (menu.ini)** uses `menu.ini`'s appearance as before.
+
+Built-in themes: Windows 11 Dark/Light, Windows 10 Dark/Light, Nord, Dracula,
+Solarized Dark, Gruvbox Dark, One Dark, Cyberpunk, Synthwave, Terminal Green,
+Amber CRT, Tokyo Night, AMOLED Black, High Contrast. Windows 11 Dark/Light are
+fixed palettes and do not follow the system theme.
 
 ## Predicates
 

@@ -7483,6 +7483,39 @@ void RenderSessionFrame(MenuSession& session, const AnimationFrame& frame) {
     }
 }
 
+// True for keyboard messages, which a menu always consumes.
+bool IsKeyboardMessage(UINT message) {
+    switch (message) {
+        case WM_KEYDOWN:
+        case WM_KEYUP:
+        case WM_SYSKEYDOWN:
+        case WM_SYSKEYUP:
+        case WM_CHAR:
+        case WM_SYSCHAR:
+        case WM_DEADCHAR:
+        case WM_SYSDEADCHAR:
+            return true;
+        default:
+            return false;
+    }
+}
+
+// True for mouse input. While a session is dismissing, these must stay queued
+// for Explorer: dispatching the replayed right-click (or the matching up)
+// while the menu is still alive breaks the shell's context-menu gesture
+// arming, which is the "a right-click just closes the menu" failure.
+bool IsMouseMessage(UINT message) {
+    if (message >= WM_MOUSEFIRST && message <= WM_MOUSELAST) {
+        return true;
+    }
+    // WM_NCMOUSEMOVE..WM_NCXBUTTONDBLCLK (MinGW does not define the FIRST/LAST
+    // macros).
+    if (message >= 0x00A0 && message <= 0x00AD) {
+        return true;
+    }
+    return false;
+}
+
 // Render-driven fade/slide. DirectComposition animations are not evaluated for
 // this target (every HRESULT succeeds and nothing moves), so the UI thread
 // draws and presents the frames itself. Messages are pumped so the menu stays
@@ -7513,12 +7546,20 @@ void RunSessionAnimation(MenuSession& session, const AnimationSpec& spec,
             break;
         }
         MSG msg = {};
-        while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
-            if (msg.message == WM_KEYDOWN || msg.message == WM_SYSKEYDOWN ||
-                msg.message == WM_KEYUP || msg.message == WM_SYSKEYUP ||
-                msg.message == WM_CHAR || msg.message == WM_SYSCHAR ||
-                msg.message == WM_DEADCHAR) {
+        while (PeekMessageW(&msg, nullptr, 0, 0, PM_NOREMOVE)) {
+            if (IsKeyboardMessage(msg.message)) {
+                // Consume keys while the menu is open, like native menus.
+                if (!PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+                    break;
+                }
                 continue;
+            }
+            if ((!opening || session.done) && IsMouseMessage(msg.message)) {
+                // Leave the dismissing/reopening click queued for Explorer.
+                break;
+            }
+            if (!PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+                break;
             }
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
@@ -7568,12 +7609,20 @@ void RunWindowAnimation(MenuSession& session, size_t index,
             break;
         }
         MSG msg = {};
-        while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
-            if (msg.message == WM_KEYDOWN || msg.message == WM_SYSKEYDOWN ||
-                msg.message == WM_KEYUP || msg.message == WM_SYSKEYUP ||
-                msg.message == WM_CHAR || msg.message == WM_SYSCHAR ||
-                msg.message == WM_DEADCHAR) {
+        while (PeekMessageW(&msg, nullptr, 0, 0, PM_NOREMOVE)) {
+            if (IsKeyboardMessage(msg.message)) {
+                // Consume keys while the menu is open, like native menus.
+                if (!PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+                    break;
+                }
                 continue;
+            }
+            if (session.done && IsMouseMessage(msg.message)) {
+                // The session is dismissing: leave input queued for Explorer.
+                break;
+            }
+            if (!PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+                break;
             }
             TranslateMessage(&msg);
             DispatchMessageW(&msg);

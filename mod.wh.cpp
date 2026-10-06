@@ -2988,9 +2988,7 @@ CanonicalSource SplitConfigForCanonical(const std::wstring& text) {
 // Rewrites the file into the canonical layout: one [appearance] section with
 // grouped active settings, theme overrides only when set, structured blocks
 // preserved, and a fresh [meta] version.
-std::wstring CanonicalizeConfig(const std::wstring& text, int toVersion) {
-    const CanonicalSource source = SplitConfigForCanonical(text);
-
+std::wstring EmitCanonicalConfig(const CanonicalSource& source, int toVersion) {
     std::wstring out;
     out += L"; Context Menu Overhaul configuration (schema ";
     out += std::to_wstring(toVersion);
@@ -3101,6 +3099,53 @@ std::wstring CanonicalizeConfig(const std::wstring& text, int toVersion) {
     out += std::to_wstring(toVersion);
     out += L"\n";
     return out;
+}
+
+std::wstring CanonicalizeConfig(const std::wstring& text, int toVersion) {
+    return EmitCanonicalConfig(SplitConfigForCanonical(text), toVersion);
+}
+
+// One change for CanonicalizeConfigWithOverrides: a set in a section, or a
+// remove (restoring inheritance/default) when `remove` is true.
+struct ConfigOverride {
+    std::wstring section;
+    std::wstring key;
+    std::wstring value;
+    bool remove = false;
+};
+
+// Canonical rewrite with explicit set/remove changes applied to the parsed
+// base/light/dark value maps before emission. Unknown sections or keys are
+// ignored, so a stale override can never corrupt the file.
+std::wstring CanonicalizeConfigWithOverrides(
+    const std::wstring& text, int toVersion,
+    const std::vector<ConfigOverride>& overrides) {
+    CanonicalSource source = SplitConfigForCanonical(text);
+    for (const ConfigOverride& change : overrides) {
+        std::unordered_map<std::wstring, std::wstring>* values = nullptr;
+        const std::wstring section = ToLowerCopy(change.section);
+        if (section == L"appearance") {
+            values = &source.baseValues;
+        } else if (section == L"appearance.light") {
+            values = &source.lightValues;
+        } else if (section == L"appearance.dark") {
+            values = &source.darkValues;
+        }
+        if (!values) {
+            continue;
+        }
+        const std::wstring key = ToLowerCopy(change.key);
+        if (change.remove) {
+            values->erase(key);
+            continue;
+        }
+        const ConfigSchemaEntry* entry = SchemaFind(key);
+        if (!entry) {
+            continue;
+        }
+        (*values)[key] = NormalizeAppearanceValue(*entry, change.value);
+    }
+    return EmitCanonicalConfig(source, toVersion);
 }
 
 // ===========================================================================

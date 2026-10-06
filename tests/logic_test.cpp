@@ -4009,6 +4009,50 @@ int main() {
     }
 
     {
+        const std::wstring base =
+            L"[appearance]\nbackground = 0, 0, 0, 255\nitemHeight = 40\n";
+        std::wstring out = cmo::CanonicalizeConfigWithOverrides(
+            base, cmo::kConfigSchemaVersion,
+            {{L"appearance", L"itemHeight", L"33", false}});
+        CHECK(out.find(L"itemHeight = 33") != std::wstring::npos);
+
+        const std::wstring withLight =
+            L"[appearance]\nitemHeight = 28\n"
+            L"[appearance.light]\nitemHeight = 30\ntextColor = 1, 2, 3, 255\n";
+        out = cmo::CanonicalizeConfigWithOverrides(
+            withLight, cmo::kConfigSchemaVersion,
+            {{L"appearance.light", L"itemHeight", L"", true}});
+        const size_t lightStart = out.find(L"\n[appearance.light]");
+        CHECK(lightStart != std::wstring::npos);
+        const size_t lightEnd = out.find(L"\n[", lightStart + 1);
+        const std::wstring light =
+            out.substr(lightStart + 1,
+                       lightEnd == std::wstring::npos
+                           ? std::wstring::npos
+                           : lightEnd - lightStart - 1);
+        CHECK(light.find(L"itemHeight") == std::wstring::npos);
+        CHECK(light.find(L"textColor") != std::wstring::npos);
+
+        // Removing an unset-capable key emits the commented (unset) form;
+        // setting it emits an active value.
+        out = cmo::CanonicalizeConfigWithOverrides(
+            L"", cmo::kConfigSchemaVersion,
+            {{L"appearance", L"itemPadding", L"", true}});
+        CHECK(out.find(L"; itemPadding = 6") != std::wstring::npos);
+        out = cmo::CanonicalizeConfigWithOverrides(
+            L"", cmo::kConfigSchemaVersion,
+            {{L"appearance", L"itemPadding", L"6", false}});
+        CHECK(out.find(L"\nitemPadding = 6") != std::wstring::npos);
+
+        // Structured sections survive.
+        out = cmo::CanonicalizeConfigWithOverrides(
+            base + L"[rules]\nhide = label:\"X\"\n", cmo::kConfigSchemaVersion,
+            {});
+        CHECK(out.find(L"[rules]") != std::wstring::npos);
+        CHECK(out.find(L"hide = label:\"X\"") != std::wstring::npos);
+    }
+
+    {
         cmo::Appearance a;
         std::wstring out;
         CHECK(cmo::AppearanceValueText(a, *cmo::SchemaFind(L"background"), out));

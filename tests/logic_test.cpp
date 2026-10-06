@@ -2691,11 +2691,11 @@ int main() {
         cmo::LayoutKey a = cmo::MakeLayoutKey(
             cmo::ContextSignature{cmo::Scope::Files, L".txt", cmo::Shape::Single,
                                   cmo::Variant::Normal},
-            config, 96, true, emptyModel);
+            config, 96, true, emptyModel, 0);
         cmo::LayoutKey b = a;
         CHECK(a == b);
         config.revision = 8;
-        cmo::LayoutKey c = cmo::MakeLayoutKey(a.sig, config, 96, true, emptyModel);
+        cmo::LayoutKey c = cmo::MakeLayoutKey(a.sig, config, 96, true, emptyModel, 0);
         CHECK(!(a == c));
 
         auto panel = std::make_shared<cmo::LayoutPanel>();
@@ -2831,17 +2831,17 @@ int main() {
         const cmo::LayoutKey base = cmo::MakeLayoutKey(
             cmo::ContextSignature{cmo::Scope::Files, L".txt", cmo::Shape::Single,
                                   cmo::Variant::Normal},
-            config, 96, true, model);
+            config, 96, true, model, 0);
         CHECK(base.modelFingerprint != 0);
-        CHECK(base == cmo::MakeLayoutKey(base.sig, config, 96, true, model));
+        CHECK(base == cmo::MakeLayoutKey(base.sig, config, 96, true, model, 0));
 
         cmo::MenuModel flagged = model;
         flagged.items[0].flags |= cmo::kModelChecked;
-        CHECK(!(base == cmo::MakeLayoutKey(base.sig, config, 96, true, flagged)));
+        CHECK(!(base == cmo::MakeLayoutKey(base.sig, config, 96, true, flagged, 0)));
 
         cmo::MenuModel relabeled = model;
         relabeled.items[0].label += L"!";
-        CHECK(!(base == cmo::MakeLayoutKey(base.sig, config, 96, true, relabeled)));
+        CHECK(!(base == cmo::MakeLayoutKey(base.sig, config, 96, true, relabeled, 0)));
 
         cmo::MenuModel restructured = model;
         cmo::MenuItem extra{};
@@ -2849,7 +2849,7 @@ int main() {
         extra.kind = cmo::ItemKind::Command;
         extra.label = L"Extra";
         restructured.items.push_back(extra);
-        CHECK(!(base == cmo::MakeLayoutKey(base.sig, config, 96, true, restructured)));
+        CHECK(!(base == cmo::MakeLayoutKey(base.sig, config, 96, true, restructured, 0)));
     }
 
     // v2.1 LRU: eviction order, promotion, clear releases.
@@ -3664,28 +3664,93 @@ int main() {
         CHECK(winrarTop);
     }
 
-    // v2.6 themes apply, preserve structure, and are idempotent.
+    // v2.7 theme store: files are complete, isolated from menu.ini, and
+    // tolerant.
     {
-        const std::wstring base =
-            L"[appearance]\nbackground = 1, 1, 1, 255\n[rules]\n"
-            L"hide = label:\"Cast to Device\"\n";
-        const std::wstring themed = cmo::ApplyTheme(base, 1);
-        CHECK(themed != base);
-        CHECK(themed.find(L"hide = label:\"Cast to Device\"") != std::wstring::npos);
-        cmo::RulesConfig parsed;
-        std::vector<cmo::ConfigParseError> errors;
-        CHECK(cmo::ParseRulesConfig(themed, parsed, errors));
-        CHECK(errors.empty());
-        CHECK(cmo::ApplyTheme(themed, 1) == themed);  // idempotent
-        CHECK(cmo::ApplyTheme(base, 0) == base);      // custom leaves it alone
+        using namespace cmo;
+        CHECK(ThemeSlug(L"Windows 11 Dark") == L"windows-11-dark");
+        CHECK(ThemeSlug(L"AMOLED Black") == L"amoled-black");
+        CHECK(ThemeSlug(L"Terminal Green") == L"terminal-green");
 
-        for (size_t i = 1; i < cmo::kThemesCount; ++i) {
-            const std::wstring applied = cmo::ApplyTheme(base, static_cast<int>(i));
-            cmo::RulesConfig config;
-            std::vector<cmo::ConfigParseError> presetErrors;
-            CHECK(cmo::ParseRulesConfig(applied, config, presetErrors));
-            CHECK(presetErrors.empty());
+        const int nord = ThemeIndexFromName(L"Nord");
+        const std::wstring themePath = ThemeFilePath(nord);
+        DeleteFileW(themePath.c_str());
+
+        // First use creates a complete file.
+        g_themeStore.ApplySelectedTheme(nord);
+        std::wstring text;
+        CHECK(ReadConfigFile(themePath, text));
+        for (const ConfigSchemaEntry& entry : kAppearanceSchema) {
+            CHECK(text.find(entry.key) != std::wstring::npos);
         }
+
+        // menu.ini is untouched by theme selection, and its dark/light
+        // overrides are ignored while a theme is active.
+        const std::wstring configPath = ConfigFilePath();
+        CHECK(WriteConfigFile(configPath,
+                              L"[appearance]\nshadowColor = 1, 2, 3, 4\n"
+                              L"[appearance.dark]\nbackground = 9, 9, 9, 255\n"));
+        std::wstring before;
+        CHECK(ReadConfigFile(configPath, before));
+        g_themeStore.ApplySelectedTheme(ThemeIndexFromName(L"Dracula"));
+        std::wstring after;
+        CHECK(ReadConfigFile(configPath, after));
+        CHECK(before == after);
+
+        // A missing key takes the template value, not menu.ini's or the
+        // schema's. CRLF lines and unknown keys are tolerated like menu.ini.
+        CHECK(WriteConfigFile(themePath,
+                              L"[appearance]\r\nbackground = 1, 2, 3, 255\r\n"
+                              L"unknownKey = 1\r\n"));
+        g_themeStore.ApplySelectedTheme(nord);
+        CHECK(g_themeStore.Snapshot()->background == 0xFF010203);
+        CHECK(g_themeStore.Snapshot()->shadowOpacity == 130);  // Nord template
+        CHECK(ReadConfigFile(themePath, text));
+        CHECK(text.find(L"shadowOpacity = 130") != std::wstring::npos);
+        CHECK(text.find(L"unknownKey") == std::wstring::npos);
+
+        // Invalid values fall back to the template and are rewritten.
+        CHECK(WriteConfigFile(themePath, L"[appearance]\ncornerRadius = nope\n"));
+        g_themeStore.ApplySelectedTheme(nord);
+        CHECK(g_themeStore.Snapshot()->cornerRadius == 6);
+        CHECK(ReadConfigFile(themePath, text));
+        CHECK(text.find(L"cornerRadius = 6") != std::wstring::npos);
+
+        // Light/dark sections in a theme file are ignored and stripped.
+        CHECK(WriteConfigFile(themePath,
+                              L"[appearance]\nbackground = 1, 2, 3, 255\n"
+                              L"[appearance.dark]\nbackground = 9, 9, 9, 255\n"));
+        g_themeStore.ApplySelectedTheme(nord);
+        CHECK(g_themeStore.Snapshot()->background == 0xFF010203);
+        CHECK(ReadConfigFile(themePath, text));
+        CHECK(text.find(L"[appearance.dark]") == std::wstring::npos);
+
+        // Edits are picked up by RefreshIfChanged.
+        const uint64_t revision = g_themeStore.Revision();
+        CHECK(WriteConfigFile(themePath,
+                              L"[appearance]\nbackground = 7, 8, 9, 255\n"));
+        g_themeStore.RefreshIfChanged();
+        CHECK(g_themeStore.Snapshot()->background == 0xFF070809);
+        CHECK(g_themeStore.Revision() > revision);
+
+        // Custom (menu.ini) has no theme appearance.
+        g_themeStore.ApplySelectedTheme(0);
+        CHECK(g_themeStore.Snapshot() == nullptr);
+        RulesConfig userConfig;
+        userConfig.appearance.background = 0xFF112233;
+        CHECK(EffectiveAppearance(userConfig, true).background == 0xFF112233);
+        g_themeStore.ApplySelectedTheme(nord);
+        CHECK(EffectiveAppearance(userConfig, true).background == 0xFF070809);
+
+        // Layout keys include the theme revision.
+        ContextSignature sig{};
+        MenuModel model{};
+        const LayoutKey key1 = MakeLayoutKey(sig, userConfig, 96, true, model, 1);
+        const LayoutKey key2 = MakeLayoutKey(sig, userConfig, 96, true, model, 2);
+        CHECK(!(key1 == key2));
+
+        DeleteFileW(themePath.c_str());
+        DeleteFileW(configPath.c_str());
     }
 
     // v2.7 theme files: every built-in theme generates a complete appearance

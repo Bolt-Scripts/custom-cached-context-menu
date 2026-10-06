@@ -163,8 +163,7 @@ inline Settings g_settings;
 // Set in Wh_ModInit; only the UI thread may touch the render device/caches.
 inline DWORD g_uiThreadId = 0;
 
-// Defined in [CMO:Themes]; declared here for the config store.
-std::wstring ApplyTheme(const std::wstring& text, int themeIndex);
+// Defined in [CMO:Themes]; declared here for the settings and theme store.
 int ThemeIndexFromName(const std::wstring& name);
 inline int g_lastAppliedTheme = 0;
 
@@ -3488,12 +3487,7 @@ public:
             CreateDirectoryW(path.substr(0, slash).c_str(), nullptr);
         }
         if (GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) {
-            if (g_settings.themeIndex > 0) {
-                WriteConfigFile(path, ApplyTheme(L"", g_settings.themeIndex));
-                g_lastAppliedTheme = g_settings.themeIndex;
-            } else {
-                WriteConfigFile(path, GenerateDefaultConfigText());
-            }
+            WriteConfigFile(path, GenerateDefaultConfigText());
         }
         std::wstring text;
         if (ReadConfigFile(path, text)) {
@@ -4155,15 +4149,10 @@ int ThemeIndexFromName(const std::wstring& name) {
     return 0;
 }
 
-// Canonical, complete [appearance] block for a theme: canonicalizing the
-// preset snippet fills every missing key from the schema defaults, and only
-// the appearance section is kept.
-std::wstring GenerateThemeText(int themeIndex) {
-    if (themeIndex <= 0 || themeIndex >= static_cast<int>(kThemesCount)) {
-        return L"";
-    }
+// Canonical [appearance] block extracted from canonicalized config text.
+std::wstring CanonicalAppearanceBlock(const std::wstring& configText) {
     const std::wstring canonical =
-        CanonicalizeConfig(kThemes[themeIndex].snippet, kConfigSchemaVersion);
+        CanonicalizeConfig(configText, kConfigSchemaVersion);
     const size_t start = canonical.find(L"[appearance]\n");
     if (start == std::wstring::npos) {
         return L"";
@@ -4180,24 +4169,14 @@ std::wstring GenerateThemeText(int themeIndex) {
     return block;
 }
 
-void ApplySelectedTheme(int themeIndex) {
-    if (themeIndex <= 0) {
-        g_lastAppliedTheme = 0;
-        return;
+// Canonical, complete [appearance] block for a theme: canonicalizing the
+// preset snippet fills every missing key from the schema defaults, and only
+// the appearance section is kept.
+std::wstring GenerateThemeText(int themeIndex) {
+    if (themeIndex <= 0 || themeIndex >= static_cast<int>(kThemesCount)) {
+        return L"";
     }
-    const std::wstring path = ConfigFilePath();
-    if (path.empty()) {
-        return;
-    }
-    std::wstring text;
-    if (!ReadConfigFile(path, text)) {
-        text.clear();
-    }
-    const std::wstring themed = ApplyTheme(text, themeIndex);
-    if (themed != text) {
-        WriteConfigFile(path, themed);
-    }
-    g_lastAppliedTheme = themeIndex;
+    return CanonicalAppearanceBlock(kThemes[themeIndex].snippet);
 }
 
 // Removes [appearance.light]/[.dark] blocks so a new theme cannot inherit a
@@ -4228,17 +4207,236 @@ std::wstring StripThemeSections(const std::wstring& text) {
     return out;
 }
 
-// Applying a theme appends its snippet and canonicalizes: the theme wins for
-// appearance values while rules/commands/submenus/items are preserved.
-std::wstring ApplyTheme(const std::wstring& text, int themeIndex) {
+std::wstring ThemeSlug(const wchar_t* name) {
+    std::wstring slug;
+    bool pendingDash = false;
+    for (const wchar_t* p = name; p && *p; ++p) {
+        const wchar_t c = *p;
+        const bool alnum = (c >= L'a' && c <= L'z') ||
+                           (c >= L'A' && c <= L'Z') ||
+                           (c >= L'0' && c <= L'9');
+        if (alnum) {
+            if (pendingDash && !slug.empty()) {
+                slug += L'-';
+            }
+            pendingDash = false;
+            slug += static_cast<wchar_t>(towlower(c));
+        } else {
+            pendingDash = true;
+        }
+    }
+    return slug;
+}
+
+std::wstring ThemeDirPath() {
+    wchar_t storagePath[MAX_PATH] = {};
+    if (!Wh_GetModStoragePath(storagePath, ARRAYSIZE(storagePath))) {
+        return L"";
+    }
+    return std::wstring(storagePath) + L"\\themes";
+}
+
+std::wstring ThemeFilePath(int themeIndex) {
     if (themeIndex <= 0 || themeIndex >= static_cast<int>(kThemesCount)) {
+        return L"";
+    }
+    const std::wstring dir = ThemeDirPath();
+    if (dir.empty()) {
+        return L"";
+    }
+    return dir + L"\\" + ThemeSlug(kThemes[themeIndex].name) + L".ini";
+}
+
+// Drops the lines the parser warned about so an invalid or unknown theme
+// value does not override the template value it falls back to.
+std::wstring DropWarnedLines(const std::wstring& text,
+                             const std::vector<ConfigParseError>& warnings) {
+    if (warnings.empty() || text.empty()) {
         return text;
     }
-    std::wstring combined = StripThemeSections(text);
-    combined += L"\n";
-    combined += kThemes[themeIndex].snippet;
-    return CanonicalizeConfig(combined, kConfigSchemaVersion);
+    std::wstring out;
+    int line = 0;
+    size_t pos = 0;
+    while (pos < text.size()) {
+        const size_t newline = text.find(L'\n', pos);
+        const size_t lineEnd =
+            newline == std::wstring::npos ? text.size() : newline;
+        ++line;
+        bool drop = false;
+        for (const ConfigParseError& warning : warnings) {
+            if (warning.line == line) {
+                drop = true;
+                break;
+            }
+        }
+        if (!drop) {
+            out.append(text, pos, lineEnd - pos);
+            out += L'\n';
+        }
+        if (newline == std::wstring::npos) {
+            break;
+        }
+        pos = newline + 1;
+    }
+    return out;
 }
+
+// Loads the selected theme from <storage>\themes\<slug>.ini. Theme files are
+// complete, self-contained [appearance] blocks: missing keys take the preset
+// value, invalid values fall back to it too, and menu.ini is never touched.
+class ThemeStore {
+public:
+    void EnsureLoaded() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        const int index = g_settings.themeIndex;
+        if (index <= 0) {
+            ClearLocked();
+            return;
+        }
+        if (loaded_ && loadedIndex_ == index && StampMatchesLocked()) {
+            return;
+        }
+        LoadLocked(index);
+    }
+
+    void RefreshIfChanged() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (loadedIndex_ <= 0 || StampMatchesLocked()) {
+            return;
+        }
+        LoadLocked(loadedIndex_);
+    }
+
+    std::shared_ptr<const Appearance> Snapshot() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return appearance_;
+    }
+
+    uint64_t Revision() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return revision_;
+    }
+
+    void ApplySelectedTheme(int themeIndex) {
+        g_lastAppliedTheme = themeIndex;
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (themeIndex <= 0) {
+            ClearLocked();
+            return;
+        }
+        LoadLocked(themeIndex);
+    }
+
+    void Clear() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        ClearLocked();
+    }
+
+private:
+    void ClearLocked() {
+        appearance_.reset();
+        loaded_ = false;
+        loadedIndex_ = -1;
+        stampValid_ = false;
+        path_.clear();
+        ++revision_;
+    }
+
+    bool StampMatchesLocked() {
+        if (!stampValid_ || path_.empty()) {
+            return false;
+        }
+        WIN32_FILE_ATTRIBUTE_DATA attributes = {};
+        if (!GetFileAttributesExW(path_.c_str(), GetFileExInfoStandard,
+                                  &attributes)) {
+            return false;
+        }
+        const uint64_t size =
+            (static_cast<uint64_t>(attributes.nFileSizeHigh) << 32) |
+            attributes.nFileSizeLow;
+        return size == stampSize_ &&
+               attributes.ftLastWriteTime.dwLowDateTime == stampTimeLow_ &&
+               attributes.ftLastWriteTime.dwHighDateTime == stampTimeHigh_;
+    }
+
+    void UpdateStampLocked() {
+        WIN32_FILE_ATTRIBUTE_DATA attributes = {};
+        if (!GetFileAttributesExW(path_.c_str(), GetFileExInfoStandard,
+                                  &attributes)) {
+            stampValid_ = false;
+            return;
+        }
+        stampValid_ = true;
+        stampSize_ = (static_cast<uint64_t>(attributes.nFileSizeHigh) << 32) |
+                     attributes.nFileSizeLow;
+        stampTimeLow_ = attributes.ftLastWriteTime.dwLowDateTime;
+        stampTimeHigh_ = attributes.ftLastWriteTime.dwHighDateTime;
+    }
+
+    void LoadLocked(int themeIndex) {
+        const std::wstring path = ThemeFilePath(themeIndex);
+        if (path.empty()) {
+            ClearLocked();
+            return;
+        }
+        const std::wstring dir = ThemeDirPath();
+        if (!dir.empty()) {
+            CreateDirectoryW(dir.c_str(), nullptr);
+        }
+
+        const std::wstring templateText = GenerateThemeText(themeIndex);
+        std::wstring fileText;
+        const bool hasFile = ReadConfigFile(path, fileText);
+        std::vector<ConfigParseError> warnings;
+        if (hasFile) {
+            RulesConfig fileOnly;
+            ParseRulesConfig(fileText, fileOnly, warnings);
+            if (!warnings.empty()) {
+                const std::wstring slug = ThemeSlug(kThemes[themeIndex].name);
+                for (const ConfigParseError& warning : warnings) {
+                    Wh_Log(L"themes\\%s.ini:%d: warning: %s", slug.c_str(),
+                           warning.line, warning.message.c_str());
+                }
+            }
+        }
+
+        std::wstring combined = templateText;
+        combined += L'\n';
+        combined += StripThemeSections(
+            hasFile ? DropWarnedLines(fileText, warnings) : L"");
+        RulesConfig effective;
+        std::vector<ConfigParseError> combinedWarnings;
+        ParseRulesConfig(combined, effective, combinedWarnings);
+
+        const std::wstring canonical = CanonicalAppearanceBlock(combined);
+        if (!canonical.empty()) {
+            std::wstring current;
+            if (!ReadConfigFile(path, current) || current != canonical) {
+                WriteConfigFile(path, canonical);
+            }
+        }
+
+        appearance_ = std::make_shared<const Appearance>(effective.appearance);
+        loaded_ = true;
+        loadedIndex_ = themeIndex;
+        path_ = path;
+        ++revision_;
+        UpdateStampLocked();
+    }
+
+    mutable std::mutex mutex_;
+    std::shared_ptr<const Appearance> appearance_;
+    uint64_t revision_ = 0;
+    bool loaded_ = false;
+    int loadedIndex_ = -1;
+    std::wstring path_;
+    bool stampValid_ = false;
+    uint64_t stampSize_ = 0;
+    DWORD stampTimeLow_ = 0;
+    DWORD stampTimeHigh_ = 0;
+};
+
+inline ThemeStore g_themeStore;
 
 // ===========================================================================
 // [CMO:Layout] Appearance resolution, metrics, and render-ready layout.
@@ -4249,6 +4447,12 @@ Appearance ResolveAppearance(const RulesConfig& config, bool darkTheme) {
         return config.hasDarkAppearance ? config.darkAppearance : config.appearance;
     }
     return config.hasLightAppearance ? config.lightAppearance : config.appearance;
+}
+
+// The active theme wins over menu.ini's appearance while it is selected.
+Appearance EffectiveAppearance(const RulesConfig& config, bool darkTheme) {
+    const std::shared_ptr<const Appearance> theme = g_themeStore.Snapshot();
+    return theme ? *theme : ResolveAppearance(config, darkTheme);
 }
 
 int BlurPasses(int amount) {
@@ -4628,6 +4832,7 @@ struct LayoutKey {
     ContextSignature sig;
     uint64_t rulesRevision = 0;
     uint64_t appearanceRevision = 0;
+    uint64_t themeRevision = 0;
     uint32_t dpi = 96;
     bool darkTheme = false;
     uint64_t modelFingerprint = 0;
@@ -4638,6 +4843,7 @@ struct LayoutKey {
         uint64_t hash = sig.Hash();
         hash = HashCombine(hash, rulesRevision);
         hash = HashCombine(hash, appearanceRevision);
+        hash = HashCombine(hash, themeRevision);
         hash = HashCombine(hash, dpi);
         hash = HashCombine(hash, darkTheme ? 1 : 0);
         hash = HashCombine(hash, modelFingerprint);
@@ -4646,11 +4852,13 @@ struct LayoutKey {
 };
 
 LayoutKey MakeLayoutKey(const ContextSignature& sig, const RulesConfig& config,
-                        uint32_t dpi, bool darkTheme, const MenuModel& model) {
+                        uint32_t dpi, bool darkTheme, const MenuModel& model,
+                        uint64_t themeRevision) {
     LayoutKey key{};
     key.sig = sig;
     key.rulesRevision = config.revision;
     key.appearanceRevision = config.revision;
+    key.themeRevision = themeRevision;
     key.dpi = dpi;
     key.darkTheme = darkTheme;
     key.modelFingerprint = ModelFingerprint(model.items);
@@ -7427,7 +7635,7 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
     std::shared_ptr<const RulesConfig> config = g_configStore.Snapshot();
     const RulesConfig emptyConfig;
     const RulesConfig& effective = config ? *config : emptyConfig;
-    const Appearance appearance = ResolveAppearance(effective, key.darkTheme);
+    const Appearance appearance = EffectiveAppearance(effective, key.darkTheme);
     const LayoutMetrics metrics =
         ResolveLayoutMetrics(appearance, key.dpi, key.darkTheme);
 
@@ -7665,7 +7873,7 @@ void PrebuildLayoutsForWarmup(const std::vector<MenuModel>& models, uint32_t dpi
     std::shared_ptr<const RulesConfig> config = g_configStore.Snapshot();
     const RulesConfig emptyConfig;
     const RulesConfig& effective = config ? *config : emptyConfig;
-    const Appearance appearance = ResolveAppearance(effective, darkTheme);
+    const Appearance appearance = EffectiveAppearance(effective, darkTheme);
     const LayoutMetrics metrics =
         ResolveLayoutMetrics(appearance, dpi, darkTheme);
 
@@ -7677,7 +7885,8 @@ void PrebuildLayoutsForWarmup(const std::vector<MenuModel>& models, uint32_t dpi
     }
     for (const MenuModel& model : models) {
         const LayoutKey key =
-            MakeLayoutKey(model.sig, effective, dpi, darkTheme, model);
+            MakeLayoutKey(model.sig, effective, dpi, darkTheme, model,
+                          g_themeStore.Revision());
         if (g_layoutCache.Find(key)) {
             continue;
         }
@@ -13072,6 +13281,7 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
 
         g_configStore.EnsureLoaded();
         g_configStore.RefreshIfChanged();
+        g_themeStore.RefreshIfChanged();
         ItemContext itemCtx{};
         itemCtx.scope = scope;
         itemCtx.shape = shape;
@@ -13148,7 +13358,8 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
                 const RulesConfig& effectiveRules = rules ? *rules : emptyConfig;
                 const LayoutKey layoutKey =
                     MakeLayoutKey(signature, effectiveRules, DpiForWindow(owner),
-                                  IsDarkThemeActive(), model);
+                                  IsDarkThemeActive(), model,
+                                  g_themeStore.Revision());
 
                 const CustomMenuResult custom =
                     ShowCustomMenu(model, layoutKey, owner, pt);
@@ -13440,6 +13651,7 @@ BOOL Wh_ModInit() {
     }
 
     cmo::LoadSettings();
+    cmo::g_themeStore.EnsureLoaded();
     cmo::g_lastAppliedTheme = cmo::g_settings.themeIndex;
     cmo::g_iconCache.PreloadCoreIcons(GetSystemMetrics(SM_CXSMICON));
 
@@ -13549,7 +13761,7 @@ void Wh_ModSettingsChanged() {
     cmo::LoadSettings();
 
     if (cmo::g_settings.themeIndex != cmo::g_lastAppliedTheme) {
-        cmo::ApplySelectedTheme(cmo::g_settings.themeIndex);
+        cmo::g_themeStore.ApplySelectedTheme(cmo::g_settings.themeIndex);
         cmo::g_configStore.RefreshIfChanged();
     }
 

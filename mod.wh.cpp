@@ -43,6 +43,11 @@ Design document: `docs/superpowers/specs/2026-10-04-context-menu-overhaul-design
   - Solarized Dark: Low-contrast teal dark palette
   - Gruvbox Dark: Warm retro dark palette
   - One Dark: Atom-style dark palette
+  - Cyberpunk: Neon yellow, cyan, and magenta on near-black
+  - Synthwave: Retro purple and pink with teal accents
+  - Terminal Green: Phosphor terminal green on black
+  - Amber CRT: Amber terminal on black
+  - Tokyo Night: Blue night palette with violet accents
   - AMOLED Black: True black, no blur or shadow
   - High Contrast: White on black, thick border
 - menuMode: 0
@@ -3893,17 +3898,6 @@ cornerRadius = 8
 shadowOpacity = 120
 shadowBlur = 12
 animation = fade
-[appearance.light]
-background = 243, 243, 243, 242
-border = 0, 0, 0, 22
-separator = 0, 0, 0, 18
-hoverBackground = 0, 0, 0, 12
-pressedBackground = 0, 0, 0, 20
-textColor = 32, 32, 32, 255
-disabledTextColor = 96, 96, 96, 255
-submenuArrow = 0, 0, 0, 120
-headerColor = 96, 96, 96, 255
-markerColor = 0, 120, 212, 255
 )INI"},    {L"Windows 11 Light",
      LR"INI([appearance]
 background = 243, 243, 243, 242
@@ -3920,17 +3914,6 @@ cornerRadius = 8
 shadowOpacity = 90
 shadowBlur = 12
 animation = fade
-[appearance.dark]
-background = 32, 32, 32, 242
-border = 255, 255, 255, 34
-separator = 255, 255, 255, 24
-hoverBackground = 255, 255, 255, 20
-pressedBackground = 255, 255, 255, 34
-textColor = 255, 255, 255, 255
-disabledTextColor = 255, 255, 255, 102
-submenuArrow = 255, 255, 255, 153
-headerColor = 255, 255, 255, 102
-markerColor = 96, 165, 250, 255
 )INI"},    {L"Windows 10 Dark",
      LR"INI([appearance]
 background = 31, 31, 31, 255
@@ -4033,6 +4016,98 @@ headerColor = 97, 175, 239, 255
 markerColor = 97, 175, 239, 255
 cornerRadius = 6
 shadowOpacity = 130
+)INI"},    {L"Cyberpunk",
+     LR"INI([appearance]
+background = 8, 10, 20, 245
+border = 255, 234, 0, 90
+separator = 0, 240, 255, 60
+hoverBackground = 255, 0, 128, 45
+pressedBackground = 255, 234, 0, 70
+textColor = 0, 245, 255, 255
+disabledTextColor = 120, 130, 160, 200
+submenuArrow = 255, 0, 128, 255
+headerColor = 255, 234, 0, 255
+markerColor = 255, 234, 0, 255
+cornerRadius = 4
+shadowColor = 255, 0, 128, 255
+shadowOpacity = 200
+shadowBlur = 16
+animation = fade
+animationDuration = 140
+)INI"},    {L"Synthwave",
+     LR"INI([appearance]
+background = 26, 16, 48, 245
+border = 255, 110, 199, 110
+separator = 0, 240, 255, 70
+hoverBackground = 255, 110, 199, 40
+pressedBackground = 0, 240, 255, 55
+textColor = 255, 200, 240, 255
+disabledTextColor = 150, 120, 190, 200
+submenuArrow = 0, 240, 255, 255
+headerColor = 0, 240, 255, 255
+markerColor = 255, 110, 199, 255
+cornerRadius = 8
+shadowColor = 160, 60, 255, 255
+shadowOpacity = 190
+shadowBlur = 18
+animation = slide
+animationDuration = 150
+)INI"},    {L"Terminal Green",
+     LR"INI([appearance]
+background = 4, 12, 6, 250
+border = 0, 255, 120, 90
+separator = 0, 200, 90, 70
+hoverBackground = 0, 255, 120, 35
+pressedBackground = 0, 255, 120, 60
+textColor = 140, 255, 170, 255
+disabledTextColor = 60, 130, 80, 220
+submenuArrow = 0, 255, 120, 255
+headerColor = 0, 255, 120, 255
+markerColor = 0, 255, 120, 255
+cornerRadius = 0
+shadowColor = 0, 255, 120, 255
+shadowOpacity = 150
+shadowBlur = 14
+blur = false
+animation = none
+font = Consolas, 9
+)INI"},    {L"Amber CRT",
+     LR"INI([appearance]
+background = 16, 10, 2, 250
+border = 255, 176, 0, 100
+separator = 255, 176, 0, 70
+hoverBackground = 255, 176, 0, 35
+pressedBackground = 255, 176, 0, 60
+textColor = 255, 200, 90, 255
+disabledTextColor = 150, 110, 50, 220
+submenuArrow = 255, 176, 0, 255
+headerColor = 255, 176, 0, 255
+markerColor = 255, 176, 0, 255
+cornerRadius = 0
+shadowColor = 255, 176, 0, 255
+shadowOpacity = 150
+shadowBlur = 14
+blur = false
+animation = none
+font = Consolas, 9
+)INI"},    {L"Tokyo Night",
+     LR"INI([appearance]
+background = 26, 27, 38, 242
+border = 61, 89, 161, 255
+separator = 61, 89, 161, 160
+hoverBackground = 41, 46, 66, 255
+pressedBackground = 61, 89, 161, 255
+textColor = 169, 177, 214, 255
+disabledTextColor = 86, 95, 137, 200
+submenuArrow = 122, 162, 247, 255
+headerColor = 122, 162, 247, 255
+markerColor = 187, 154, 247, 255
+cornerRadius = 6
+shadowColor = 30, 40, 90, 255
+shadowOpacity = 160
+shadowBlur = 14
+animation = fade
+animationDuration = 120
 )INI"},    {L"AMOLED Black",
      LR"INI([appearance]
 background = 0, 0, 0, 252
@@ -4078,6 +4153,31 @@ int ThemeIndexFromName(const std::wstring& name) {
         }
     }
     return 0;
+}
+
+// Canonical, complete [appearance] block for a theme: canonicalizing the
+// preset snippet fills every missing key from the schema defaults, and only
+// the appearance section is kept.
+std::wstring GenerateThemeText(int themeIndex) {
+    if (themeIndex <= 0 || themeIndex >= static_cast<int>(kThemesCount)) {
+        return L"";
+    }
+    const std::wstring canonical =
+        CanonicalizeConfig(kThemes[themeIndex].snippet, kConfigSchemaVersion);
+    const size_t start = canonical.find(L"[appearance]\n");
+    if (start == std::wstring::npos) {
+        return L"";
+    }
+    size_t end = canonical.find(L"\n[", start + 1);
+    if (end == std::wstring::npos) {
+        end = canonical.size();
+    }
+    std::wstring block = canonical.substr(start, end - start);
+    while (!block.empty() && (block.back() == L'\n' || block.back() == L'\r')) {
+        block.pop_back();
+    }
+    block += L'\n';
+    return block;
 }
 
 void ApplySelectedTheme(int themeIndex) {

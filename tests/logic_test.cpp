@@ -3688,17 +3688,35 @@ int main() {
         }
     }
 
-    // v2.6 theme switch replaces stale light/dark overrides.
+    // v2.7 theme files: every built-in theme generates a complete appearance
+    // block, and Windows 11 Dark/Light are fixed single palettes.
     {
-        const std::wstring base = L"[appearance]\nitemHeight = 28\n";
-        const std::wstring light = cmo::ApplyTheme(base, 2);  // Windows 11 Light
-        CHECK(light.find(L"\n[appearance.dark]\n") != std::wstring::npos);
-        const std::wstring dracula = cmo::ApplyTheme(light, 6);  // Dracula
-        CHECK(dracula.find(L"\n[appearance.dark]\n") == std::wstring::npos);
-        cmo::RulesConfig parsed;
-        std::vector<cmo::ConfigParseError> errors;
-        CHECK(cmo::ParseRulesConfig(dracula, parsed, errors));
-        CHECK(errors.empty());
+        CHECK(cmo::ThemeIndexFromName(L"Cyberpunk") > 0);
+        CHECK(cmo::ThemeIndexFromName(L"Synthwave") > 0);
+        CHECK(cmo::ThemeIndexFromName(L"Terminal Green") > 0);
+        CHECK(cmo::ThemeIndexFromName(L"Amber CRT") > 0);
+        CHECK(cmo::ThemeIndexFromName(L"Tokyo Night") > 0);
+        for (size_t i = 1; i < cmo::kThemesCount; ++i) {
+            const std::wstring text = cmo::GenerateThemeText(static_cast<int>(i));
+            CHECK(text.find(L"[appearance]") == 0);
+            for (const cmo::ConfigSchemaEntry& entry : cmo::kAppearanceSchema) {
+                CHECK(text.find(entry.key) != std::wstring::npos);
+            }
+            cmo::RulesConfig parsed;
+            std::vector<cmo::ConfigParseError> errors;
+            CHECK(cmo::ParseRulesConfig(text, parsed, errors));
+            CHECK(errors.empty());
+        }
+        const int light = cmo::ThemeIndexFromName(L"Windows 11 Light");
+        const std::wstring lightText = cmo::GenerateThemeText(light);
+        CHECK(lightText.find(L"[appearance.dark]") == std::wstring::npos);
+        CHECK(lightText.find(L"background = 243, 243, 243, 242") !=
+              std::wstring::npos);
+        const int dark = cmo::ThemeIndexFromName(L"Windows 11 Dark");
+        const std::wstring darkText = cmo::GenerateThemeText(dark);
+        CHECK(darkText.find(L"[appearance.light]") == std::wstring::npos);
+        CHECK(darkText.find(L"background = 32, 32, 32, 242") !=
+              std::wstring::npos);
     }
 
     // v2.6 theme names map to preset indices.

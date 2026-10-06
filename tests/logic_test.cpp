@@ -4010,6 +4010,100 @@ int main() {
     }
 
     {
+        cmo::LayoutItem item{};
+        item.control.kind = cmo::ControlKind::IntSlider;
+        item.rect = {0, 0, 300, 28};
+        item.trackRect = {100, 12, 200, 16};
+        item.thumbRect = {145, 8, 157, 20};
+        item.fieldRect = {210, 4, 290, 24};
+        CHECK(cmo::HitTestControlPart(item, POINT{150, 14}) ==
+              cmo::ControlPart::Thumb);
+        CHECK(cmo::HitTestControlPart(item, POINT{120, 14}) ==
+              cmo::ControlPart::Track);
+        CHECK(cmo::HitTestControlPart(item, POINT{250, 14}) ==
+              cmo::ControlPart::Field);
+        CHECK(cmo::HitTestControlPart(item, POINT{50, 14}) ==
+              cmo::ControlPart::Row);
+        CHECK(cmo::HitTestControlPart(item, POINT{50, 90}) ==
+              cmo::ControlPart::None);
+
+        std::wstring buf = L"1";
+        size_t caret = 1;
+        CHECK(cmo::ApplyFieldKey(buf, caret, 0, L'2', true, false));
+        CHECK_EQ(buf, std::wstring(L"12"));
+        CHECK_EQ(caret, size_t(2));
+        CHECK(cmo::ApplyFieldKey(buf, caret, VK_BACK, 0, true, false));
+        CHECK_EQ(buf, std::wstring(L"1"));
+        CHECK(cmo::ApplyFieldKey(buf, caret, 0, L'-', true, false));
+        CHECK_EQ(buf, std::wstring(L"-1"));
+        CHECK_EQ(caret, size_t(2));  // the insert shifts the caret
+        CHECK(!cmo::ApplyFieldKey(buf, caret, 0, L'-', true, false));
+        buf = L"";
+        caret = 0;
+        CHECK(!cmo::ApplyFieldKey(buf, caret, 0, L'x', true, false));
+        CHECK(cmo::ApplyFieldKey(buf, caret, 0, L'a', false, true));
+        CHECK(cmo::ApplyFieldKey(buf, caret, 0, L'F', false, true));
+        CHECK_EQ(buf, std::wstring(L"aF"));
+        CHECK(!cmo::ApplyFieldKey(buf, caret, 0, L'g', false, true));
+        caret = 1;
+        CHECK(cmo::ApplyFieldKey(buf, caret, VK_LEFT, 0, false, true));
+        CHECK_EQ(caret, size_t(0));
+        CHECK(cmo::ApplyFieldKey(buf, caret, VK_DELETE, 0, false, true));
+        CHECK_EQ(buf, std::wstring(L"F"));
+
+        cmo::ControlSpec slider{};
+        slider.kind = cmo::ControlKind::IntSlider;
+        slider.minValue = 0;
+        slider.maxValue = 100;
+        std::wstring canonical;
+        CHECK(cmo::CommitFieldBuffer(slider, L"  42 ", canonical));
+        CHECK_EQ(canonical, std::wstring(L"42"));
+        CHECK(cmo::CommitFieldBuffer(slider, L"999", canonical));
+        CHECK_EQ(canonical, std::wstring(L"100"));
+        CHECK(!cmo::CommitFieldBuffer(slider, L"12x", canonical));
+        cmo::ControlSpec color{};
+        color.kind = cmo::ControlKind::TextField;
+        CHECK(cmo::CommitFieldBuffer(color, L"#11223344", canonical));
+        CHECK_EQ(canonical, std::wstring(L"34, 51, 68, 17"));
+    }
+
+    {
+        cmo::LayoutMetrics m;
+        std::vector<cmo::MenuItem> items(1);
+        items[0].label = L"Item height";
+        items[0].control.kind = cmo::ControlKind::IntSlider;
+        items[0].control.key = L"itemHeight";
+        cmo::LayoutPanel p = cmo::BuildLayoutPanel(items, m, nullptr);
+        const cmo::LayoutItem& it = p.items[0];
+        CHECK(it.control.kind == cmo::ControlKind::IntSlider);
+        CHECK(it.trackRect.left >= it.textRect.left);
+        CHECK(it.fieldRect.left > it.trackRect.left);
+        CHECK(it.fieldRect.right <= p.size.cx);
+        CHECK_EQ(static_cast<int>(it.rect.bottom - it.rect.top), m.itemHeight);
+
+        std::vector<cmo::MenuItem> area(1);
+        area[0].control.kind = cmo::ControlKind::ColorArea;
+        area[0].controlHeight = 120;
+        cmo::LayoutPanel p2 = cmo::BuildLayoutPanel(area, m, nullptr);
+        CHECK_EQ(
+            static_cast<int>(p2.items[0].rect.bottom - p2.items[0].rect.top),
+            120);
+        CHECK(p2.size.cy > 120);
+        CHECK(p2.items[0].areaRect.right <= p2.size.cx);
+
+        // Existing non-control rows keep their geometry.
+        std::vector<cmo::MenuItem> plain(1);
+        plain[0].label = L"Plain";
+        cmo::LayoutPanel p3 = cmo::BuildLayoutPanel(plain, m, nullptr);
+        CHECK_EQ(
+            static_cast<int>(p3.items[0].rect.bottom - p3.items[0].rect.top),
+            m.itemHeight);
+        CHECK_EQ(static_cast<int>(p3.items[0].controlRect.right -
+                                  p3.items[0].controlRect.left),
+                 0);
+    }
+
+    {
         cmo::SettingsWriteState st;
         cmo::SettingsMarkDirty(st, 1000, 400);
         CHECK(st.pending);

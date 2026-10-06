@@ -5892,6 +5892,7 @@ std::wstring BuildThemeTextWithChanges(
     return ExtractAppearanceBlock(canonical);
 }
 
+
 // ===========================================================================
 // [CMO:Layout] Appearance resolution, metrics, and render-ready layout.
 // ===========================================================================
@@ -6078,6 +6079,18 @@ struct LayoutItem {
     int submenuIndex = -1;
     InvocationDescriptor invocation;
     std::shared_ptr<LayoutItemResources> resources;
+    // Settings-UI control (ControlKind::None for ordinary items).
+    ControlSpec control;
+    std::wstring controlText;
+    int controlValue = 0;
+    uint32_t controlColor = 0;
+    RECT controlRect = {};
+    RECT fieldRect = {};
+    RECT trackRect = {};
+    RECT thumbRect = {};
+    RECT swatchRect = {};
+    RECT areaRect = {};
+    RECT stripRect = {};
 };
 
 struct LayoutPanel {
@@ -6142,25 +6155,62 @@ LayoutPanel BuildLayoutPanel(const std::vector<MenuItem>& items,
     const int textLeft = iconLeft + metrics.iconSize + metrics.padding;
     const int textGap = metrics.padding;
 
+    auto measureText = [&](const std::wstring& text) {
+        return text.empty()
+                   ? 0
+                   : (measure ? measure(text.c_str(), text.size(), metrics)
+                              : EstimateTextWidth(text.c_str(), text.size(),
+                                                  metrics));
+    };
+    auto controlReserve = [&](const MenuItem& item) {
+        switch (item.control.kind) {
+            case ControlKind::Toggle:
+                return 44;
+            case ControlKind::IntSlider:
+                return 200;
+            case ControlKind::Enum:
+                return measureText(item.controlText) + 18;
+            case ControlKind::ColorSwatch:
+                return 48;
+            case ControlKind::TextField:
+                return 140;
+            case ControlKind::Info:
+                return measureText(item.controlText);
+            default:
+                return 0;
+        }
+    };
+    auto rowHeight = [&](const MenuItem& item) {
+        if (item.kind == ItemKind::Separator) {
+            return metrics.separatorHeight + 2 * metrics.separatorSpacing;
+        }
+        if (item.control.kind == ControlKind::ColorArea) {
+            return item.controlHeight > 0 ? item.controlHeight : 120;
+        }
+        if (item.control.kind == ControlKind::HueStrip ||
+            item.control.kind == ControlKind::AlphaStrip) {
+            return item.controlHeight > 0 ? item.controlHeight : 24;
+        }
+        if (item.controlHeight > 0) {
+            return item.controlHeight;
+        }
+        return metrics.itemHeight;
+    };
+
     int y = metrics.verticalPadding;
     int contentWidth = 0;
     for (const MenuItem& item : items) {
-        const int height =
-            item.kind == ItemKind::Separator
-                ? metrics.separatorHeight + 2 * metrics.separatorSpacing
-                : metrics.itemHeight;
+        const int height = rowHeight(item);
         if (item.kind != ItemKind::Separator) {
             const std::wstring& measureLabel =
                 item.displayLabel.empty() ? item.label : item.displayLabel;
-            const int textWidth =
-                measure ? measure(measureLabel.c_str(), measureLabel.size(), metrics)
-                        : EstimateTextWidth(measureLabel.c_str(),
-                                            measureLabel.size(), metrics);
+            const int textWidth = measureText(measureLabel);
             const int arrowSpace = item.kind == ItemKind::Submenu
                                        ? metrics.submenuArrowWidth
                                        : 0;
-            contentWidth = std::max(
-                contentWidth, textLeft + textWidth + arrowSpace + textGap);
+            contentWidth =
+                std::max(contentWidth, textLeft + textWidth + arrowSpace +
+                                           controlReserve(item) + textGap);
         }
         y += height;
     }
@@ -6197,10 +6247,7 @@ LayoutPanel BuildLayoutPanel(const std::vector<MenuItem>& items,
         layout.invocation.targetPath = item.targetPath;
         layout.invocation.hasOffset = (item.flags & kModelHasOffset) != 0;
 
-        const int height =
-            item.kind == ItemKind::Separator
-                ? metrics.separatorHeight + 2 * metrics.separatorSpacing
-                : metrics.itemHeight;
+        const int height = rowHeight(item);
         layout.rect = {0, offset, panel.size.cx, offset + height};
 
         if (item.kind != ItemKind::Separator) {
@@ -6221,6 +6268,51 @@ LayoutPanel BuildLayoutPanel(const std::vector<MenuItem>& items,
                                panel.size.cx - textGap - arrowSpace, offset + height};
         }
 
+        if (item.control.kind != ControlKind::None) {
+            layout.control = item.control;
+            layout.controlText = item.controlText;
+            layout.controlValue = item.controlValue;
+            layout.controlColor = item.controlColor;
+            const int reserve = controlReserve(item);
+            const int controlLeft = panel.size.cx - textGap - reserve;
+            layout.controlRect = {controlLeft, offset, panel.size.cx - textGap,
+                                  offset + height};
+            switch (item.control.kind) {
+                case ControlKind::IntSlider: {
+                    const int fieldWidth = 56;
+                    layout.fieldRect = {layout.controlRect.right - fieldWidth,
+                                        offset + (height - 20) / 2,
+                                        layout.controlRect.right,
+                                        offset + (height + 20) / 2};
+                    layout.trackRect = {layout.controlRect.left,
+                                        offset + height / 2 - 2,
+                                        layout.fieldRect.left - 6,
+                                        offset + height / 2 + 2};
+                    break;
+                }
+                case ControlKind::ColorSwatch:
+                    layout.swatchRect = {controlLeft,
+                                         offset + (height - 18) / 2,
+                                         controlLeft + 44,
+                                         offset + (height + 18) / 2};
+                    break;
+                case ControlKind::TextField:
+                    layout.fieldRect = {controlLeft, offset + (height - 20) / 2,
+                                        layout.controlRect.right,
+                                        offset + (height + 20) / 2};
+                    break;
+                case ControlKind::ColorArea:
+                case ControlKind::HueStrip:
+                case ControlKind::AlphaStrip:
+                    layout.areaRect = {textLeft, offset,
+                                       panel.size.cx - textGap, offset + height};
+                    layout.stripRect = layout.areaRect;
+                    break;
+                default:
+                    break;
+            }
+        }
+
         if (item.kind == ItemKind::Submenu) {
             layout.submenuIndex = static_cast<int>(panel.children.size());
             panel.children.push_back(
@@ -6230,6 +6322,176 @@ LayoutPanel BuildLayoutPanel(const std::vector<MenuItem>& items,
         offset += height;
     }
     return panel;
+}
+
+// --- Control hit-testing and field editing ---------------------------------
+
+enum class ControlPart : uint8_t {
+    None,
+    Row,
+    Track,
+    Thumb,
+    Field,
+    Swatch,
+    Area,
+    HueStrip,
+    AlphaStrip,
+    Toggle,
+};
+
+bool PointInRect(const RECT& rect, POINT pt) {
+    return pt.x >= rect.left && pt.x < rect.right && pt.y >= rect.top &&
+           pt.y < rect.bottom;
+}
+
+ControlPart HitTestControlPart(const LayoutItem& item, POINT pt) {
+    if (!PointInRect(item.rect, pt)) {
+        return ControlPart::None;
+    }
+    switch (item.control.kind) {
+        case ControlKind::IntSlider:
+            if (PointInRect(item.thumbRect, pt)) {
+                return ControlPart::Thumb;
+            }
+            if (PointInRect(item.fieldRect, pt)) {
+                return ControlPart::Field;
+            }
+            if (PointInRect(item.trackRect, pt)) {
+                return ControlPart::Track;
+            }
+            return ControlPart::Row;
+        case ControlKind::ColorSwatch:
+            if (PointInRect(item.swatchRect, pt)) {
+                return ControlPart::Swatch;
+            }
+            return ControlPart::Row;
+        case ControlKind::TextField:
+            if (PointInRect(item.fieldRect, pt)) {
+                return ControlPart::Field;
+            }
+            return ControlPart::Row;
+        case ControlKind::ColorArea:
+            if (PointInRect(item.areaRect, pt)) {
+                return ControlPart::Area;
+            }
+            return ControlPart::Row;
+        case ControlKind::HueStrip:
+            if (PointInRect(item.stripRect, pt)) {
+                return ControlPart::HueStrip;
+            }
+            return ControlPart::Row;
+        case ControlKind::AlphaStrip:
+            if (PointInRect(item.stripRect, pt)) {
+                return ControlPart::AlphaStrip;
+            }
+            return ControlPart::Row;
+        case ControlKind::Toggle:
+            if (PointInRect(item.controlRect, pt)) {
+                return ControlPart::Toggle;
+            }
+            return ControlPart::Row;
+        default:
+            return ControlPart::Row;
+    }
+}
+
+// Field editing: control keys move the caret/delete; a typed character is
+// passed with key == 0 and ch set. Returns true when the buffer changed.
+bool ApplyFieldKey(std::wstring& buffer, size_t& caret, UINT key, wchar_t ch,
+                   bool allowNegative, bool hexOnly) {
+    if (caret > buffer.size()) {
+        caret = buffer.size();
+    }
+    switch (key) {
+        case VK_BACK:
+            if (caret == 0) {
+                return false;
+            }
+            buffer.erase(caret - 1, 1);
+            --caret;
+            return true;
+        case VK_DELETE:
+            if (caret >= buffer.size()) {
+                return false;
+            }
+            buffer.erase(caret, 1);
+            return true;
+        case VK_LEFT:
+            if (caret == 0) {
+                return false;
+            }
+            --caret;
+            return true;
+        case VK_RIGHT:
+            if (caret >= buffer.size()) {
+                return false;
+            }
+            ++caret;
+            return true;
+        case VK_HOME:
+            if (caret == 0) {
+                return false;
+            }
+            caret = 0;
+            return true;
+        case VK_END:
+            if (caret == buffer.size()) {
+                return false;
+            }
+            caret = buffer.size();
+            return true;
+        default:
+            break;
+    }
+    if (key != 0 || ch == 0) {
+        return false;
+    }
+    if (ch == L'-') {
+        if (!allowNegative || buffer.find(L'-') != std::wstring::npos) {
+            return false;
+        }
+        buffer.insert(0, 1, L'-');
+        ++caret;
+        return true;
+    }
+    if (ch == L'#') {
+        if (!hexOnly || buffer.find(L'#') != std::wstring::npos) {
+            return false;
+        }
+        buffer.insert(0, 1, L'#');
+        ++caret;
+        return true;
+    }
+    const bool digit = ch >= L'0' && ch <= L'9';
+    const bool hexDigit =
+        digit || (ch >= L'a' && ch <= L'f') || (ch >= L'A' && ch <= L'F');
+    if (hexOnly ? !hexDigit : !digit) {
+        return false;
+    }
+    buffer.insert(caret, 1, ch);
+    ++caret;
+    return true;
+}
+
+bool CommitFieldBuffer(const ControlSpec& control, const std::wstring& buffer,
+                       std::wstring& canonicalOut) {
+    if (control.kind == ControlKind::IntSlider) {
+        int value = 0;
+        if (!ParseIntField(buffer, control.minValue, control.maxValue, value)) {
+            return false;
+        }
+        canonicalOut = std::to_wstring(value);
+        return true;
+    }
+    if (control.kind == ControlKind::TextField) {
+        uint32_t argb = 0;
+        if (!ParseColorField(buffer, argb)) {
+            return false;
+        }
+        canonicalOut = FormatColorRgba(argb);
+        return true;
+    }
+    return false;
 }
 
 POINT ClampPanelPosition(POINT anchor, SIZE panelSize, const RECT& workArea) {

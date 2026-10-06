@@ -5263,6 +5263,15 @@ bool ParseHotkey(const std::wstring& text, HotkeySpec& out) {
     return true;
 }
 
+// Multi-select effect rows: mask 0 is "none" and clears everything; a real
+// effect toggles its bit, and clearing the last bit leaves "none".
+uint32_t ToggleAnimationEffect(uint32_t effects, uint32_t effect) {
+    if (effect == 0) {
+        return 0;
+    }
+    return effects ^ effect;
+}
+
 // ===========================================================================
 // [CMO:Layout] Appearance resolution, metrics, and render-ready layout.
 // ===========================================================================

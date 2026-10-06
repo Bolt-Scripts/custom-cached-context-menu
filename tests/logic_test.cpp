@@ -4009,6 +4009,24 @@ int main() {
     }
 
     {
+        CHECK_EQ(cmo::ToggleAnimationEffect(cmo::kAnimFade | cmo::kAnimSlide,
+                                            cmo::kAnimSlide),
+                 cmo::kAnimFade);
+        CHECK_EQ(cmo::ToggleAnimationEffect(cmo::kAnimFade | cmo::kAnimSlide,
+                                            cmo::kAnimCrt),
+                 (cmo::kAnimFade | cmo::kAnimSlide | cmo::kAnimCrt));
+        // "none" is effect mask 0 (there is no kAnimNone constant).
+        CHECK_EQ(cmo::ToggleAnimationEffect(0, 0u), 0u);
+        CHECK_EQ(cmo::ToggleAnimationEffect(cmo::kAnimFade | cmo::kAnimSlide,
+                                            0u),
+                 0u);
+        CHECK_EQ(cmo::ToggleAnimationEffect(0u, cmo::kAnimFade),
+                 cmo::kAnimFade);
+        CHECK_EQ(cmo::ToggleAnimationEffect(cmo::kAnimFade, cmo::kAnimFade),
+                 0u);
+    }
+
+    {
         cmo::HotkeySpec hk{};
         CHECK(cmo::ParseHotkey(L"Ctrl+Alt+M", hk));
         CHECK_EQ(hk.modifiers, static_cast<UINT>(MOD_CONTROL | MOD_ALT));

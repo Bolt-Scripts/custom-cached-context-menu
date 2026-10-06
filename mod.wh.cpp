@@ -6048,6 +6048,9 @@ struct LayoutItemResources {
     IDWriteTextLayout* text = nullptr;
     IDWriteTextLayout* glyph = nullptr;
     ID2D1Bitmap* icon = nullptr;
+    // Cached saturation/value square for the color editor, keyed by hue.
+    ID2D1Bitmap* svSquare = nullptr;
+    float svHue = -1.0f;
 
     ~LayoutItemResources() {
         if (text) {
@@ -6058,6 +6061,9 @@ struct LayoutItemResources {
         }
         if (icon) {
             icon->Release();
+        }
+        if (svSquare) {
+            svSquare->Release();
         }
     }
 };
@@ -7227,6 +7233,14 @@ struct MenuInputState {
     int keyboardIndex = -1;
     int scrollOffset = 0;
     int openSubmenu = -1;
+    // Settings UI state (empty/None for ordinary menus).
+    std::wstring focusedControl;
+    std::wstring editBuffer;
+    size_t caretPos = 0;
+    bool caretVisible = false;
+    std::wstring dragControl;
+    ControlPart dragPart = ControlPart::None;
+    ControlPart hoverPart = ControlPart::None;
 };
 
 struct BackdropBitmap {
@@ -7987,6 +8001,417 @@ void DrawSubmenuArrow(ID2D1DeviceContext* dc, const LayoutItem& item,
     brush->Release();
 }
 
+// --- Settings control drawing ----------------------------------------------
+
+D2D1_RECT_F RectF(const RECT& rect) {
+    return D2D1::RectF(static_cast<float>(rect.left),
+                       static_cast<float>(rect.top),
+                       static_cast<float>(rect.right),
+                       static_cast<float>(rect.bottom));
+}
+
+float SettingsTextWidth(const std::wstring& text, const LayoutMetrics& metrics) {
+    IDWriteFactory* dwrite = g_renderDevice.DWriteFactory();
+    if (!dwrite || text.empty()) {
+        return 0.0f;
+    }
+    IDWriteTextFormat* format = nullptr;
+    if (FAILED(dwrite->CreateTextFormat(
+            metrics.fontFace.c_str(), nullptr,
+            FontWeightToDwrite(metrics.fontWeight),
+            FontStyleToDwrite(metrics.fontStyle), DWRITE_FONT_STRETCH_NORMAL,
+            metrics.fontSize, L"", &format)) ||
+        !format) {
+        return 0.0f;
+    }
+    IDWriteTextLayout* layout = nullptr;
+    float width = 0.0f;
+    if (SUCCEEDED(dwrite->CreateTextLayout(text.c_str(),
+                                           static_cast<UINT32>(text.size()),
+                                           format, 4096.0f, 64.0f, &layout)) &&
+        layout) {
+        DWRITE_TEXT_METRICS textMetrics = {};
+        if (SUCCEEDED(layout->GetMetrics(&textMetrics))) {
+            width = textMetrics.widthIncludingTrailingWhitespace;
+        }
+        layout->Release();
+    }
+    format->Release();
+    return width;
+}
+
+void DrawSettingsText(ID2D1DeviceContext* dc, const std::wstring& text,
+                      const RECT& rect, uint32_t color,
+                      const LayoutMetrics& metrics,
+                      DWRITE_TEXT_ALIGNMENT alignment) {
+    IDWriteFactory* dwrite = g_renderDevice.DWriteFactory();
+    if (!dwrite || text.empty() || rect.right <= rect.left ||
+        rect.bottom <= rect.top) {
+        return;
+    }
+    IDWriteTextFormat* format = nullptr;
+    if (FAILED(dwrite->CreateTextFormat(
+            metrics.fontFace.c_str(), nullptr,
+            FontWeightToDwrite(metrics.fontWeight),
+            FontStyleToDwrite(metrics.fontStyle), DWRITE_FONT_STRETCH_NORMAL,
+            metrics.fontSize, L"", &format)) ||
+        !format) {
+        return;
+    }
+    format->SetTextAlignment(alignment);
+    format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+    IDWriteTextLayout* layout = nullptr;
+    if (SUCCEEDED(dwrite->CreateTextLayout(
+            text.c_str(), static_cast<UINT32>(text.size()), format,
+            static_cast<float>(rect.right - rect.left),
+            static_cast<float>(rect.bottom - rect.top), &layout)) &&
+        layout) {
+        ID2D1SolidColorBrush* brush = nullptr;
+        if (SUCCEEDED(dc->CreateSolidColorBrush(ColorFromArgb(color), &brush)) &&
+            brush) {
+            dc->DrawTextLayout(
+                D2D1::Point2F(static_cast<float>(rect.left),
+                              static_cast<float>(rect.top)),
+                layout, brush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
+            brush->Release();
+        }
+        layout->Release();
+    }
+    format->Release();
+}
+
+void DrawSettingsCheckerboard(ID2D1DeviceContext* dc, const D2D1_RECT_F& rect,
+                              float cell) {
+    ID2D1SolidColorBrush* light = nullptr;
+    ID2D1SolidColorBrush* dark = nullptr;
+    if (FAILED(dc->CreateSolidColorBrush(D2D1::ColorF(0.78f, 0.78f, 0.78f),
+                                         &light)) ||
+        !light) {
+        return;
+    }
+    if (FAILED(dc->CreateSolidColorBrush(D2D1::ColorF(0.55f, 0.55f, 0.55f),
+                                         &dark)) ||
+        !dark) {
+        light->Release();
+        return;
+    }
+    int row = 0;
+    for (float y = rect.top; y < rect.bottom; y += cell, ++row) {
+        int col = 0;
+        for (float x = rect.left; x < rect.right; x += cell, ++col) {
+            const D2D1_RECT_F cellRect = {
+                x, y, std::min(x + cell, rect.right),
+                std::min(y + cell, rect.bottom)};
+            dc->FillRectangle(cellRect,
+                              ((row + col) % 2) != 0 ? dark : light);
+        }
+    }
+    light->Release();
+    dark->Release();
+}
+
+void DrawSettingsToggle(ID2D1DeviceContext* dc, const LayoutItem& item,
+                        const LayoutMetrics& metrics,
+                        const Appearance& appearance) {
+    const bool on = item.controlValue != 0;
+    const float height = 18.0f;
+    const float width = 36.0f;
+    const float left = static_cast<float>(item.controlRect.left);
+    const float top =
+        (static_cast<float>(item.rect.top) + static_cast<float>(item.rect.bottom)) /
+            2.0f -
+        height / 2.0f;
+    const D2D1_ROUNDED_RECT pill = {
+        D2D1::RectF(left, top, left + width, top + height), height / 2.0f,
+        height / 2.0f};
+    ID2D1SolidColorBrush* brush = nullptr;
+    if (on) {
+        if (SUCCEEDED(dc->CreateSolidColorBrush(ColorFromArgb(metrics.textColor),
+                                                &brush)) &&
+            brush) {
+            dc->FillRoundedRectangle(pill, brush);
+            brush->Release();
+        }
+    } else if (SUCCEEDED(dc->CreateSolidColorBrush(
+                   ColorFromArgb(appearance.border), &brush)) &&
+               brush) {
+        dc->DrawRoundedRectangle(pill, brush, 1.0f);
+        brush->Release();
+    }
+    const float knobX = on ? left + width - height / 2.0f : left + height / 2.0f;
+    if (SUCCEEDED(dc->CreateSolidColorBrush(ColorFromArgb(appearance.background),
+                                            &brush)) &&
+        brush) {
+        dc->FillEllipse(D2D1::Ellipse(D2D1::Point2F(knobX, top + height / 2.0f),
+                                      6.0f, 6.0f),
+                        brush);
+        brush->Release();
+    }
+}
+
+void DrawSettingsField(ID2D1DeviceContext* dc, const LayoutItem& item,
+                       const MenuInputState& state,
+                       const LayoutMetrics& metrics,
+                       const Appearance& appearance) {
+    if (item.fieldRect.right <= item.fieldRect.left) {
+        return;
+    }
+    const bool focused = !state.focusedControl.empty() &&
+                         state.focusedControl == item.control.key;
+    ID2D1SolidColorBrush* brush = nullptr;
+    const D2D1_ROUNDED_RECT field = {RectF(item.fieldRect), 4.0f, 4.0f};
+    if (SUCCEEDED(dc->CreateSolidColorBrush(ColorFromArgb(metrics.hoverBackground),
+                                            &brush)) &&
+        brush) {
+        dc->FillRoundedRectangle(field, brush);
+        brush->Release();
+    }
+    if (focused &&
+        SUCCEEDED(dc->CreateSolidColorBrush(ColorFromArgb(appearance.border),
+                                            &brush)) &&
+        brush) {
+        dc->DrawRoundedRectangle(field, brush, 1.0f);
+        brush->Release();
+    }
+    const std::wstring& text = focused ? state.editBuffer : item.controlText;
+    DrawSettingsText(dc, text, item.fieldRect, metrics.textColor, metrics,
+                     DWRITE_TEXT_ALIGNMENT_TRAILING);
+    if (focused && state.caretVisible) {
+        const std::wstring prefix =
+            state.editBuffer.substr(0, std::min(state.caretPos,
+                                                state.editBuffer.size()));
+        const float fullWidth = SettingsTextWidth(text, metrics);
+        const float prefixWidth = SettingsTextWidth(prefix, metrics);
+        const float caretX = static_cast<float>(item.fieldRect.right) - 6.0f -
+                             fullWidth + prefixWidth;
+        if (SUCCEEDED(dc->CreateSolidColorBrush(ColorFromArgb(metrics.textColor),
+                                                &brush)) &&
+            brush) {
+            dc->DrawLine(
+                D2D1::Point2F(caretX,
+                              static_cast<float>(item.fieldRect.top) + 3.0f),
+                D2D1::Point2F(caretX,
+                              static_cast<float>(item.fieldRect.bottom) - 3.0f),
+                brush, 1.0f);
+            brush->Release();
+        }
+    }
+}
+
+void DrawSettingsSlider(ID2D1DeviceContext* dc, const LayoutItem& item,
+                        const MenuInputState& state,
+                        const LayoutMetrics& metrics,
+                        const Appearance& appearance) {
+    ID2D1SolidColorBrush* brush = nullptr;
+    const float trackY =
+        (static_cast<float>(item.trackRect.top) +
+         static_cast<float>(item.trackRect.bottom)) /
+        2.0f;
+    if (SUCCEEDED(dc->CreateSolidColorBrush(ColorFromArgb(metrics.submenuArrow),
+                                            &brush)) &&
+        brush) {
+        dc->DrawLine(
+            D2D1::Point2F(static_cast<float>(item.trackRect.left), trackY),
+            D2D1::Point2F(static_cast<float>(item.trackRect.right), trackY),
+            brush, 3.0f);
+        brush->Release();
+    }
+    const int trackWidth = item.trackRect.right - item.trackRect.left;
+    const int thumbX =
+        SliderXFromValue(item.controlValue, item.trackRect.left, trackWidth,
+                         item.control.minValue, item.control.maxValue);
+    const float centerY =
+        (static_cast<float>(item.rect.top) + static_cast<float>(item.rect.bottom)) /
+        2.0f;
+    if (SUCCEEDED(dc->CreateSolidColorBrush(ColorFromArgb(metrics.textColor),
+                                            &brush)) &&
+        brush) {
+        dc->FillEllipse(
+            D2D1::Ellipse(D2D1::Point2F(static_cast<float>(thumbX), centerY),
+                          6.0f, 6.0f),
+            brush);
+        brush->Release();
+    }
+    DrawSettingsField(dc, item, state, metrics, appearance);
+}
+
+void DrawSettingsEnum(ID2D1DeviceContext* dc, const LayoutItem& item,
+                      const LayoutMetrics& metrics) {
+    RECT textRect = item.controlRect;
+    textRect.right -= 14;
+    DrawSettingsText(dc, item.controlText, textRect, metrics.textColor, metrics,
+                     DWRITE_TEXT_ALIGNMENT_TRAILING);
+    ID2D1SolidColorBrush* brush = nullptr;
+    if (SUCCEEDED(dc->CreateSolidColorBrush(ColorFromArgb(metrics.submenuArrow),
+                                            &brush)) &&
+        brush) {
+        const float right = static_cast<float>(item.controlRect.right) - 4.0f;
+        const float midY = (static_cast<float>(item.rect.top) +
+                            static_cast<float>(item.rect.bottom)) /
+                           2.0f;
+        dc->DrawLine(D2D1::Point2F(right - 6.0f, midY - 3.0f),
+                     D2D1::Point2F(right, midY), brush, 1.2f);
+        dc->DrawLine(D2D1::Point2F(right, midY),
+                     D2D1::Point2F(right - 6.0f, midY + 3.0f), brush, 1.2f);
+        brush->Release();
+    }
+}
+
+void DrawSettingsSwatch(ID2D1DeviceContext* dc, const LayoutItem& item,
+                        const LayoutMetrics& metrics,
+                        const Appearance& appearance) {
+    const D2D1_RECT_F rect = RectF(item.swatchRect);
+    if ((item.controlColor >> 24) != 0xFF) {
+        DrawSettingsCheckerboard(dc, rect, 8.0f);
+    }
+    ID2D1SolidColorBrush* brush = nullptr;
+    if (SUCCEEDED(dc->CreateSolidColorBrush(ColorFromArgb(item.controlColor),
+                                            &brush)) &&
+        brush) {
+        dc->FillRoundedRectangle(D2D1::RoundedRect(rect, 4.0f, 4.0f), brush);
+        brush->Release();
+    }
+    if (SUCCEEDED(dc->CreateSolidColorBrush(ColorFromArgb(appearance.border),
+                                            &brush)) &&
+        brush) {
+        dc->DrawRoundedRectangle(D2D1::RoundedRect(rect, 4.0f, 4.0f), brush,
+                                 1.0f);
+        brush->Release();
+    }
+}
+
+void DrawSettingsColorArea(ID2D1DeviceContext* dc, const LayoutItem& item,
+                           const LayoutMetrics& metrics,
+                           const Appearance& appearance) {
+    const D2D1_RECT_F rect = RectF(item.areaRect);
+    const int width = item.areaRect.right - item.areaRect.left;
+    const int height = item.areaRect.bottom - item.areaRect.top;
+    if (width <= 0 || height <= 0 || !item.resources) {
+        return;
+    }
+    const HsvColor hsv = RgbToHsv(item.controlColor);
+    LayoutItemResources* resources = item.resources.get();
+    if (!resources->svSquare || resources->svHue != hsv.h) {
+        const std::vector<uint8_t> pixels =
+            BuildSvSquarePixels(hsv.h, width, height);
+        ID2D1Bitmap* bitmap = nullptr;
+        const D2D1_BITMAP_PROPERTIES props = D2D1::BitmapProperties(
+            D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM,
+                              D2D1_ALPHA_MODE_PREMULTIPLIED));
+        if (!pixels.empty() &&
+            SUCCEEDED(dc->CreateBitmap(
+                D2D1::SizeU(static_cast<UINT32>(width),
+                            static_cast<UINT32>(height)),
+                pixels.data(), static_cast<UINT32>(width * 4), props,
+                &bitmap)) &&
+            bitmap) {
+            if (resources->svSquare) {
+                resources->svSquare->Release();
+            }
+            resources->svSquare = bitmap;
+            resources->svHue = hsv.h;
+        }
+    }
+    if (resources->svSquare) {
+        dc->DrawBitmap(resources->svSquare, rect, 1.0f,
+                       D2D1_INTERPOLATION_MODE_LINEAR);
+    }
+    ID2D1SolidColorBrush* brush = nullptr;
+    if (SUCCEEDED(dc->CreateSolidColorBrush(ColorFromArgb(appearance.border),
+                                            &brush)) &&
+        brush) {
+        dc->DrawRectangle(rect, brush, 1.0f);
+        brush->Release();
+    }
+    const float markerX =
+        static_cast<float>(item.areaRect.left) +
+        hsv.s * static_cast<float>(width);
+    const float markerY =
+        static_cast<float>(item.areaRect.top) +
+        (1.0f - hsv.v) * static_cast<float>(height);
+    if (SUCCEEDED(dc->CreateSolidColorBrush(ColorFromArgb(0xFFFFFFFF), &brush)) &&
+        brush) {
+        dc->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(markerX, markerY), 5.0f,
+                                      5.0f),
+                        brush, 2.0f);
+        brush->Release();
+    }
+    if (SUCCEEDED(dc->CreateSolidColorBrush(ColorFromArgb(0xFF000000), &brush)) &&
+        brush) {
+        dc->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(markerX, markerY), 6.5f,
+                                      6.5f),
+                        brush, 1.0f);
+        brush->Release();
+    }
+}
+
+void DrawSettingsStrip(ID2D1DeviceContext* dc, const LayoutItem& item,
+                       const LayoutMetrics& metrics,
+                       const Appearance& appearance, bool alpha) {
+    const D2D1_RECT_F rect = RectF(item.stripRect);
+    if (alpha) {
+        DrawSettingsCheckerboard(dc, rect, 8.0f);
+    }
+    D2D1_GRADIENT_STOP stops[7] = {};
+    UINT32 stopCount = 0;
+    if (alpha) {
+        stopCount = 2;
+        stops[0] = {0.0f, ColorFromArgb(item.controlColor & 0x00FFFFFF)};
+        stops[1] = {1.0f, ColorFromArgb(item.controlColor | 0xFF000000)};
+    } else {
+        stopCount = 7;
+        stops[0] = {0.0f, ColorFromArgb(0xFFFF0000)};
+        stops[1] = {1.0f / 6.0f, ColorFromArgb(0xFFFFFF00)};
+        stops[2] = {2.0f / 6.0f, ColorFromArgb(0xFF00FF00)};
+        stops[3] = {3.0f / 6.0f, ColorFromArgb(0xFF00FFFF)};
+        stops[4] = {4.0f / 6.0f, ColorFromArgb(0xFF0000FF)};
+        stops[5] = {5.0f / 6.0f, ColorFromArgb(0xFFFF00FF)};
+        stops[6] = {1.0f, ColorFromArgb(0xFFFF0000)};
+    }
+    ID2D1GradientStopCollection* collection = nullptr;
+    if (FAILED(dc->CreateGradientStopCollection(stops, stopCount, &collection)) ||
+        !collection) {
+        return;
+    }
+    ID2D1LinearGradientBrush* brush = nullptr;
+    if (SUCCEEDED(dc->CreateLinearGradientBrush(
+            D2D1::LinearGradientBrushProperties(
+                D2D1::Point2F(rect.left, rect.top),
+                D2D1::Point2F(rect.right, rect.top)),
+            collection, &brush)) &&
+        brush) {
+        dc->FillRectangle(rect, brush);
+        brush->Release();
+    }
+    collection->Release();
+
+    const HsvColor hsv = RgbToHsv(item.controlColor);
+    const float markerX =
+        alpha
+            ? rect.left + static_cast<float>((item.controlColor >> 24) & 0xFF) /
+                              255.0f * (rect.right - rect.left)
+            : rect.left + hsv.h / 360.0f * (rect.right - rect.left);
+    ID2D1SolidColorBrush* marker = nullptr;
+    if (SUCCEEDED(dc->CreateSolidColorBrush(ColorFromArgb(0xFFFFFFFF), &marker)) &&
+        marker) {
+        dc->DrawLine(D2D1::Point2F(markerX, rect.top - 1.0f),
+                     D2D1::Point2F(markerX, rect.bottom + 1.0f), marker, 2.0f);
+        marker->Release();
+    }
+    if (SUCCEEDED(dc->CreateSolidColorBrush(ColorFromArgb(0xFF000000), &marker)) &&
+        marker) {
+        dc->DrawRectangle(rect, marker, 1.0f);
+        marker->Release();
+    }
+}
+
+void DrawSettingsInfo(ID2D1DeviceContext* dc, const LayoutItem& item,
+                      const LayoutMetrics& metrics) {
+    DrawSettingsText(dc, item.controlText, item.controlRect,
+                     metrics.disabledTextColor, metrics,
+                     DWRITE_TEXT_ALIGNMENT_TRAILING);
+}
+
 void DrawPanel(ID2D1DeviceContext* dc, const LayoutPanel& panel,
                const MenuInputState& state, const LayoutMetrics& metrics,
                const Appearance& appearance, const BackdropBitmap* backdrop,
@@ -8285,6 +8710,40 @@ void DrawPanel(ID2D1DeviceContext* dc, const LayoutPanel& panel,
                                   static_cast<float>(item.textRect.top)},
                     item.resources->text, brush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
                 brush->Release();
+            }
+        }
+
+        if (item.control.kind != ControlKind::None) {
+            switch (item.control.kind) {
+                case ControlKind::Toggle:
+                    DrawSettingsToggle(dc, item, metrics, appearance);
+                    break;
+                case ControlKind::IntSlider:
+                    DrawSettingsSlider(dc, item, state, metrics, appearance);
+                    break;
+                case ControlKind::Enum:
+                    DrawSettingsEnum(dc, item, metrics);
+                    break;
+                case ControlKind::ColorSwatch:
+                    DrawSettingsSwatch(dc, item, metrics, appearance);
+                    break;
+                case ControlKind::TextField:
+                    DrawSettingsField(dc, item, state, metrics, appearance);
+                    break;
+                case ControlKind::ColorArea:
+                    DrawSettingsColorArea(dc, item, metrics, appearance);
+                    break;
+                case ControlKind::HueStrip:
+                    DrawSettingsStrip(dc, item, metrics, appearance, false);
+                    break;
+                case ControlKind::AlphaStrip:
+                    DrawSettingsStrip(dc, item, metrics, appearance, true);
+                    break;
+                case ControlKind::Info:
+                    DrawSettingsInfo(dc, item, metrics);
+                    break;
+                default:
+                    break;
             }
         }
 

@@ -2776,7 +2776,11 @@ int main() {
             explicitConfig, warnings));
         CHECK(explicitConfig.appearance.animationOpen == kAnimFade);
         CHECK(explicitConfig.appearance.animationClose == kAnimSlide);
-        CHECK(kConfigSchemaVersion == 6);
+        CHECK(kConfigSchemaVersion == 7);
+        RulesConfig submenuConfig;
+        CHECK(ParseRulesConfig(L"[appearance]\nanimateSubmenus = true\n",
+                               submenuConfig, warnings));
+        CHECK(submenuConfig.appearance.animateSubmenus);
 
         // Canonical rewrites keep the recognized effect subset.
         const ConfigSchemaEntry* openRow = SchemaFind(L"animationOpen");
@@ -3439,13 +3443,13 @@ int main() {
                       entry, entry.defaultValue)) != std::wstring::npos);
         }
         CHECK(text.find(L"[meta]") != std::wstring::npos);
-        CHECK(text.find(L"schemaVersion = 6") != std::wstring::npos);
+        CHECK(text.find(L"schemaVersion = 7") != std::wstring::npos);
         CHECK(text.find(L"[rules]") != std::wstring::npos);
         CHECK(text.find(L"[command ") != std::wstring::npos);
         cmo::RulesConfig config;
         std::vector<cmo::ConfigParseError> errors;
         CHECK(cmo::ParseRulesConfig(text, config, errors));
-        CHECK(config.schemaVersion == 6);
+        CHECK(config.schemaVersion == 7);
     }
 
     // v2.3/v2.4 review fixes: inert examples, '#' comments.
@@ -3503,13 +3507,13 @@ int main() {
             L"; my notes\n[appearance]\nitemHeight = 30\n[appearance]\n"
             L"background = #11223344\n[rules]\n; my rule\n"
             L"hide = label:\"Cast to Device\"\n[meta]\nschemaVersion = 0\n";
-        const std::wstring canonical = cmo::CanonicalizeConfig(legacy, 6);
+        const std::wstring canonical = cmo::CanonicalizeConfig(legacy, 7);
         CHECK(cmo::CountSubstring(canonical, L"[appearance]") == 1);
         CHECK(canonical.find(L"itemHeight = 30") != std::wstring::npos);
         CHECK(canonical.find(L"background = 34, 51, 68, 17") != std::wstring::npos);
         CHECK(canonical.find(L"hide = label:\"Cast to Device\"") != std::wstring::npos);
         CHECK(canonical.find(L"; my rule") != std::wstring::npos);
-        CHECK(canonical.find(L"schemaVersion = 6") != std::wstring::npos);
+        CHECK(canonical.find(L"schemaVersion = 7") != std::wstring::npos);
         cmo::RulesConfig reparsed;
         CHECK(cmo::ParseRulesConfig(canonical, reparsed, errors));
         CHECK(reparsed.appearance.itemHeight == 30);
@@ -3575,7 +3579,7 @@ int main() {
         CHECK(store.Snapshot()->appearance.itemHeight == 30);
         std::wstring text;
         CHECK(cmo::ReadConfigFile(path, text));
-        CHECK(text.find(L"schemaVersion = 6") != std::wstring::npos);
+        CHECK(text.find(L"schemaVersion = 7") != std::wstring::npos);
         CHECK(text.find(L"itemHeight = 30") != std::wstring::npos);
         CHECK(text.find(L"; itemPadding = 6") != std::wstring::npos);
 
@@ -3586,7 +3590,7 @@ int main() {
         std::wstring rewritten;
         CHECK(cmo::ReadConfigFile(path, rewritten));
         CHECK(rewritten.find(L"[appearance]") != std::wstring::npos);
-        CHECK(rewritten.find(L"schemaVersion = 6") != std::wstring::npos);
+        CHECK(rewritten.find(L"schemaVersion = 7") != std::wstring::npos);
         DeleteFileW(path.c_str());
     }
 
@@ -3712,7 +3716,7 @@ int main() {
         CHECK(text.find(L"none | fade | slide") != std::wstring::npos);
         CHECK(text.find(L"1-256") != std::wstring::npos);
         CHECK(text.find(L"dot | check | bar | none") != std::wstring::npos);
-        CHECK(text.find(L"schemaVersion = 6") != std::wstring::npos);
+        CHECK(text.find(L"schemaVersion = 7") != std::wstring::npos);
     }
 
     // v2.6 advanced grouping: toggles, exclude, keep.

@@ -1132,6 +1132,7 @@ struct Appearance {
     int slideOffsetY = 0;
     int scaleFrom = 92;
     bool animationAnchorAtCursor = true;
+    bool animateSubmenus = false;
     int verticalPadding = 4;
     int minWidth = 0;
     int maxWidth = 0;
@@ -1579,7 +1580,7 @@ bool ParseCornerRadii(const std::wstring& value, CornerRadii& radii) {
 enum class SettingType : uint8_t { Bool, Int, Color, Font, Enum, IntList, EffectList };
 
 // The build's schema version; bump when a row is added.
-constexpr int kConfigSchemaVersion = 6;
+constexpr int kConfigSchemaVersion = 7;
 
 struct ConfigSchemaEntry {
     const wchar_t* section;
@@ -1692,6 +1693,8 @@ const ConfigSchemaEntry kAppearanceSchema[] = {
     {L"appearance", L"animationAnchor", L"Animation", SettingType::Enum, L"cursor",
      L"cursor|center", 0, 0,
      L"Scale origin: nearest panel corner to the cursor, or the panel center.", 6, false},
+    {L"appearance", L"animateSubmenus", L"Animation", SettingType::Bool, L"false", nullptr, 0, 0,
+     L"Run the open animation for submenus too.", 7, false},
     {L"appearance", L"animation", L"Animation", SettingType::Enum, L"none",
      L"none|fade|slide", 0, 0,
      L"Deprecated; maps to animationOpen and animationClose when they are unset.",
@@ -1902,6 +1905,10 @@ bool ApplyAppearanceValue(Appearance& appearance, const std::wstring& key,
         ParseAnimationAnchor(row->defaultValue, fallback);
         return applyEnum(ParseAnimationAnchor, appearance.animationAnchorAtCursor,
                          fallback);
+    }
+    if (normalized == L"animatesubmenus") {
+        return applyBool(appearance.animateSubmenus,
+                         wcscmp(row->defaultValue, L"true") == 0);
     }
     if (normalized == L"verticalpadding") {
         return applyInt(appearance.verticalPadding, _wtoi(row->defaultValue));
@@ -7520,6 +7527,61 @@ void RunSessionAnimation(MenuSession& session, const AnimationSpec& spec,
     }
 }
 
+// Runs the open animation for a single session window (a submenu). A nested
+// action can close the animating submenu while frames pump, so every iteration
+// re-checks that the window is still part of the session.
+void RunWindowAnimation(MenuSession& session, size_t index,
+                        const AnimationSpec& spec, POINT anchor) {
+    if (!spec.animate || spec.durationMs <= 0 ||
+        index >= session.windows.size()) {
+        return;
+    }
+    MenuWindow* window = session.windows[index];
+    if (!window || !window->Panel()) {
+        return;
+    }
+    const LayoutPanel* panel = window->Panel();
+    const BackdropBitmap* backdrop =
+        index < session.backdrops.size() && session.backdrops[index].width > 0
+            ? &session.backdrops[index]
+            : nullptr;
+    const int shadowClipSide =
+        index < session.shadowClipSides.size() ? session.shadowClipSides[index]
+                                               : 0;
+    const ULONGLONG start = GetTickCount64();
+    for (;;) {
+        if (session.done || index >= session.windows.size() ||
+            session.windows[index] != window || window->Panel() != panel) {
+            break;
+        }
+        const ULONGLONG elapsed = GetTickCount64() - start;
+        float t = static_cast<float>(elapsed) /
+                  static_cast<float>(spec.durationMs);
+        if (t > 1.0f) {
+            t = 1.0f;
+        }
+        RenderMenuWindow(window, *panel, session.states[index], session.metrics,
+                         session.appearance, backdrop, session.margin,
+                         shadowClipSide, ComputeAnimationFrame(spec, t, true),
+                         anchor);
+        if (t >= 1.0f) {
+            break;
+        }
+        MSG msg = {};
+        while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+            if (msg.message == WM_KEYDOWN || msg.message == WM_SYSKEYDOWN ||
+                msg.message == WM_KEYUP || msg.message == WM_SYSKEYUP ||
+                msg.message == WM_CHAR || msg.message == WM_SYSCHAR ||
+                msg.message == WM_DEADCHAR) {
+                continue;
+            }
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+        Sleep(static_cast<DWORD>(std::clamp(spec.frameMs, 1, 100)));
+    }
+}
+
 void RepaintMenuWindow(MenuSession* session, int index) {
     if (!session || index < 0 ||
         index >= static_cast<int>(session->windows.size())) {
@@ -7630,12 +7692,39 @@ void OpenSubmenu(MenuSession* session, int index, int itemIndex) {
     session->states[index].openSubmenu = item.submenuIndex;
     session->states[index].hoverIndex = itemIndex;
 
+    // Optional submenu animation: the same effects as the main open, anchored
+    // to the child panel corner nearest the parent item.
+    const AnimationSpec childSpec = ResolveAnimationSpec(session->appearance, true);
+    const bool animateChild = session->appearance.animateSubmenus &&
+                              childSpec.animate && childSpec.durationMs > 0;
+    POINT childAnchor = {childPanel.size.cx / 2, childPanel.size.cy / 2};
+    if (session->appearance.animationAnchorAtCursor) {
+        const int panelLeft = childPos.x + session->margin;
+        const int panelTop = childPos.y + session->margin;
+        const int itemCenterX = (itemScreen.left + itemScreen.right) / 2;
+        const int itemCenterY = (itemScreen.top + itemScreen.bottom) / 2;
+        childAnchor = {itemCenterX < panelLeft + childPanel.size.cx / 2
+                           ? 0
+                           : childPanel.size.cx,
+                       itemCenterY < panelTop + childPanel.size.cy / 2
+                           ? 0
+                           : childPanel.size.cy};
+    }
+
     RepaintMenuWindow(session, index);
     RenderMenuWindow(child, childPanel, session->states.back(), session->metrics,
                      session->appearance,
                      hasBackdrop ? &session->backdrops.back() : nullptr,
-                     session->margin, session->shadowClipSides.back());
+                     session->margin, session->shadowClipSides.back(),
+                     animateChild
+                         ? ComputeAnimationFrame(childSpec, 0.0f, true)
+                         : AnimationFrame{},
+                     childAnchor);
     child->Show();
+    if (animateChild) {
+        RunWindowAnimation(*session, session->windows.size() - 1, childSpec,
+                           childAnchor);
+    }
 }
 
 constexpr UINT_PTR kMenuSubmenuTimerId = 1;

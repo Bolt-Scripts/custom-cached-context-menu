@@ -111,6 +111,7 @@ rewritten.
 | slideOffsetY | int | `0` | -400–400 px the menu slides from |
 | scaleFrom | int | `92` | 10–200 % start scale for scale/unfold/crt |
 | animationAnchor | enum | `cursor` | cursor (nearest panel corner) or center |
+| animateSubmenus | bool | `false` | run the open animation for submenus too |
 | animation | enum | `none` | deprecated; maps to animationOpen/Close when unset |
 | verticalPadding | int | `4` | 0–256 px above/below items |
 | minWidth | int | `0` | 0–4096 px (0 = automatic) |
@@ -160,6 +161,10 @@ scale/unfold/crt: `cursor` (the panel corner nearest where the menu opened) or
 
 Example: `animationOpen = fade, slide`, `animationClose = scale`, with
 `slideOffsetX = 24` and `animationEasing = easeOut`.
+
+`animateSubmenus = true` runs the open effect for submenus as well (anchored to
+the submenu corner nearest the parent item); off by default so submenus pop
+instantly.
 
 ## Structured sections
 

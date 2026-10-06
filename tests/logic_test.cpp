@@ -4012,6 +4012,23 @@ int main() {
     }
 
     {
+        // A warned unknown-section header must take its body keys with it;
+        // otherwise they attach to the previous section after the drop.
+        const std::wstring text =
+            L"[appearance]\nitemHeight = 30\n[appearance.drak]\n"
+            L"itemHeight = 99\n";
+        cmo::RulesConfig parsed;
+        std::vector<cmo::ConfigParseError> warnings;
+        cmo::ParseRulesConfig(text, parsed, warnings);
+        CHECK(!warnings.empty());
+        const std::wstring dropped = cmo::DropWarnedLines(text, warnings);
+        cmo::RulesConfig reparsed;
+        std::vector<cmo::ConfigParseError> reparsedWarnings;
+        cmo::ParseRulesConfig(dropped, reparsed, reparsedWarnings);
+        CHECK_EQ(reparsed.appearance.itemHeight, 30);
+    }
+
+    {
         // Shell-only open items join the open group instead of the tail.
         cmo::MenuModel core = cmo::BuildCoreModel(
             cmo::Scope::Folders, {L"C:\\dir"}, cmo::Shape::Single);

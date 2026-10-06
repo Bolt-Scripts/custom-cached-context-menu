@@ -577,8 +577,9 @@ bool IsKnownWindowsVerb(const std::wstring& verb) {
 
 // Windows extras (configured list or a known Windows verb) sort above
 // third-party handlers inside the More options submenu.
-bool IsBuiltinExtra(const MenuItem& item) {
-    for (const std::wstring& token : g_settings.advancedSubmenuItems) {
+bool IsBuiltinExtra(const MenuItem& item,
+                    const std::vector<std::wstring>& windowsItems) {
+    for (const std::wstring& token : windowsItems) {
         if (LabelsMatchIgnoreCase(item.label, token) ||
             EqualsIgnoreCase(item.canonicalVerb, token)) {
             return true;
@@ -3975,10 +3976,10 @@ std::wstring ConfigFilePath() {
 class ConfigStore {
 public:
     void EnsureLoaded() {
-        if (loaded_) {
+        if (loaded_.load()) {
             return;
         }
-        loaded_ = true;
+        loaded_.store(true);
         const std::wstring path = ConfigFilePath();
         if (path.empty()) {
             return;
@@ -4013,15 +4014,20 @@ public:
         const uint64_t size =
             (static_cast<uint64_t>(attributes.nFileSizeHigh) << 32) |
             attributes.nFileSizeLow;
-        if (stampValid_ && size == stampSize_ &&
-            attributes.ftLastWriteTime.dwLowDateTime == stampTimeLow_ &&
-            attributes.ftLastWriteTime.dwHighDateTime == stampTimeHigh_) {
-            return;
+        {
+            // The management thread can call this too (settings change), so the
+            // stamp fields are guarded.
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (stampValid_ && size == stampSize_ &&
+                attributes.ftLastWriteTime.dwLowDateTime == stampTimeLow_ &&
+                attributes.ftLastWriteTime.dwHighDateTime == stampTimeHigh_) {
+                return;
+            }
+            stampValid_ = true;
+            stampSize_ = size;
+            stampTimeLow_ = attributes.ftLastWriteTime.dwLowDateTime;
+            stampTimeHigh_ = attributes.ftLastWriteTime.dwHighDateTime;
         }
-        stampValid_ = true;
-        stampSize_ = size;
-        stampTimeLow_ = attributes.ftLastWriteTime.dwLowDateTime;
-        stampTimeHigh_ = attributes.ftLastWriteTime.dwHighDateTime;
 
         std::wstring text;
         if (ReadConfigFile(path, text)) {
@@ -4066,9 +4072,11 @@ private:
     void UpdateStamp(const std::wstring& path) {
         WIN32_FILE_ATTRIBUTE_DATA attributes = {};
         if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &attributes)) {
+            std::lock_guard<std::mutex> lock(mutex_);
             stampValid_ = false;
             return;
         }
+        std::lock_guard<std::mutex> lock(mutex_);
         stampValid_ = true;
         stampSize_ = (static_cast<uint64_t>(attributes.nFileSizeHigh) << 32) |
                      attributes.nFileSizeLow;
@@ -4102,7 +4110,7 @@ private:
 
     mutable std::mutex mutex_;
     std::shared_ptr<const RulesConfig> config_;
-    bool loaded_ = false;
+    std::atomic<bool> loaded_{false};
     bool stampValid_ = false;
     uint64_t stampSize_ = 0;
     DWORD stampTimeLow_ = 0;
@@ -4238,8 +4246,10 @@ void ReorganizeAdvancedItems(std::vector<MenuItem>& items,
         return;
     }
 
-    const auto customStart =
-        std::stable_partition(advanced.begin(), advanced.end(), IsBuiltinExtra);
+    const auto customStart = std::stable_partition(
+        advanced.begin(), advanced.end(), [&](const MenuItem& item) {
+            return IsBuiltinExtra(item, options.windowsItems);
+        });
     if (customStart != advanced.begin() && customStart != advanced.end()) {
         MenuItem separator{};
         separator.id = 0xF001;
@@ -4804,18 +4814,30 @@ std::wstring DropWarnedLines(const std::wstring& text,
     }
     std::wstring out;
     int line = 0;
+    bool droppingSection = false;
     size_t pos = 0;
     while (pos < text.size()) {
         const size_t newline = text.find(L'\n', pos);
         const size_t lineEnd =
             newline == std::wstring::npos ? text.size() : newline;
         ++line;
-        bool drop = false;
+        bool warned = false;
         for (const ConfigParseError& warning : warnings) {
             if (warning.line == line) {
-                drop = true;
+                warned = true;
                 break;
             }
+        }
+        const std::wstring trimmed = TrimWhitespace(
+            StripInlineComment(text.substr(pos, lineEnd - pos)));
+        const bool isHeader = !trimmed.empty() && trimmed[0] == L'[';
+        bool drop = warned;
+        if (isHeader) {
+            // A dropped section header takes its whole body with it; otherwise
+            // the remaining keys would attach to the previous section.
+            droppingSection = warned;
+        } else if (droppingSection) {
+            drop = true;
         }
         if (!drop) {
             out.append(text, pos, lineEnd - pos);
@@ -4832,6 +4854,32 @@ std::wstring DropWarnedLines(const std::wstring& text,
 // True when the text contains an [appearance.light] or [appearance.dark]
 // section. Theme files are single-palette; the store logs this so copied
 // menu.ini overrides are not dropped silently.
+// True when the text declares any section other than the appearance block
+// (and [meta]); those are dropped when a theme file is rewritten.
+bool ThemeTextHasNonAppearanceSections(const std::wstring& text) {
+    size_t pos = 0;
+    while (pos <= text.size()) {
+        const size_t newline = text.find(L'\n', pos);
+        const size_t lineEnd =
+            newline == std::wstring::npos ? text.size() : newline;
+        const std::wstring trimmed = TrimWhitespace(
+            StripInlineComment(text.substr(pos, lineEnd - pos)));
+        if (!trimmed.empty() && trimmed[0] == L'[' && trimmed.back() == L']') {
+            const std::wstring name = ToLowerCopy(
+                TrimWhitespace(trimmed.substr(1, trimmed.size() - 2)));
+            if (name != L"appearance" && name != L"appearance.light" &&
+                name != L"appearance.dark" && name != L"meta") {
+                return true;
+            }
+        }
+        if (newline == std::wstring::npos) {
+            break;
+        }
+        pos = newline + 1;
+    }
+    return false;
+}
+
 bool ThemeTextHasSubThemeSections(const std::wstring& text) {
     size_t pos = 0;
     while (pos <= text.size()) {
@@ -4901,19 +4949,17 @@ public:
         LoadLocked(themeIndex);
     }
 
-    void Clear() {
-        std::lock_guard<std::mutex> lock(mutex_);
-        ClearLocked();
-    }
-
 private:
     void ClearLocked() {
+        const bool hadTheme = appearance_ != nullptr || loaded_;
         appearance_.reset();
         loaded_ = false;
         loadedIndex_ = -1;
         stampValid_ = false;
         path_.clear();
-        ++revision_;
+        if (hadTheme) {
+            ++revision_;  // only signal a real appearance change
+        }
     }
 
     bool StampMatchesLocked() {
@@ -4960,12 +5006,14 @@ private:
 
         const std::wstring templateText = GenerateThemeText(themeIndex);
         std::wstring fileText;
+        const bool fileExists =
+            GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES;
         const bool hasFile = ReadConfigFile(path, fileText);
+        const std::wstring slug = ThemeSlug(kThemes[themeIndex].name);
         std::vector<ConfigParseError> warnings;
         if (hasFile) {
             RulesConfig fileOnly;
             ParseRulesConfig(fileText, fileOnly, warnings);
-            const std::wstring slug = ThemeSlug(kThemes[themeIndex].name);
             for (const ConfigParseError& warning : warnings) {
                 Wh_Log(L"themes\\%s.ini:%d: warning: %s", slug.c_str(),
                        warning.line, warning.message.c_str());
@@ -4975,6 +5023,15 @@ private:
                        L"are ignored in theme files",
                        slug.c_str());
             }
+            if (ThemeTextHasNonAppearanceSections(fileText)) {
+                Wh_Log(L"themes\\%s.ini: non-appearance sections are ignored "
+                       L"and removed on rewrite",
+                       slug.c_str());
+            }
+        } else if (fileExists) {
+            // Unreadable file: keep it instead of replacing it with a template.
+            Wh_Log(L"themes\\%s.ini: unable to read; leaving the file untouched",
+                   slug.c_str());
         }
 
         std::wstring combined = templateText;
@@ -4984,9 +5041,15 @@ private:
         RulesConfig effective;
         std::vector<ConfigParseError> combinedWarnings;
         ParseRulesConfig(combined, effective, combinedWarnings);
+        for (size_t i = warnings.size(); i < combinedWarnings.size(); ++i) {
+            Wh_Log(L"themes\\%s.ini: warning: %s", slug.c_str(),
+                   combinedWarnings[i].message.c_str());
+        }
 
         const std::wstring canonical = CanonicalAppearanceBlock(combined);
-        if (!canonical.empty() && (!hasFile || fileText != canonical)) {
+        const bool writeSafe = !fileExists || hasFile;
+        if (writeSafe && !canonical.empty() &&
+            (!hasFile || fileText != canonical)) {
             WriteConfigFile(path, canonical);
         }
 

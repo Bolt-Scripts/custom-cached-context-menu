@@ -7828,6 +7828,10 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
 constexpr wchar_t kControlWindowClass[] = L"ContextMenuOverhaulV2Control";
 constexpr UINT kControlUninitMessage = WM_APP + 37;
 
+// Defined after OwnerSubclass; removes every window subclass this DLL
+// installed so comctl32 cannot call into unloaded code.
+void RemoveOwnerSubclasses();
+
 LRESULT CALLBACK ControlWindowProc(HWND hwnd, UINT msg, WPARAM wParam,
                                    LPARAM lParam) {
     if (msg == kControlUninitMessage) {
@@ -7836,6 +7840,11 @@ LRESULT CALLBACK ControlWindowProc(HWND hwnd, UINT msg, WPARAM wParam,
             g_menuSession->done = true;
             PostThreadMessageW(GetCurrentThreadId(), WM_NULL, 0, 0);
         }
+        // Close any native menu still running on this thread (HMENU fallback
+        // or native replay); its modal loop is what keeps mod code on the
+        // stack while the DLL is unloaded.
+        EndMenu();
+        RemoveOwnerSubclasses();
         HHOOK hook = g_menuMouseHook.exchange(nullptr);
         if (hook) {
             UnhookWindowsHookEx(hook);
@@ -12420,6 +12429,10 @@ private:
 constexpr UINT kDiscoveryTimerId = 0xC0DE;
 constexpr UINT_PTR kOwnerSubclassId = 0xC0DE;
 
+// Windows the native replay has subclassed. UI-thread only; the unload
+// cleanup removes them so a subclass proc can never outlive the DLL.
+inline std::vector<HWND> g_subclassOwners;
+
 class OwnerSubclass {
 public:
     OwnerSubclass(HWND owner, PendingCapture* capture, bool forwardMenuMessages)
@@ -12427,6 +12440,7 @@ public:
         if (SetWindowSubclass(owner, &OwnerSubclass::Proc, kOwnerSubclassId,
                               reinterpret_cast<DWORD_PTR>(this))) {
             subclassed_ = true;
+            g_subclassOwners.push_back(owner);
         }
     }
 
@@ -12434,7 +12448,24 @@ public:
         StopDiscoveryTimer();
         if (subclassed_) {
             RemoveWindowSubclass(owner_, &OwnerSubclass::Proc, kOwnerSubclassId);
+            for (size_t i = 0; i < g_subclassOwners.size(); ++i) {
+                if (g_subclassOwners[i] == owner_) {
+                    g_subclassOwners.erase(g_subclassOwners.begin() + i);
+                    break;
+                }
+            }
         }
+    }
+
+    // Called from the UI-thread unload cleanup: removes every subclass this
+    // DLL installed, so comctl32 can never call into unloaded code.
+    static void RemoveAllInstalled() {
+        for (HWND hwnd : g_subclassOwners) {
+            if (IsWindow(hwnd)) {
+                RemoveWindowSubclass(hwnd, &OwnerSubclass::Proc, kOwnerSubclassId);
+            }
+        }
+        g_subclassOwners.clear();
     }
 
     // Runs discovery after the menu has been painted and is interactive. The
@@ -12509,6 +12540,12 @@ private:
     bool timerSet_ = false;
     ContextSignature discoverySignature_{};
 };
+
+// Free-function bridge so the early unload cleanup can remove subclasses
+// without knowing about OwnerSubclass.
+void RemoveOwnerSubclasses() {
+    OwnerSubclass::RemoveAllInstalled();
+}
 
 // Shows the retained, really-populated native menu with menu-message
 // forwarding and invokes the selection through the live object. Used by the
@@ -13244,6 +13281,11 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
 
     g_warmup.SetMenuOpen(true);
 
+    // Ensure the UI-thread cleanup window exists before any menu (custom or
+    // native) can block the thread, so unload can close it and remove
+    // subclasses.
+    EnsureControlWindow();
+
     while (true) {
         std::optional<MenuModel> cached;
         bool needsDiscovery = false;
@@ -13742,9 +13784,10 @@ void Wh_ModUninit() {
     }
 
     // An open menu session runs on the UI thread; wait for it to observe the
-    // unload flag and finish its own teardown. Menu preparation and native
-    // replay also hold a busy scope.
-    const ULONGLONG deadline = GetTickCount64() + 5000;
+    // unload flag and finish its own teardown. Menu preparation, native replay
+    // and native menus also hold a busy scope. Waiting is the only safe option:
+    // unloading with mod frames still on the UI thread stack crashes on return.
+    const ULONGLONG deadline = GetTickCount64() + 30000;
     while ((cmo::g_activeSessions.load() > 0 || cmo::g_uiBusy.load() > 0) &&
            GetTickCount64() < deadline) {
         Sleep(10);

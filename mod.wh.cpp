@@ -7082,6 +7082,7 @@ public:
         if (!hwnd_ || width <= 0 || height <= 0) {
             return;
         }
+        Resize(width, height);
         SetWindowPos(hwnd_, HWND_TOPMOST, screenPos.x, screenPos.y, width,
                      height, SWP_NOACTIVATE);
     }
@@ -9243,6 +9244,8 @@ struct SettingsSessionContext {
     bool hasLight = false;
     bool hasDark = false;
     std::wstring statusText;
+    uint32_t dpi = 96;
+    POINT panelOrigin = {0, 0};
     // Owns the rebuilt panels; windows point into it.
     std::shared_ptr<LayoutPanel> panel;
     // ShellExecute target for @open:* rows, launched after teardown.
@@ -9265,7 +9268,7 @@ bool SettingsKeyIsGeometry(const std::wstring& key) {
            k == L"itempadding" || k == L"iconsize" || k == L"markerwidth" ||
            k == L"separatorspacing" || k == L"minwidth" || k == L"maxwidth" ||
            k == L"font" || k == L"fontweight" || k == L"fontstyle" ||
-           k == L"showaccelerators";
+           k == L"showaccelerators" || k == L"@font:size";
 }
 
 const LayoutItem* SettingsFindItem(MenuSession& session, int level,
@@ -9309,6 +9312,17 @@ void SettingsRefreshSession(MenuSession& session) {
     }
     settings->inputs.working = settings->working;
     settings->model = BuildSettingsTree(settings->inputs);
+    // Recompute the live metrics so geometry changes actually take effect.
+    session.appearance = settings->working;
+    session.metrics = ResolveLayoutMetrics(settings->working, settings->dpi,
+                                           settings->darkSystemTheme);
+    session.margin =
+        settings->working.shadow &&
+                (session.metrics.shadowSize > 0 || session.metrics.shadowBlur > 0)
+            ? ShadowMargin(session.metrics.shadowSize, session.metrics.shadowBlur,
+                           session.metrics.shadowOffsetX,
+                           session.metrics.shadowOffsetY)
+            : 0;
     RelayoutSession(session);
 }
 
@@ -9368,21 +9382,6 @@ void SettingsHandleReservedAction(MenuSession& session,
                                    opening ? L"animationOpen"
                                            : L"animationClose",
                                    AnimationEffectsText(effects), true);
-        return;
-    }
-    if (key == L"@font:size") {
-        int size = 0;
-        if (ParseIntField(canonicalText, 6, 72, size)) {
-            settings->working.fontSize = static_cast<float>(size);
-            if (std::find(settings->dirtyKeys.begin(),
-                          settings->dirtyKeys.end(),
-                          std::wstring(L"font")) == settings->dirtyKeys.end()) {
-                settings->dirtyKeys.push_back(L"font");
-            }
-            SettingsMarkDirty(settings->write, GetTickCount64(), 400);
-            SettingsArmSaveTimer(session);
-            SettingsRefreshSession(session);
-        }
         return;
     }
     if (key.rfind(L"@color:", 0) == 0 && key.size() > 6 &&
@@ -9453,6 +9452,23 @@ void SettingsApplyControlChange(MenuSession& session, const std::wstring& key,
                                 bool commitGeometry) {
     SettingsSessionContext* settings = session.settings;
     if (!settings || key.empty()) {
+        return;
+    }
+    if (key == L"@font:size") {
+        int size = 0;
+        if (ParseIntField(canonicalText, 6, 72, size)) {
+            settings->working.fontSize = static_cast<float>(size);
+            if (std::find(settings->dirtyKeys.begin(),
+                          settings->dirtyKeys.end(),
+                          std::wstring(L"font")) == settings->dirtyKeys.end()) {
+                settings->dirtyKeys.push_back(L"font");
+            }
+            SettingsMarkDirty(settings->write, GetTickCount64(), 400);
+            SettingsArmSaveTimer(session);
+            if (commitGeometry) {
+                SettingsRefreshSession(session);
+            }
+        }
         return;
     }
     if (key[0] == L'@') {
@@ -9583,9 +9599,22 @@ bool SettingsHandleMouseMove(MenuSession& session, int level, POINT panelPoint) 
     std::wstring text;
     if (SettingsComputeDragValue(*session.settings, *item, panelPoint, text)) {
         const std::wstring schemaKey = SettingsDragSchemaKey(item->control.key);
-        SettingsApplyControlChange(
-            session, schemaKey, text,
-            !SettingsKeyIsGeometry(schemaKey));
+        if (schemaKey.rfind(L"@cornerRadii:", 0) == 0) {
+            // The drag wrote the radius directly; dirty and refresh it.
+            session.settings->working.hasCornerRadii = true;
+            if (std::find(session.settings->dirtyKeys.begin(),
+                          session.settings->dirtyKeys.end(),
+                          std::wstring(L"cornerRadii")) ==
+                session.settings->dirtyKeys.end()) {
+                session.settings->dirtyKeys.push_back(L"cornerRadii");
+            }
+            SettingsMarkDirty(session.settings->write, GetTickCount64(), 400);
+            SettingsArmSaveTimer(session);
+            SettingsRefreshSession(session);
+        } else {
+            SettingsApplyControlChange(session, schemaKey, text,
+                                       !SettingsKeyIsGeometry(schemaKey));
+        }
     }
     return true;
 }
@@ -9652,9 +9681,23 @@ bool SettingsHandleMouseUp(MenuSession& session, int level, POINT panelPoint) {
             std::wstring text;
             if (SettingsComputeDragValue(*session.settings, *item, panelPoint,
                                          text)) {
-                SettingsApplyControlChange(
-                    session, SettingsDragSchemaKey(item->control.key), text,
-                    true);
+                const std::wstring schemaKey =
+                    SettingsDragSchemaKey(item->control.key);
+                if (schemaKey.rfind(L"@cornerRadii:", 0) == 0) {
+                    session.settings->working.hasCornerRadii = true;
+                    if (std::find(session.settings->dirtyKeys.begin(),
+                                  session.settings->dirtyKeys.end(),
+                                  std::wstring(L"cornerRadii")) ==
+                        session.settings->dirtyKeys.end()) {
+                        session.settings->dirtyKeys.push_back(L"cornerRadii");
+                    }
+                    SettingsMarkDirty(session.settings->write,
+                                      GetTickCount64(), 400);
+                    SettingsArmSaveTimer(session);
+                    SettingsRefreshSession(session);
+                } else {
+                    SettingsApplyControlChange(session, schemaKey, text, true);
+                }
             }
         }
         state.dragControl.clear();
@@ -9671,15 +9714,17 @@ bool SettingsHandleMouseUp(MenuSession& session, int level, POINT panelPoint) {
     if (item.kind == ItemKind::Submenu) {
         return false;  // the generic path opens it
     }
+    if (item.control.kind == ControlKind::None) {
+        return false;
+    }
     if (!item.control.key.empty() && item.control.key[0] == L'@') {
         const std::wstring text =
             item.control.kind == ControlKind::Toggle
                 ? (item.controlValue ? L"false" : L"true")
                 : std::wstring();
         SettingsHandleReservedAction(session, item.control.key, text);
-        return true;
     }
-    return false;
+    return true;  // settings rows never close the session
 }
 
 bool SettingsHandleKey(MenuSession& session, UINT key, wchar_t ch) {
@@ -9736,6 +9781,9 @@ bool SettingsHandleKey(MenuSession& session, UINT key, wchar_t ch) {
         return true;
     }
     if (key == VK_TAB) {
+        if (panel.items.empty()) {
+            return true;
+        }
         for (size_t i = 1; i <= panel.items.size(); ++i) {
             const int candidate = (std::max(0, state.keyboardIndex) +
                                    static_cast<int>(i)) %
@@ -10863,6 +10911,9 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
 
     const RECT workArea = WorkAreaForPoint(pt);
     const POINT panelPos = ClampPanelPosition(pt, panel->size, workArea);
+    if (settings) {
+        settings->panelOrigin = panelPos;
+    }
 
     MenuSession session;
     session.config = config;
@@ -10945,9 +10996,14 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
         // are addressed to it. Handle them here, exactly like a native menu
         // loop, and swallow the rest instead of stealing focus from the owner.
         if (msg.message == WM_KEYDOWN || msg.message == WM_SYSKEYDOWN) {
-            if (session.settings &&
-                SettingsHandleKey(session, static_cast<UINT>(msg.wParam), 0)) {
-                continue;
+            if (session.settings) {
+                // Generate WM_CHAR for the field editor; the modal loop
+                // consumes it on the next iteration.
+                TranslateMessage(&msg);
+                if (SettingsHandleKey(session, static_cast<UINT>(msg.wParam),
+                                      0)) {
+                    continue;
+                }
             }
             HandleMenuKey(&session, static_cast<UINT>(msg.wParam));
             continue;
@@ -11055,9 +11111,9 @@ void RelayoutSession(MenuSession& session) {
         const int height = levelPanel->size.cy + 2 * session.margin;
         POINT pos = {0, 0};
         if (i == 0) {
-            RECT windowRect = {};
-            GetWindowRect(session.windows[0]->Handle(), &windowRect);
-            pos = {windowRect.left, windowRect.top};
+            // Keep the panel anchored; only the shadow margin may change.
+            pos = {settings->panelOrigin.x - session.margin,
+                   settings->panelOrigin.y - session.margin};
         } else {
             const LayoutPanel* parentPanel = levelPanels[i - 1];
             int itemIndex = -1;
@@ -11165,7 +11221,7 @@ void SettingsApplyReset(MenuSession& session, const std::wstring& key) {
 }
 
 void OpenSettingsMenu(HWND owner, POINT pt) {
-    if (g_unloading.load() || g_settings.menuMode != 0) {
+    if (g_unloading.load() || g_settings.menuMode != 0 || g_menuSession) {
         return;
     }
     if (!g_renderDevice.IsReady() && !g_renderDevice.Initialize()) {
@@ -11220,6 +11276,7 @@ void OpenSettingsMenu(HWND owner, POINT pt) {
     LayoutKey key;
     key.dpi = owner ? DpiForWindow(owner) : 96;
     key.darkTheme = settings.darkSystemTheme;
+    settings.dpi = key.dpi;
     ShowCustomMenu(model, key, owner, pt, &settings);
 }
 

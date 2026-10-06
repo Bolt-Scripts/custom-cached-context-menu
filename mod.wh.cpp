@@ -5305,10 +5305,6 @@ public:
     }
 
     void Destroy() {
-        for (IUnknown* object : compRefs_) {
-            object->Release();
-        }
-        compRefs_.clear();
         if (visual_) {
             visual_->Release();
             visual_ = nullptr;
@@ -5339,15 +5335,6 @@ public:
     void Present() {
         if (swapChain_) {
             swapChain_->Present(1, 0);
-        }
-    }
-
-    // Takes ownership of a composition object (effect group, animation) and
-    // releases it when the window is destroyed. DirectComposition may need
-    // these objects alive for the whole animation, not just until Commit.
-    void Adopt(IUnknown* object) {
-        if (object) {
-            compRefs_.push_back(object);
         }
     }
 
@@ -5461,7 +5448,6 @@ private:
     IDXGISwapChain1* swapChain_ = nullptr;
     IDCompositionTarget* target_ = nullptr;
     IDCompositionVisual* visual_ = nullptr;
-    std::vector<IUnknown*> compRefs_;
 };
 
 // Set while Wh_ModUninit tears the mod down. New sessions are refused and
@@ -6314,16 +6300,32 @@ void DrawSubmenuArrow(ID2D1DeviceContext* dc, const LayoutItem& item,
 void DrawPanel(ID2D1DeviceContext* dc, const LayoutPanel& panel,
                const MenuInputState& state, const LayoutMetrics& metrics,
                const Appearance& appearance, const BackdropBitmap* backdrop,
-               int margin = 0, int shadowClipSide = 0) {
+               int margin = 0, int shadowClipSide = 0, float opacity = 1.0f,
+               int slideOffsetX = 0) {
     if (!dc) {
         return;
     }
 
-    if (margin > 0) {
+    if (margin > 0 || slideOffsetX != 0) {
         const D2D1_MATRIX_3X2_F transform = {
-            1.0f, 0.0f, 0.0f, 1.0f, static_cast<float>(margin),
+            1.0f, 0.0f, 0.0f, 1.0f,
+            static_cast<float>(margin + slideOffsetX),
             static_cast<float>(margin)};
         dc->SetTransform(&transform);
+    }
+
+    // Animation frames are drawn by the UI thread (DirectComposition
+    // animations are not evaluated for this target), so the fade is a layer
+    // opacity applied to the whole panel.
+    const bool fading = opacity < 0.999f;
+    if (fading) {
+        D2D1_LAYER_PARAMETERS1 layer = {};
+        layer.contentBounds = D2D1::InfiniteRect();
+        layer.maskAntialiasMode = D2D1_ANTIALIAS_MODE_PER_PRIMITIVE;
+        layer.maskTransform = D2D1::IdentityMatrix();
+        layer.opacity = opacity;
+        layer.layerOptions = D2D1_LAYER_OPTIONS1_NONE;
+        dc->PushLayer(layer, nullptr);
     }
 
     const D2D1_RECT_F rect = {0.0f, 0.0f, static_cast<float>(panel.size.cx),
@@ -6597,6 +6599,9 @@ void DrawPanel(ID2D1DeviceContext* dc, const LayoutPanel& panel,
     }
     if (panelGeometry) {
         panelGeometry->Release();
+    }
+    if (fading) {
+        dc->PopLayer();
     }
 }
 
@@ -6919,6 +6924,9 @@ struct MenuSession {
     bool ownsMouseHook = false;
     bool submenuTimerActive = false;
     bool done = false;
+    // Current render-driven animation frame (1.0 = fully visible, 0 offset).
+    float animationOpacity = 1.0f;
+    int animationOffsetX = 0;
     LayoutMetrics metrics;
     Appearance appearance;
 };
@@ -6968,78 +6976,6 @@ struct AnimationSpec {
     int durationMs = 0;
 };
 
-// MinGW's dcomp.h lists overload pairs in the wrong order (and omits
-// SetOpacity, which lives on IDCompositionVisual3). Mirror the real SDK vtable
-// order so animation calls hit the intended slots.
-struct IDCompositionVisualCorrect : public IUnknown {
-    virtual HRESULT STDMETHODCALLTYPE SetOffsetX(float offsetX) = 0;
-    virtual HRESULT STDMETHODCALLTYPE SetOffsetX(IDCompositionAnimation* animation) = 0;
-    virtual HRESULT STDMETHODCALLTYPE SetOffsetY(float offsetY) = 0;
-    virtual HRESULT STDMETHODCALLTYPE SetOffsetY(IDCompositionAnimation* animation) = 0;
-    virtual HRESULT STDMETHODCALLTYPE SetTransform(
-        const D2D_MATRIX_3X2_F& matrix) = 0;
-    virtual HRESULT STDMETHODCALLTYPE SetTransform(
-        IDCompositionTransform* transform) = 0;
-    virtual HRESULT STDMETHODCALLTYPE SetTransformParent(
-        IDCompositionVisual* visual) = 0;
-    virtual HRESULT STDMETHODCALLTYPE SetEffect(IDCompositionEffect* effect) = 0;
-    virtual HRESULT STDMETHODCALLTYPE SetBitmapInterpolationMode(
-        DCOMPOSITION_BITMAP_INTERPOLATION_MODE mode) = 0;
-    virtual HRESULT STDMETHODCALLTYPE SetBorderMode(
-        DCOMPOSITION_BORDER_MODE mode) = 0;
-    virtual HRESULT STDMETHODCALLTYPE SetClip(const D2D_RECT_F& rect) = 0;
-    virtual HRESULT STDMETHODCALLTYPE SetClip(IDCompositionClip* clip) = 0;
-    virtual HRESULT STDMETHODCALLTYPE SetContent(IUnknown* content) = 0;
-    virtual HRESULT STDMETHODCALLTYPE AddVisual(IDCompositionVisual* visual,
-                                                BOOL insertAbove,
-                                                IDCompositionVisual* referenceVisual) = 0;
-    virtual HRESULT STDMETHODCALLTYPE RemoveVisual(IDCompositionVisual* visual) = 0;
-    virtual HRESULT STDMETHODCALLTYPE RemoveAllVisuals() = 0;
-    virtual HRESULT STDMETHODCALLTYPE SetCompositeMode(
-        DCOMPOSITION_COMPOSITE_MODE mode) = 0;
-};
-
-struct IDCompositionEffectGroupCorrect : public IDCompositionEffect {
-    virtual HRESULT STDMETHODCALLTYPE SetOpacity(float opacity) = 0;
-    virtual HRESULT STDMETHODCALLTYPE SetOpacity(
-        IDCompositionAnimation* animation) = 0;
-    virtual HRESULT STDMETHODCALLTYPE SetTransform3D(
-        IDCompositionTransform3D* transform) = 0;
-};
-
-// IDCompositionVisual3, so the visual's own Opacity property can be animated.
-// The vtable chain is Visual + Visual2 + VisualDebug + Visual3 in the Windows
-// SDK order; MinGW's dcomp.h omits the interface entirely.
-const GUID kIidIDCompositionVisual3 = {
-    0x2775f462, 0xb6c1, 0x4015, {0xb0, 0xbe, 0xb3, 0xe7, 0xd6, 0xa4, 0x97, 0x6d}};
-
-struct IDCompositionVisual3Correct : public IDCompositionVisualCorrect {
-    // IDCompositionVisual2
-    virtual HRESULT STDMETHODCALLTYPE SetOpacityMode(
-        DCOMPOSITION_OPACITY_MODE mode) = 0;
-    virtual HRESULT STDMETHODCALLTYPE SetBackFaceVisibility(
-        DCOMPOSITION_BACKFACE_VISIBILITY visibility) = 0;
-    // IDCompositionVisualDebug
-    virtual HRESULT STDMETHODCALLTYPE EnableHeatMap(
-        const D2D1_COLOR_F& color) = 0;
-    virtual HRESULT STDMETHODCALLTYPE DisableHeatMap() = 0;
-    virtual HRESULT STDMETHODCALLTYPE EnableRedrawRegions() = 0;
-    virtual HRESULT STDMETHODCALLTYPE DisableRedrawRegions() = 0;
-    // IDCompositionVisual3
-    virtual HRESULT STDMETHODCALLTYPE SetDepthMode(int mode) = 0;
-    virtual HRESULT STDMETHODCALLTYPE SetOffsetZ(float offsetZ) = 0;
-    virtual HRESULT STDMETHODCALLTYPE SetOffsetZ(
-        IDCompositionAnimation* animation) = 0;
-    virtual HRESULT STDMETHODCALLTYPE SetOpacity(float opacity) = 0;
-    virtual HRESULT STDMETHODCALLTYPE SetOpacity(
-        IDCompositionAnimation* animation) = 0;
-    virtual HRESULT STDMETHODCALLTYPE SetTransform(
-        const D2D_MATRIX_4X4_F& matrix) = 0;
-    virtual HRESULT STDMETHODCALLTYPE SetTransform(
-        IDCompositionTransform3D* transform) = 0;
-    virtual HRESULT STDMETHODCALLTYPE SetVisible(BOOL visible) = 0;
-};
-
 AnimationSpec ResolveAnimationSpec(const Appearance& appearance) {
     AnimationSpec spec;
     switch (appearance.animation) {
@@ -7061,104 +6997,12 @@ AnimationSpec ResolveAnimationSpec(const Appearance& appearance) {
     return spec;
 }
 
-bool ApplyWindowAnimation(MenuWindow* window, const AnimationSpec& spec,
-                          bool opening) {
-    IDCompositionVisual* visual = window ? window->CompVisual() : nullptr;
-    if (!visual) {
-        return false;
-    }
-    IDCompositionDevice* comp = g_renderDevice.CompDevice();
-    if (!comp) {
-        return false;
-    }
-
-    if (!spec.animate || spec.durationMs <= 0) {
-        // Default opacity is 1; non-animated closes destroy the window.
-        return false;
-    }
-
-    auto* visualCorrect = reinterpret_cast<IDCompositionVisualCorrect*>(visual);
-    const double duration = static_cast<double>(spec.durationMs) / 1000.0;
-
-    // Prefer the visual's own Opacity property (IDCompositionVisual3): the
-    // effect-group opacity is a bitmap effect and is not applied to swap-chain
-    // content on every system. Fall back to an effect group when the visual
-    // does not expose the interface.
-    HRESULT opacityHr = E_FAIL;
-    HRESULT groupHr = S_FALSE;
-    HRESULT effectHr = S_FALSE;
-    bool usedVisual3 = false;
-    IDCompositionVisual3Correct* visual3 = nullptr;
-    if (SUCCEEDED(visual->QueryInterface(
-            kIidIDCompositionVisual3, reinterpret_cast<void**>(&visual3))) &&
-        visual3) {
-        IDCompositionAnimation* opacity = nullptr;
-        if (SUCCEEDED(comp->CreateAnimation(&opacity)) && opacity) {
-            opacity->AddCubic(0.0, opening ? 0.0 : 1.0,
-                              (opening ? 1.0 : -1.0) / duration, 0.0, 0.0);
-            opacity->End(duration, opening ? 1.0 : 0.0);
-            opacityHr = visual3->SetOpacity(opacity);
-            window->Adopt(opacity);
-            usedVisual3 = true;
-        }
-        visual3->Release();
-    }
-    if (!usedVisual3) {
-        IDCompositionEffectGroup* group = nullptr;
-        groupHr = comp->CreateEffectGroup(&group);
-        if (FAILED(groupHr) || !group) {
-            if (g_settings.debugLogging) {
-                Wh_Log(L"Animation: CreateEffectGroup failed %08X",
-                       static_cast<unsigned>(groupHr));
-            }
-            return false;
-        }
-        auto* groupCorrect =
-            reinterpret_cast<IDCompositionEffectGroupCorrect*>(group);
-        IDCompositionAnimation* opacity = nullptr;
-        if (SUCCEEDED(comp->CreateAnimation(&opacity)) && opacity) {
-            opacity->AddCubic(0.0, opening ? 0.0 : 1.0,
-                              (opening ? 1.0 : -1.0) / duration, 0.0, 0.0);
-            opacity->End(duration, opening ? 1.0 : 0.0);
-            opacityHr = groupCorrect->SetOpacity(opacity);
-            window->Adopt(opacity);
-        }
-        effectHr = visualCorrect->SetEffect(group);
-        window->Adopt(group);
-    }
-
-    HRESULT offsetHr = S_FALSE;
-    if (spec.slide) {
-        IDCompositionAnimation* slide = nullptr;
-        if (SUCCEEDED(comp->CreateAnimation(&slide)) && slide) {
-            slide->AddCubic(0.0, opening ? 12.0 : 0.0,
-                            (opening ? -12.0 : 12.0) / duration, 0.0, 0.0);
-            slide->End(duration, opening ? 0.0 : 12.0);
-            offsetHr = visualCorrect->SetOffsetX(slide);
-            window->Adopt(slide);
-        }
-    }
-    const HRESULT commitHr = comp->Commit();
-    if (g_settings.debugLogging) {
-        Wh_Log(L"Animation: opening=%d slide=%d duration=%d v3=%d group=%08X "
-               L"opacity=%08X effect=%08X offset=%08X commit=%08X",
-               opening ? 1 : 0, spec.slide ? 1 : 0, spec.durationMs,
-               usedVisual3 ? 1 : 0, static_cast<unsigned>(groupHr),
-               static_cast<unsigned>(opacityHr),
-               static_cast<unsigned>(effectHr),
-               static_cast<unsigned>(offsetHr),
-               static_cast<unsigned>(commitHr));
-    }
-    // Only report an applied animation when a sub-animation actually ran, so
-    // a failed animation never adds a close wait.
-    return opacityHr == S_OK || offsetHr == S_OK;
-}
-
 void RenderMenuWindow(MenuWindow* window, const LayoutPanel& panel,
                       const MenuInputState& state, const LayoutMetrics& metrics,
                       const Appearance& appearance,
                       const BackdropBitmap* backdrop, int margin,
-                      int shadowClipSide) {
+                      int shadowClipSide, float opacity = 1.0f,
+                      int slideOffsetX = 0) {
     if (!window || !window->SwapChain() || !g_renderDevice.D2DDevice()) {
         return;
     }    IDXGISurface* surface = nullptr;
@@ -7184,7 +7028,7 @@ void RenderMenuWindow(MenuWindow* window, const LayoutPanel& panel,
         dc->BeginDraw();
         dc->Clear(nullptr);
         DrawPanel(dc, panel, state, metrics, appearance, backdrop, margin,
-                  shadowClipSide);
+                  shadowClipSide, opacity, slideOffsetX);
         const HRESULT drawResult = dc->EndDraw();
         target->Release();
         if (drawResult == D2DERR_RECREATE_TARGET) {
@@ -7194,6 +7038,72 @@ void RenderMenuWindow(MenuWindow* window, const LayoutPanel& panel,
     dc->Release();
     surface->Release();
     window->Present();
+}
+
+// Renders every window of the session at one animation frame.
+void RenderSessionFrame(MenuSession& session, float opacity, int slideOffsetX) {
+    session.animationOpacity = opacity;
+    session.animationOffsetX = slideOffsetX;
+    for (size_t i = 0; i < session.windows.size(); ++i) {
+        MenuWindow* window = session.windows[i];
+        if (!window || !window->Panel()) {
+            continue;
+        }
+        const BackdropBitmap* backdrop = nullptr;
+        if (i < session.backdrops.size() && session.backdrops[i].width > 0) {
+            backdrop = &session.backdrops[i];
+        }
+        const int shadowClipSide =
+            i < session.shadowClipSides.size() ? session.shadowClipSides[i] : 0;
+        RenderMenuWindow(window, *window->Panel(), session.states[i],
+                         session.metrics, session.appearance, backdrop,
+                         session.margin, shadowClipSide, opacity, slideOffsetX);
+    }
+}
+
+// Render-driven fade/slide. DirectComposition animations are not evaluated for
+// this target (every HRESULT succeeds and nothing moves), so the UI thread
+// draws and presents the frames itself. Messages are pumped so the menu stays
+// responsive while the frames run.
+void RunSessionAnimation(MenuSession& session, const AnimationSpec& spec,
+                         bool opening) {
+    if (!spec.animate || spec.durationMs <= 0) {
+        return;
+    }
+    if (g_settings.debugLogging) {
+        Wh_Log(L"Menu animation: opening=%d slide=%d duration=%d (render)",
+               opening ? 1 : 0, spec.slide ? 1 : 0, spec.durationMs);
+    }
+    const ULONGLONG start = GetTickCount64();
+    for (;;) {
+        const ULONGLONG elapsed = GetTickCount64() - start;
+        float t = static_cast<float>(elapsed) /
+                  static_cast<float>(spec.durationMs);
+        if (t > 1.0f) {
+            t = 1.0f;
+        }
+        const float opacity = opening ? t : 1.0f - t;
+        const int offset =
+            spec.slide
+                ? static_cast<int>((opening ? 1.0f - t : t) * 12.0f)
+                : 0;
+        RenderSessionFrame(session, opacity, offset);
+        if (t >= 1.0f || session.done) {
+            break;
+        }
+        MSG msg = {};
+        while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+            if (msg.message == WM_KEYDOWN || msg.message == WM_SYSKEYDOWN ||
+                msg.message == WM_KEYUP || msg.message == WM_SYSKEYUP ||
+                msg.message == WM_CHAR || msg.message == WM_SYSCHAR ||
+                msg.message == WM_DEADCHAR) {
+                continue;
+            }
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+        Sleep(15);
+    }
 }
 
 void RepaintMenuWindow(MenuSession* session, int index) {
@@ -7216,7 +7126,8 @@ void RepaintMenuWindow(MenuSession* session, int index) {
             : 0;
     RenderMenuWindow(window, *window->Panel(), session->states[index],
                      session->metrics, session->appearance, backdrop,
-                     session->margin, shadowClipSide);
+                     session->margin, shadowClipSide, session->animationOpacity,
+                     session->animationOffsetX);
 }
 
 void CloseSubmenusBelow(MenuSession* session, int index) {
@@ -7230,8 +7141,6 @@ void CloseSubmenusBelow(MenuSession* session, int index) {
         if (session->backdrops.size() >= session->windows.size() + 1) {
             session->backdrops.pop_back();
         }
-        ApplyWindowAnimation(window, ResolveAnimationSpec(session->appearance),
-                             false);
         g_menuWindowPool.Release(window);
     }
     session->active = index;
@@ -7313,7 +7222,6 @@ void OpenSubmenu(MenuSession* session, int index, int itemIndex) {
                      hasBackdrop ? &session->backdrops.back() : nullptr,
                      session->margin, session->shadowClipSides.back());
     child->Show();
-    ApplyWindowAnimation(child, ResolveAnimationSpec(session->appearance), true);
 }
 
 constexpr UINT_PTR kMenuSubmenuTimerId = 1;
@@ -7834,11 +7742,14 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
         Wh_Log(L"Custom menu session start (margin=%d dpi=%u)", margin, key.dpi);
     }
 
+    const AnimationSpec opening = ResolveAnimationSpec(appearance);
+    const bool openingAnimated = opening.animate && opening.durationMs > 0;
     root->Move(POINT{panelPos.x - margin, panelPos.y - margin});
-    RenderMenuWindow(root, *panel, session.states[0], metrics, appearance,
-                     hasBackdrop ? &session.backdrops[0] : nullptr, margin, 0);
+    // Draw the first animation frame before showing so the menu never flashes
+    // at full opacity.
+    RenderSessionFrame(session, openingAnimated ? 0.0f : 1.0f,
+                       openingAnimated && opening.slide ? 12 : 0);
     root->Show();
-    ApplyWindowAnimation(root, ResolveAnimationSpec(appearance), true);
     if (!g_menuMouseHook.load()) {
         HHOOK hook = SetWindowsHookExW(WH_MOUSE_LL, MenuMouseHookProc,
                                        GetModuleHandleW(nullptr), 0);
@@ -7848,6 +7759,7 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
             Wh_Log(L"Failed to install the menu mouse hook");
         }
     }
+    RunSessionAnimation(session, opening, true);
 
     MSG msg = {};
     while (!session.done) {
@@ -7879,13 +7791,7 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
         session.submenuTimerActive = false;
     }
     const AnimationSpec closing = ResolveAnimationSpec(appearance);
-    bool closingAnimated = false;
-    for (MenuWindow* window : session.windows) {
-        closingAnimated |= ApplyWindowAnimation(window, closing, false);
-    }
-    if (closingAnimated) {
-        Sleep(static_cast<DWORD>(closing.durationMs));
-    }
+    RunSessionAnimation(session, closing, false);
     if (session.ownsMouseHook) {
         HHOOK hook = g_menuMouseHook.exchange(nullptr);
         if (hook) {

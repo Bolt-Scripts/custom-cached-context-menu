@@ -4281,6 +4281,32 @@ std::wstring DropWarnedLines(const std::wstring& text,
     return out;
 }
 
+// True when the text contains an [appearance.light] or [appearance.dark]
+// section. Theme files are single-palette; the store logs this so copied
+// menu.ini overrides are not dropped silently.
+bool ThemeTextHasSubThemeSections(const std::wstring& text) {
+    size_t pos = 0;
+    while (pos <= text.size()) {
+        const size_t newline = text.find(L'\n', pos);
+        const size_t lineEnd =
+            newline == std::wstring::npos ? text.size() : newline;
+        const std::wstring trimmed = TrimWhitespace(
+            StripInlineComment(text.substr(pos, lineEnd - pos)));
+        if (!trimmed.empty() && trimmed[0] == L'[' && trimmed.back() == L']') {
+            const std::wstring name = ToLowerCopy(
+                TrimWhitespace(trimmed.substr(1, trimmed.size() - 2)));
+            if (name == L"appearance.light" || name == L"appearance.dark") {
+                return true;
+            }
+        }
+        if (newline == std::wstring::npos) {
+            break;
+        }
+        pos = newline + 1;
+    }
+    return false;
+}
+
 // Loads the selected theme from <storage>\themes\<slug>.ini. Theme files are
 // complete, self-contained [appearance] blocks: missing keys take the preset
 // value, invalid values fall back to it too, and menu.ini is never touched.
@@ -4391,12 +4417,15 @@ private:
         if (hasFile) {
             RulesConfig fileOnly;
             ParseRulesConfig(fileText, fileOnly, warnings);
-            if (!warnings.empty()) {
-                const std::wstring slug = ThemeSlug(kThemes[themeIndex].name);
-                for (const ConfigParseError& warning : warnings) {
-                    Wh_Log(L"themes\\%s.ini:%d: warning: %s", slug.c_str(),
-                           warning.line, warning.message.c_str());
-                }
+            const std::wstring slug = ThemeSlug(kThemes[themeIndex].name);
+            for (const ConfigParseError& warning : warnings) {
+                Wh_Log(L"themes\\%s.ini:%d: warning: %s", slug.c_str(),
+                       warning.line, warning.message.c_str());
+            }
+            if (ThemeTextHasSubThemeSections(fileText)) {
+                Wh_Log(L"themes\\%s.ini: [appearance.light]/[appearance.dark] "
+                       L"are ignored in theme files",
+                       slug.c_str());
             }
         }
 
@@ -4409,11 +4438,8 @@ private:
         ParseRulesConfig(combined, effective, combinedWarnings);
 
         const std::wstring canonical = CanonicalAppearanceBlock(combined);
-        if (!canonical.empty()) {
-            std::wstring current;
-            if (!ReadConfigFile(path, current) || current != canonical) {
-                WriteConfigFile(path, canonical);
-            }
+        if (!canonical.empty() && (!hasFile || fileText != canonical)) {
+            WriteConfigFile(path, canonical);
         }
 
         appearance_ = std::make_shared<const Appearance>(effective.appearance);
@@ -7049,7 +7075,10 @@ bool ApplyWindowAnimation(IDCompositionVisual* visual, const AnimationSpec& spec
                static_cast<unsigned>(effectHr),
                static_cast<unsigned>(offsetHr));
     }
-    return SUCCEEDED(effectHr);
+    // Only report an applied animation when a sub-animation actually ran:
+    // SetEffect alone (with a failed opacity/offset) must not add a close wait.
+    return SUCCEEDED(effectHr) &&
+           (SUCCEEDED(opacityHr) || SUCCEEDED(offsetHr));
 }
 
 void RenderMenuWindow(MenuWindow* window, const LayoutPanel& panel,

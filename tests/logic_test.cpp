@@ -3753,6 +3753,19 @@ int main() {
         DeleteFileW(configPath.c_str());
     }
 
+    // v2.7 theme files: light/dark sections are reported, not silently
+    // ignored.
+    {
+        CHECK(!cmo::ThemeTextHasSubThemeSections(
+            L"[appearance]\nbackground = 1, 2, 3, 255\n"));
+        CHECK(cmo::ThemeTextHasSubThemeSections(
+            L"[appearance.dark]\nbackground = 0, 0, 0, 255\n"));
+        CHECK(cmo::ThemeTextHasSubThemeSections(
+            L"[appearance.light]\nbackground = 255, 255, 255, 255\n"));
+        CHECK(cmo::ThemeTextHasSubThemeSections(
+            L"[APPEARANCE.DARK]\nbackground = 0, 0, 0, 255\n"));
+    }
+
     // v2.7 theme files: every built-in theme generates a complete appearance
     // block, and Windows 11 Dark/Light are fixed single palettes.
     {

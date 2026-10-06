@@ -133,6 +133,31 @@ rewritten.
 the base section when that theme is active; keys not listed inherit from
 `[appearance]`.
 
+## Animations
+
+`animationOpen` and `animationClose` are comma-separated effect lists, so
+effects combine (opacities multiply, translations add, scales multiply):
+
+- `fade` — the panel fades in/out.
+- `slide` — starts offset by `slideOffsetX`/`slideOffsetY` and settles at 0.
+- `scale` — scales from `scaleFrom`% to 100% about `animationAnchor`.
+- `dissolve` — the panel fades first, then the item content follows (and
+  leaves first on close).
+- `crt` — opens vertically from a thin line, like a CRT powering on.
+- `unfold` — unfolds horizontally from the cursor-side edge.
+- `none` — no animation.
+
+`animationEasing` shapes the progress: `linear`, `easeOut`, `easeInOut`,
+`back`, `bounce`, `elastic` (the last three overshoot, for a springy feel).
+`animationFrameMs` controls the interval between drawn frames (lower =
+smoother); `animationDuration` and `animationCloseDuration` are separate, with
+`0` meaning "same as the open duration". `animationAnchor` is the origin for
+scale/unfold/crt: `cursor` (the panel corner nearest where the menu opened) or
+`center`.
+
+Example: `animationOpen = fade, slide`, `animationClose = scale`, with
+`slideOffsetX = 24` and `animationEasing = easeOut`.
+
 ## Structured sections
 
 - `[rules]` — `hide`, `keep`, `move = <predicate> -> "Destination"`.

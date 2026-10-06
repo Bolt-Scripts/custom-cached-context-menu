@@ -4092,7 +4092,10 @@ markerColor = 96, 165, 250, 255
 cornerRadius = 8
 shadowOpacity = 120
 shadowBlur = 12
-animation = fade
+animationOpen = fade
+animationClose = fade
+animationDuration = 100
+animationEasing = easeOut
 )INI"},    {L"Windows 11 Light",
      LR"INI([appearance]
 background = 243, 243, 243, 242
@@ -4108,7 +4111,10 @@ markerColor = 0, 120, 212, 255
 cornerRadius = 8
 shadowOpacity = 90
 shadowBlur = 12
-animation = fade
+animationOpen = fade
+animationClose = fade
+animationDuration = 100
+animationEasing = easeOut
 )INI"},    {L"Windows 10 Dark",
      LR"INI([appearance]
 background = 31, 31, 31, 255
@@ -4124,7 +4130,9 @@ markerColor = 0, 153, 255, 255
 cornerRadius = 0
 shadow = false
 blur = false
-animation = none
+animationOpen = none
+animationClose = none
+animationDuration = 90
 )INI"},    {L"Windows 10 Light",
      LR"INI([appearance]
 background = 240, 240, 240, 255
@@ -4140,7 +4148,9 @@ markerColor = 0, 102, 204, 255
 cornerRadius = 0
 shadow = false
 blur = false
-animation = none
+animationOpen = none
+animationClose = none
+animationDuration = 90
 )INI"},    {L"Nord",
      LR"INI([appearance]
 background = 46, 52, 64, 242
@@ -4155,6 +4165,9 @@ headerColor = 143, 188, 187, 255
 markerColor = 136, 192, 208, 255
 cornerRadius = 6
 shadowOpacity = 130
+animationOpen = fade
+animationClose = fade
+animationDuration = 100
 )INI"},    {L"Dracula",
      LR"INI([appearance]
 background = 40, 42, 54, 242
@@ -4169,6 +4182,10 @@ headerColor = 139, 233, 253, 255
 markerColor = 80, 250, 123, 255
 cornerRadius = 6
 shadowOpacity = 130
+animationOpen = fade, slide
+animationClose = fade, slide
+animationDuration = 100
+slideOffsetX = 8
 )INI"},    {L"Solarized Dark",
      LR"INI([appearance]
 background = 0, 43, 54, 242
@@ -4183,6 +4200,9 @@ headerColor = 38, 139, 210, 255
 markerColor = 181, 137, 0, 255
 cornerRadius = 4
 shadowOpacity = 140
+animationOpen = fade
+animationClose = fade
+animationDuration = 100
 )INI"},    {L"Gruvbox Dark",
      LR"INI([appearance]
 background = 40, 40, 40, 242
@@ -4197,6 +4217,10 @@ headerColor = 215, 153, 33, 255
 markerColor = 215, 153, 33, 255
 cornerRadius = 6
 shadowOpacity = 130
+animationOpen = fade
+animationClose = fade
+animationDuration = 100
+animationEasing = easeOut
 )INI"},    {L"One Dark",
      LR"INI([appearance]
 background = 40, 44, 52, 242
@@ -4211,6 +4235,10 @@ headerColor = 97, 175, 239, 255
 markerColor = 97, 175, 239, 255
 cornerRadius = 6
 shadowOpacity = 130
+animationOpen = fade, slide
+animationClose = fade, slide
+animationDuration = 100
+slideOffsetX = 6
 )INI"},    {L"Cyberpunk",
      LR"INI([appearance]
 background = 8, 10, 20, 245
@@ -4227,8 +4255,11 @@ cornerRadius = 4
 shadowColor = 255, 0, 128, 255
 shadowOpacity = 200
 shadowBlur = 16
-animation = fade
-animationDuration = 140
+animationOpen = fade, slide
+animationClose = fade, slide
+animationDuration = 110
+animationEasing = easeOut
+slideOffsetX = 18
 )INI"},    {L"Synthwave",
      LR"INI([appearance]
 background = 26, 16, 48, 245
@@ -4245,8 +4276,9 @@ cornerRadius = 8
 shadowColor = 160, 60, 255, 255
 shadowOpacity = 190
 shadowBlur = 18
-animation = slide
-animationDuration = 150
+animationOpen = unfold
+animationClose = unfold
+animationDuration = 120
 )INI"},    {L"Terminal Green",
      LR"INI([appearance]
 background = 4, 12, 6, 250
@@ -4264,8 +4296,10 @@ shadowColor = 0, 255, 120, 255
 shadowOpacity = 150
 shadowBlur = 14
 blur = false
-animation = none
 font = Consolas, 9
+animationOpen = crt
+animationClose = crt
+animationDuration = 110
 )INI"},    {L"Amber CRT",
      LR"INI([appearance]
 background = 16, 10, 2, 250
@@ -4283,8 +4317,10 @@ shadowColor = 255, 176, 0, 255
 shadowOpacity = 150
 shadowBlur = 14
 blur = false
-animation = none
 font = Consolas, 9
+animationOpen = crt
+animationClose = crt
+animationDuration = 110
 )INI"},    {L"Tokyo Night",
      LR"INI([appearance]
 background = 26, 27, 38, 242
@@ -4301,8 +4337,10 @@ cornerRadius = 6
 shadowColor = 30, 40, 90, 255
 shadowOpacity = 160
 shadowBlur = 14
-animation = fade
-animationDuration = 120
+animationOpen = fade, slide
+animationClose = fade, slide
+animationDuration = 100
+slideOffsetX = 8
 )INI"},    {L"AMOLED Black",
      LR"INI([appearance]
 background = 0, 0, 0, 252
@@ -4319,6 +4357,9 @@ cornerRadius = 8
 shadow = false
 shadowOpacity = 0
 blur = false
+animationOpen = fade
+animationClose = fade
+animationDuration = 90
 )INI"},    {L"High Contrast",
      LR"INI([appearance]
 background = 0, 0, 0, 255
@@ -4335,8 +4376,9 @@ markerColor = 255, 255, 0, 255
 cornerRadius = 0
 shadow = false
 blur = false
-animation = none
 font = Segoe UI, 10
+animationOpen = none
+animationClose = none
 )INI"},};
 
 constexpr size_t kThemesCount = ARRAYSIZE(kThemes);

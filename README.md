@@ -146,8 +146,9 @@ resource — all with true transparency in the custom renderer.
   opens (it is a blurred snapshot, not a live blur), and the drop shadow is a
   blurred mask whose spread, softness, and offset are configurable. Tall menus
   do not scroll visually yet (wheel input is
-  tracked but the drawing does not offset). Animations are off by default
-  (`animation = none`); `fade` and `slide` are compositor-driven.
+  tracked but the drawing does not offset). Animations default to a 120 ms
+  fade and are drawn by the UI thread (`fade`, `slide`, `scale`, `dissolve`,
+  `crt`, `unfold`; combinable, separate open/close; see `docs/CONFIG.md`).
 
 Menu models persist to disk (`menu-cache.bin` in the mod's storage directory)
 and are pre-warmed at Explorer start, so extension items survive restarts.

@@ -1,28 +1,99 @@
 // ==WindhawkMod==
-// @id              context-menu-overhaul
-// @name            Context Menu Overhaul
-// @description     Replaces the Explorer context menu with an instantly-opening cached menu, then discovers and caches shell extension items asynchronously.
-// @version         0.11.0
+// @id              custom-cached-context-menu
+// @name            Custom Cached Context Menu
+// @description     Instantly-opening cached Explorer context menu that is fully customizable: themes, layout, colors, animations, rules, and custom commands.
+// @version         1.0.0
 // @include         explorer.exe
 // @architecture    x86-64
 // @compilerOptions -lole32 -lshlwapi -luuid -lcomctl32 -ladvapi32 -lgdi32 -luxtheme -lversion -ld3d11 -ld2d1 -ldwrite -ldcomp -ldxgi
 // @license         MIT
+// @author          BOLT
+// @github          https://github.com/Bolt-Scripts
 // ==/WindhawkMod==
 
 // ==WindhawkModReadme==
 /*
-# Context Menu Overhaul
+# Custom Cached Context Menu
 
-Replaces the Windows Explorer file context menu with a custom menu that opens
-instantly. The native menu is slow because every registered shell extension is
-loaded synchronously before it can be shown; this mod shows a cached menu right
-away and discovers extension items asynchronously in the background.
+Replaces the Windows Explorer context menu with a self-rendered menu that opens
+instantly and can be customized down to the pixel.
 
-Hold Shift while right-clicking to get the untouched native menu.
+The native menu is slow because every registered shell extension is loaded
+synchronously before it can be shown. This mod shows a cached menu right away
+and discovers extension items in the background, so repeated opens are instant.
 
-Design document: `docs/superpowers/specs/2026-10-04-context-menu-overhaul-design.md`
+## Highlights
+
+- **Instant, cached menus** — the first open of a context discovers and caches
+  the shell's items; later opens render from the cache, and common contexts are
+  pre-built in the background at startup.
+- **Custom rendering** — the menu is drawn with Direct2D: rounded corners,
+  blur, shadows, per-item icons, hover feedback, and animations, instead of the
+  classic owner-drawn menu.
+- **Themes** — bundled themes (Windows 11/10 dark and light, Nord, Dracula,
+  Solarized, Gruvbox, One Dark, Cyberpunk, Synthwave, Terminal Green, Amber
+  CRT, Tokyo Night, AMOLED Black, High Contrast) plus full `menu.ini` control.
+  Each theme is a self-contained file you can edit or copy.
+- **Animations** — combinable open/close effects (`fade`, `slide`, `scale`,
+  `dissolve`, `crt`, `unfold`) with easing, timing, direction, and optional
+  submenu animation.
+- **Settings menu** — in the advanced ("More options") submenu, or via the
+  optional global hotkey. Appearance is edited live (sliders with typed values,
+  a color picker, instant preview) and written back to the active theme file or
+  `menu.ini`.
+- **No code needed** — `menu.ini` supports rules (`hide`/`keep`/`move`),
+  custom commands, custom submenus, per-item overrides, and an icon library.
+- **Native behavior** — hover everywhere, keyboard navigation, click-through
+  shadows, and Shift+right-click for the untouched native menu.
+
+## Settings
+
+| Setting | Default | Description |
+|---|---|---|
+| Shift bypass | on | Hold Shift while right-clicking for the native menu. |
+| Menu mode | 0 (custom) | 0 = self-rendered menu (automatic fallback to the classic menu after repeated failures); 1 = classic owner-drawn menu. |
+| Theme | Custom (menu.ini) | Loads the appearance from `<mod storage>\\themes\\<name>.ini` (created from the bundled preset on first use). `menu.ini` is never modified by theme selection. |
+| Show classic menu item | on | Adds a "Show classic menu" entry at the bottom of the menu. |
+| Warm-up extensions | common list | File types pre-built at Explorer startup. |
+| Warm-up delay | 5 s | Delay before background warm-up starts. |
+| Clear cache | off | Turn on to delete cached models; they rebuild on next use. |
+| Debug logging | off | Logs timings and diagnostics. |
+| Instant menu open | on | Temporarily disables the system menu animation while this mod's menu opens. |
+| Submenu open delay | 150 ms | Hover delay before a submenu opens; 0 = instant, -1 = keep the Windows setting. |
+| Move Windows extras | on | Moves the configured Windows extras into the More options submenu. |
+| Move third-party handlers | on | Moves third-party shell extension entries into the More options submenu. |
+| Keep in the main menu | empty | Comma-separated labels or verbs that stay in the main menu. |
+| More options submenu label | `More options` | Label of that submenu. |
+| Windows items to move | common list | Comma-separated labels or verbs of Windows items to move into the submenu. |
+| Settings hotkey | empty | Optional global hotkey that opens the settings menu (for example `Ctrl+Alt+M`). |
+
+## Configuration
+
+`menu.ini` lives in the mod's storage directory (Windhawk → the mod's details →
+Storage). It is created on first run as a fully commented settings list, with
+the range and meaning of every key next to it. Invalid values never stop the
+file from loading: they are clamped or fall back to defaults, logged as
+`menu.ini:<line>: warning: <message>`, and the corrected file is rewritten.
+
+Themes are complete `[appearance]` blocks under `themes\\<name>.ini`; they never
+inherit from `menu.ini`, so a theme is always self-contained. Edit one directly,
+or use the in-menu settings browser.
+
+## Limitations
+
+- Targets `explorer.exe`; other file managers and file dialogs are untouched.
+- Menus that contain owner-drawn items, and non-filesystem namespaces, fall
+  back to the native menu.
+- The custom menu is not exposed to UI Automation; use the classic menu mode
+  with a screen reader.
+- Tall menus do not scroll; they are capped to the work area.
+- Nav-pane menus are cached per tree node for the session and refresh after
+  use, so the first open of each node pays the shell's population cost.
+
+## License
+
+MIT
 */
-// ==/WindhawkModReadme==
 
 // ==WindhawkModSettings==
 /*
@@ -1108,6 +1179,9 @@ bool CreateNewItemInFolder(const NewTemplate& tmpl, const std::wstring& director
 // Logs any unlabeled item with its full descriptor so the extension behavior
 // can be identified from a single run.
 void DumpSuspiciousItems(const std::vector<MenuItem>& items, int depth) {
+    if (!g_settings.debugLogging) {
+        return;
+    }
     for (const MenuItem& item : items) {
         if (item.kind != ItemKind::Separator && item.label.empty()) {
             Wh_Log(L"[suspicious d%d] kind=%d action=%d flags=%04X offset=%u "
@@ -3038,7 +3112,7 @@ CanonicalSource SplitConfigForCanonical(const std::wstring& text) {
 // preserved, and a fresh [meta] version.
 std::wstring EmitCanonicalConfig(const CanonicalSource& source, int toVersion) {
     std::wstring out;
-    out += L"; Context Menu Overhaul configuration (schema ";
+    out += L"; Custom Cached Context Menu configuration (schema ";
     out += std::to_wstring(toVersion);
     out += L")\n";
     out += L"; UTF-8. Reloaded when a menu opens. Settings are active; edit the values.\n";
@@ -13118,7 +13192,7 @@ HRESULT STDMETHODCALLTYPE QueryContextMenu_Hook(IContextMenu* pThis, HMENU hmenu
                                                 UINT indexMenu, UINT idCmdFirst,
                                                 UINT idCmdLast, UINT uFlags) {
     if (!ShouldDeferContextMenu(uFlags)) {
-        Wh_Log(L"QueryContextMenu pass-through: flags=%08X", uFlags);
+        if (g_settings.debugLogging) Wh_Log(L"QueryContextMenu pass-through: flags=%08X", uFlags);
         return QueryContextMenu_Original(pThis, hmenu, indexMenu, idCmdFirst, idCmdLast,
                                          uFlags);
     }
@@ -13136,7 +13210,7 @@ HRESULT STDMETHODCALLTYPE QueryContextMenu_Hook(IContextMenu* pThis, HMENU hmenu
     }
     g_pending.Push(capture);
 
-    Wh_Log(L"QueryContextMenu deferred: this=%p idFirst=%u flags=%08X", pThis,
+    if (g_settings.debugLogging) Wh_Log(L"QueryContextMenu deferred: this=%p idFirst=%u flags=%08X", pThis,
            idCmdFirst, uFlags);
 
     // Report an empty menu; the caller shows it and our TrackPopupMenu* hook
@@ -13163,7 +13237,7 @@ bool ConsumePendingAndReplay(HWND owner, HMENU hMenu) {
     ReplayInto(capture.obj, hMenu, capture.indexMenu, capture.idCmdFirst,
                capture.idCmdLast, capture.flags);
     ReleaseCapture(capture);
-    Wh_Log(L"Replayed native population for owner=%p", owner);
+    if (g_settings.debugLogging) Wh_Log(L"Replayed native population for owner=%p", owner);
     return true;
 }
 
@@ -13701,7 +13775,7 @@ void LogHandlerCandidates(const ContextSignature& signature,
             RegCloseKey(key);
 
             if (!names.empty()) {
-                Wh_Log(L"Handler candidates for '%s' (%s): %s", label.c_str(),
+                if (g_settings.debugLogging) Wh_Log(L"Handler candidates for '%s' (%s): %s", label.c_str(),
                        base.c_str(), names.c_str());
             }
         }
@@ -13742,7 +13816,7 @@ void ApplyRegistryIconsRecursive(
         }
         if (!icon.empty()) {
             item.iconRef = icon;
-            Wh_Log(L"Registry icon for '%s' (verb '%s'): %s", item.label.c_str(),
+            if (g_settings.debugLogging) Wh_Log(L"Registry icon for '%s' (verb '%s'): %s", item.label.c_str(),
                    item.canonicalVerb.c_str(), icon.c_str());
         } else if (g_settings.debugLogging) {
             LogHandlerCandidates(signature, item.label);
@@ -13792,7 +13866,7 @@ void BuildItemsFromHMenu(HMENU menu, UINT idCmdFirst, IContextMenu* context,
         }
 
         if (info.hbmpItem && IsSentinelMenuBitmap(info.hbmpItem)) {
-            Wh_Log(L"Sentinel menu bitmap %lld for '%s'",
+            if (g_settings.debugLogging) Wh_Log(L"Sentinel menu bitmap %lld for '%s'",
                    static_cast<long long>(reinterpret_cast<INT_PTR>(info.hbmpItem)),
                    item.label.c_str());
         }
@@ -14092,9 +14166,9 @@ void CaptureOwnerDrawIcons(PendingCapture& capture, std::vector<MenuItem>& items
         std::vector<uint8_t> pixels;
         if (CaptureOwnerDrawIcon(capture, item, pixels)) {
             item.iconPixels = std::move(pixels);
-            Wh_Log(L"Owner-draw icon captured for '%s'", item.label.c_str());
+            if (g_settings.debugLogging) Wh_Log(L"Owner-draw icon captured for '%s'", item.label.c_str());
         } else {
-            Wh_Log(L"Owner-draw draw not handled for '%s' (verb '%s')",
+            if (g_settings.debugLogging) Wh_Log(L"Owner-draw draw not handled for '%s' (verb '%s')",
                    item.label.c_str(), item.canonicalVerb.c_str());
         }
     }
@@ -14132,7 +14206,7 @@ void DiscoverIntoCache(PendingCapture& capture, const ContextSignature& signatur
     model.sourceStamp = capture.sourceStamp;
     capture.discoveryDone = true;
 
-    Wh_Log(L"Discovered %zu menu items in %llu ms", model.items.size(),
+    if (g_settings.debugLogging) Wh_Log(L"Discovered %zu menu items in %llu ms", model.items.size(),
            static_cast<unsigned long long>(GetTickCount64() - start));
     if (g_settings.debugLogging) {
         DumpModelItems(model.items, 0);
@@ -15462,7 +15536,7 @@ bool EnsureContextPopulated(PendingCapture& capture) {
     capture.obj->QueryInterface(IID_IContextMenu3, (void**)&capture.contextMenu3);
     capture.obj->QueryInterface(IID_IContextMenu2, (void**)&capture.contextMenu2);
 
-    Wh_Log(L"Population: %llu ms, %d items",
+    if (g_settings.debugLogging) Wh_Log(L"Population: %llu ms, %d items",
            static_cast<unsigned long long>(GetTickCount64() - start),
            GetMenuItemCount(menu));
     return true;
@@ -17494,7 +17568,7 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
 
     if (!capturedMenuContext &&
         !IsFilesystemContext(info.folderIsFilesystem, info.allItemsAreFilesystem)) {
-        Wh_Log(L"Non-filesystem namespace: using the native menu");
+        if (g_settings.debugLogging) Wh_Log(L"Non-filesystem namespace: using the native menu");
         ShowNativeReplay(capture, owner, pt);
         g_warmup.SetMenuOpen(false);
         return true;
@@ -17573,7 +17647,7 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
         } else {
             cached = g_cache.Find(signature);
             needsDiscovery = !cached || (cached->flags & kModelWarmup);
-            Wh_Log(L"Cache %s: scope=%d key=%s shape=%d paths=%zu",
+            if (g_settings.debugLogging) Wh_Log(L"Cache %s: scope=%d key=%s shape=%d paths=%zu",
                    cached ? (needsDiscovery ? L"warm" : L"hit") : L"miss",
                    static_cast<int>(scope), typeKey.c_str(),
                    static_cast<int>(shape), paths.size());
@@ -17584,7 +17658,7 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
             // same first-open cost. Warm entries are shown provisionally and
             // refreshed after the menu closes.
             if (!cached && !capture.discoveryDone) {
-                Wh_Log(L"Populating before showing the menu");
+                if (g_settings.debugLogging) Wh_Log(L"Populating before showing the menu");
                 DiscoverIntoCache(capture, signature);
                 cached = g_cache.Find(signature);
                 needsDiscovery = !cached || (cached->flags & kModelWarmup);
@@ -17632,7 +17706,7 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
         PruneMenuItems(model.items);
 
         if (ShouldShowNativeReplay(model.flags)) {
-            Wh_Log(L"Owner-draw context: using the native menu");
+            if (g_settings.debugLogging) Wh_Log(L"Owner-draw context: using the native menu");
             ShowNativeReplay(capture, owner, pt);
             break;
         }
@@ -17670,7 +17744,7 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
         if (scope == Scope::Background || scope == Scope::Desktop) {
             ApplyViewStateChecks(model.items, owner, kind);
         }
-        Wh_Log(L"Menu prep: %llu ms",
+        if (g_settings.debugLogging) Wh_Log(L"Menu prep: %llu ms",
                static_cast<unsigned long long>(g_perf.OpenPathElapsedMs()));
 
         bool creationFailed = false;
@@ -17760,7 +17834,7 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
                     result = InvokeItem(*item, ctx, capture);
                 }
 
-                Wh_Log(L"Invoke '%s' -> %d", item->label.c_str(),
+                if (g_settings.debugLogging) Wh_Log(L"Invoke '%s' -> %d", item->label.c_str(),
                        static_cast<int>(result));
 
                 if (capturedMenuContext && typeKey != L"*") {
@@ -17799,7 +17873,7 @@ BOOL WINAPI TrackPopupMenuEx_Hook(HMENU hMenu, UINT uFlags, int x, int y, HWND h
         DecidePath(shiftHeld, kind, hasPending, g_settings.enableShiftBypass);
 
     if (path == MenuPath::Ours && hasPending) {
-        Wh_Log(L"Replacing context menu: kind=%d", static_cast<int>(kind));
+        if (g_settings.debugLogging) Wh_Log(L"Replacing context menu: kind=%d", static_cast<int>(kind));
         pending.owner = hWnd;
         ShowReplacementMenu(pending, kind, hWnd, POINT{x, y});
         ReleaseCapture(pending);
@@ -17807,14 +17881,14 @@ BOOL WINAPI TrackPopupMenuEx_Hook(HMENU hMenu, UINT uFlags, int x, int y, HWND h
     }
 
     if (path == MenuPath::NativeBypass && hasPending) {
-        Wh_Log(L"Shift bypass: showing the native menu");
+        if (g_settings.debugLogging) Wh_Log(L"Shift bypass: showing the native menu");
         ShowNativeReplay(pending, hWnd, POINT{x, y});
         ReleaseCapture(pending);
         return 0;
     }
 
     if (hasPending) {
-        Wh_Log(L"Passing through: kind=%d", static_cast<int>(kind));
+        if (g_settings.debugLogging) Wh_Log(L"Passing through: kind=%d", static_cast<int>(kind));
         ReplayInto(pending.obj, hMenu, pending.indexMenu, pending.idCmdFirst,
                    pending.idCmdLast, pending.flags);
         ReleaseCapture(pending);
@@ -17833,7 +17907,7 @@ BOOL WINAPI TrackPopupMenu_Hook(HMENU hMenu, UINT uFlags, int x, int y, int nRes
         DecidePath(shiftHeld, kind, hasPending, g_settings.enableShiftBypass);
 
     if (path == MenuPath::Ours && hasPending) {
-        Wh_Log(L"Replacing context menu: kind=%d", static_cast<int>(kind));
+        if (g_settings.debugLogging) Wh_Log(L"Replacing context menu: kind=%d", static_cast<int>(kind));
         pending.owner = hWnd;
         ShowReplacementMenu(pending, kind, hWnd, POINT{x, y});
         ReleaseCapture(pending);
@@ -17841,14 +17915,14 @@ BOOL WINAPI TrackPopupMenu_Hook(HMENU hMenu, UINT uFlags, int x, int y, int nRes
     }
 
     if (path == MenuPath::NativeBypass && hasPending) {
-        Wh_Log(L"Shift bypass: showing the native menu");
+        if (g_settings.debugLogging) Wh_Log(L"Shift bypass: showing the native menu");
         ShowNativeReplay(pending, hWnd, POINT{x, y});
         ReleaseCapture(pending);
         return 0;
     }
 
     if (hasPending) {
-        Wh_Log(L"Passing through: kind=%d", static_cast<int>(kind));
+        if (g_settings.debugLogging) Wh_Log(L"Passing through: kind=%d", static_cast<int>(kind));
         ReplayInto(pending.obj, hMenu, pending.indexMenu, pending.idCmdFirst,
                    pending.idCmdLast, pending.flags);
         ReleaseCapture(pending);
@@ -17902,7 +17976,7 @@ HRESULT WINAPI IUnknown_QueryService_Hook(IUnknown* punk, REFGUID guidService,
          IsEqualGUID(riid, kContextMenuPresenterIid24H2))) {
         // Suppressed unconditionally so Shift+right-click reaches our bypass
         // and shows the classic native menu, matching stock Windows 11.
-        Wh_Log(L"Blocking modern context menu presenter");
+        if (g_settings.debugLogging) Wh_Log(L"Blocking modern context menu presenter");
         if (ppvOut) {
             *ppvOut = nullptr;
         }
@@ -17919,7 +17993,7 @@ bool WINAPI ShouldShowMiniMenu_Hook(void* pThis, void* param) {
     (void)param;
     // Suppressed unconditionally so the classic path (and our replacement)
     // always handles desktop menus; Shift bypass is handled by the popup hooks.
-    Wh_Log(L"Blocking modern desktop mini menu");
+    if (g_settings.debugLogging) Wh_Log(L"Blocking modern desktop mini menu");
     return false;
 }
 
@@ -17973,7 +18047,7 @@ bool g_populationHookDeferred = false;
 }
 
 BOOL Wh_ModInit() {
-    Wh_Log(L"Context Menu Overhaul init");
+    Wh_Log(L"Custom Cached Context Menu init");
     cmo::g_uiThreadId = GetCurrentThreadId();
 
     if (!Wh_SetFunctionHook((void*)TrackPopupMenuEx, (void*)cmo::TrackPopupMenuEx_Hook,
@@ -18038,7 +18112,7 @@ void Wh_ModAfterInit() {
 }
 
 void Wh_ModUninit() {
-    Wh_Log(L"Context Menu Overhaul uninit");
+    Wh_Log(L"Custom Cached Context Menu uninit");
     cmo::g_unloading.store(true);
 
     // Workers use the caches and the render device; stop them before anything
@@ -18104,7 +18178,7 @@ void Wh_ModSettingsChanged() {
     if (cmo::g_unloading.load()) {
         return;
     }
-    Wh_Log(L"Context Menu Overhaul settings changed");
+    Wh_Log(L"Custom Cached Context Menu settings changed");
     cmo::LoadSettings();
     cmo::UpdateSettingsHotkey();
 

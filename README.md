@@ -1,4 +1,4 @@
-# Context Menu Overhaul
+# Custom Cached Context Menu
 
 A [Windhawk](https://windhawk.net/) mod that replaces the Windows Explorer file
 and desktop context menu with an instantly-opening cached menu, then discovers

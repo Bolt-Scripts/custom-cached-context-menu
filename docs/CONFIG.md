@@ -1,4 +1,4 @@
-# Context Menu Overhaul — Configuration Guide
+# Custom Cached Context Menu — Configuration Guide
 
 For maintainers and anyone extending `menu.ini`. The user-facing summary lives
 in the README; this document explains how the configuration pipeline works and

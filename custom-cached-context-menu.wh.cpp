@@ -6576,8 +6576,13 @@ LayoutPanel BuildLayoutPanel(const std::vector<MenuItem>& items,
             layout.controlValue = item.controlValue;
             layout.controlColor = item.controlColor;
             const int reserve = controlReserve(item);
-            const int controlLeft = panel.size.cx - textGap - reserve;
-            layout.controlRect = {controlLeft, offset, panel.size.cx - textGap,
+            // A submenu chevron owns the right edge; keep the control (value
+            // text, swatch, field) left of it so they never overlap.
+            const int arrowSpace =
+                item.kind == ItemKind::Submenu ? metrics.submenuArrowWidth : 0;
+            const int controlRight = panel.size.cx - textGap - arrowSpace;
+            const int controlLeft = controlRight - reserve;
+            layout.controlRect = {controlLeft, offset, controlRight,
                                   offset + height};
             switch (item.control.kind) {
                 case ControlKind::IntSlider: {
@@ -8585,24 +8590,10 @@ void DrawSettingsSlider(ID2D1DeviceContext* dc, const LayoutItem& item,
 
 void DrawSettingsEnum(ID2D1DeviceContext* dc, const LayoutItem& item,
                       const LayoutMetrics& metrics) {
-    RECT textRect = item.controlRect;
-    textRect.right -= 14;
-    DrawSettingsText(dc, item.controlText, textRect, metrics.textColor, metrics,
-                     DWRITE_TEXT_ALIGNMENT_TRAILING);
-    ID2D1SolidColorBrush* brush = nullptr;
-    if (SUCCEEDED(dc->CreateSolidColorBrush(ColorFromArgb(metrics.submenuArrow),
-                                            &brush)) &&
-        brush) {
-        const float right = static_cast<float>(item.controlRect.right) - 4.0f;
-        const float midY = (static_cast<float>(item.rect.top) +
-                            static_cast<float>(item.rect.bottom)) /
-                           2.0f;
-        dc->DrawLine(D2D1::Point2F(right - 6.0f, midY - 3.0f),
-                     D2D1::Point2F(right, midY), brush, 1.2f);
-        dc->DrawLine(D2D1::Point2F(right, midY),
-                     D2D1::Point2F(right - 6.0f, midY + 3.0f), brush, 1.2f);
-        brush->Release();
-    }
+    // The row's submenu chevron is drawn by the shared submenu pass; only the
+    // current value goes here.
+    DrawSettingsText(dc, item.controlText, item.controlRect, metrics.textColor,
+                     metrics, DWRITE_TEXT_ALIGNMENT_TRAILING);
 }
 
 void DrawSettingsSwatch(ID2D1DeviceContext* dc, const LayoutItem& item,

@@ -4279,6 +4279,33 @@ int main() {
         CHECK(p2.size.cy > 120);
         CHECK(p2.items[0].areaRect.right <= p2.size.cx);
 
+        // A submenu row with a control keeps the control left of the chevron.
+        std::vector<cmo::MenuItem> submenuRow(1);
+        submenuRow[0].label = L"Animation easing";
+        submenuRow[0].kind = cmo::ItemKind::Submenu;
+        submenuRow[0].action = cmo::ActionKind::Submenu;
+        submenuRow[0].control.kind = cmo::ControlKind::Enum;
+        submenuRow[0].control.key = L"animationEasing";
+        submenuRow[0].controlText = L"easeOut";
+        cmo::LayoutPanel submenuPanel =
+            cmo::BuildLayoutPanel(submenuRow, m, nullptr);
+        const cmo::LayoutItem& submenuItem = submenuPanel.items[0];
+        CHECK(submenuItem.controlRect.right <= submenuItem.textRect.right);
+        CHECK_EQ(submenuItem.controlRect.right,
+                 static_cast<int>(submenuPanel.size.cx) - m.padding -
+                     m.submenuArrowWidth);
+
+        std::vector<cmo::MenuItem> swatchRow(1);
+        swatchRow[0].label = L"Background";
+        swatchRow[0].kind = cmo::ItemKind::Submenu;
+        swatchRow[0].action = cmo::ActionKind::Submenu;
+        swatchRow[0].control.kind = cmo::ControlKind::ColorSwatch;
+        swatchRow[0].control.key = L"background";
+        cmo::LayoutPanel swatchPanel =
+            cmo::BuildLayoutPanel(swatchRow, m, nullptr);
+        CHECK(swatchPanel.items[0].swatchRect.right <=
+              swatchPanel.items[0].textRect.right);
+
         // Existing non-control rows keep their geometry.
         std::vector<cmo::MenuItem> plain(1);
         plain[0].label = L"Plain";

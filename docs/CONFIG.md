@@ -84,6 +84,10 @@ rewritten.
 | background | color | `#F01E1E1E` | panel background and blur tint |
 | blur | bool | `true` | blur the screen behind the menu |
 | blurStrength | int | `12` | 0–64 |
+| overlay | effect list | `none` | none, noise, plasma, hue, glow, scanlines, vignette; combinable, drawn over the menu content |
+| overlayIntensity | int | `50` | 0–100 opacity |
+| overlaySpeed | int | `100` | 0–200 animation speed |
+| overlayAnimate | bool | `false` | keep overlays animating while the menu is open |
 | cornerRadius | int | `8` | 0–256 px |
 | border | color | `#22FFFFFF` | border color |
 | borderWidth | int | `1` | 0–64 px (0 hides it) |

@@ -37,6 +37,11 @@ and discovers extension items in the background, so repeated opens are instant.
 - **Animations** — combinable open/close effects (`fade`, `slide`, `scale`,
   `dissolve`, `crt`, `unfold`) with easing, timing, direction, and optional
   submenu animation.
+- **Overlays** — combinable effects drawn over the menu content (`noise`,
+  `plasma`, `hue`, `glow`, `scanlines`, `vignette`) with intensity and speed.
+  `overlayAnimate` keeps them moving while the menu stays open (off by
+  default); otherwise they animate only during the open/close. The Terminal
+  Green and Amber CRT themes ship with scanlines.
 - **Settings menu** — in the advanced ("More options") submenu, or via the
   optional global hotkey. Appearance is edited live (sliders with typed values,
   a color picker, a font-face field with installed-font validation, instant
@@ -181,6 +186,7 @@ MIT
 
 #include <d2d1.h>
 #include <d2d1_1.h>
+#include <d2d1effects.h>
 #include <d3d11.h>
 #include <dcomp.h>
 #include <dwrite.h>
@@ -1220,6 +1226,14 @@ constexpr uint32_t kAnimDissolve = 1u << 3;
 constexpr uint32_t kAnimCrt = 1u << 4;
 constexpr uint32_t kAnimUnfold = 1u << 5;
 
+// Overlay effects combine the same way; they are drawn over the menu content.
+constexpr uint32_t kOverlayNoise = 1u << 0;
+constexpr uint32_t kOverlayPlasma = 1u << 1;
+constexpr uint32_t kOverlayHue = 1u << 2;
+constexpr uint32_t kOverlayGlow = 1u << 3;
+constexpr uint32_t kOverlayScanlines = 1u << 4;
+constexpr uint32_t kOverlayVignette = 1u << 5;
+
 enum class AnimEasing : uint8_t { Linear, EaseOut, EaseInOut, Back, Bounce, Elastic };
 enum class MarkerStyle : uint8_t { Dot, Check, Bar, None };
 enum class FontWeightKind : uint8_t { Normal, Semibold, Bold };
@@ -1288,6 +1302,11 @@ struct Appearance {
     uint32_t headerColor = 0x66FFFFFF;
     bool hasHeaderColor = false;
     AcceleratorMode acceleratorMode = AcceleratorMode::Underline;
+    // Overlays drawn over the menu content.
+    uint32_t overlay = 0;
+    int overlayIntensity = 50;
+    int overlaySpeed = 100;
+    bool overlayAnimate = false;
 };
 
 // One animation frame: opacities, translation, and scale for the panel.
@@ -1565,6 +1584,62 @@ std::wstring AnimationEffectsText(uint32_t effects) {
     return text.empty() ? std::wstring(L"none") : text;
 }
 
+bool ParseOverlayEffects(const std::wstring& text, uint32_t& effects) {
+    effects = 0;
+    const std::wstring trimmed = TrimWhitespace(text);
+    if (trimmed.empty() || ToLowerCopy(trimmed) == L"none") {
+        return true;
+    }
+    bool allKnown = true;
+    size_t pos = 0;
+    while (pos <= trimmed.size()) {
+        const size_t comma = trimmed.find(L',', pos);
+        const std::wstring token = ToLowerCopy(TrimWhitespace(
+            comma == std::wstring::npos ? trimmed.substr(pos)
+                                        : trimmed.substr(pos, comma - pos)));
+        if (token == L"noise") {
+            effects |= kOverlayNoise;
+        } else if (token == L"plasma") {
+            effects |= kOverlayPlasma;
+        } else if (token == L"hue") {
+            effects |= kOverlayHue;
+        } else if (token == L"glow") {
+            effects |= kOverlayGlow;
+        } else if (token == L"scanlines") {
+            effects |= kOverlayScanlines;
+        } else if (token == L"vignette") {
+            effects |= kOverlayVignette;
+        } else if (token != L"none" && !token.empty()) {
+            allKnown = false;
+        }
+        if (comma == std::wstring::npos) {
+            break;
+        }
+        pos = comma + 1;
+    }
+    return allKnown;
+}
+
+std::wstring OverlayEffectsText(uint32_t effects) {
+    std::wstring text;
+    auto append = [&](uint32_t bit, const wchar_t* name) {
+        if ((effects & bit) == 0) {
+            return;
+        }
+        if (!text.empty()) {
+            text += L", ";
+        }
+        text += name;
+    };
+    append(kOverlayNoise, L"noise");
+    append(kOverlayPlasma, L"plasma");
+    append(kOverlayHue, L"hue");
+    append(kOverlayGlow, L"glow");
+    append(kOverlayScanlines, L"scanlines");
+    append(kOverlayVignette, L"vignette");
+    return text.empty() ? std::wstring(L"none") : text;
+}
+
 bool ParseAnimEasing(const std::wstring& text, AnimEasing& easing) {
     const std::wstring lower = ToLowerCopy(TrimWhitespace(text));
     if (lower == L"linear") {
@@ -1716,7 +1791,7 @@ bool ParseCornerRadii(const std::wstring& value, CornerRadii& radii) {
 enum class SettingType : uint8_t { Bool, Int, Color, Font, Enum, IntList, EffectList };
 
 // The build's schema version; bump when a row is added.
-constexpr int kConfigSchemaVersion = 7;
+constexpr int kConfigSchemaVersion = 8;
 
 struct ConfigSchemaEntry {
     const wchar_t* section;
@@ -1805,6 +1880,17 @@ const ConfigSchemaEntry kAppearanceSchema[] = {
      L"Blur the screen behind the menu.", 1, false},
     {L"appearance", L"blurStrength", L"Effects", SettingType::Int, L"12", nullptr, 0, 64,
      L"Blur strength.", 1, false},
+    {L"appearance", L"overlay", L"Effects", SettingType::EffectList, L"none",
+     L"none|noise|plasma|hue|glow|scanlines|vignette", 0, 0,
+     L"Overlay effects drawn over the menu content; combinable.", 8, false},
+    {L"appearance", L"overlayIntensity", L"Effects", SettingType::Int, L"50",
+     nullptr, 0, 100, L"Overlay strength (opacity), 0-100.", 8, false},
+    {L"appearance", L"overlaySpeed", L"Effects", SettingType::Int, L"100",
+     nullptr, 0, 200, L"Overlay animation speed, 100 = normal.", 8, false},
+    {L"appearance", L"overlayAnimate", L"Effects", SettingType::Bool, L"false",
+     nullptr, 0, 0,
+     L"Keep overlays animating while the menu stays open (uses a frame timer).",
+     8, false},
     {L"appearance", L"animationOpen", L"Animation", SettingType::EffectList, L"fade",
      L"none|fade|slide|scale|dissolve|crt|unfold", 0, 0,
      L"Open animation effects (comma separated, combinable).", 6, false},
@@ -1942,6 +2028,24 @@ bool ApplyAppearanceValue(Appearance& appearance, const std::wstring& key,
     }
     if (normalized == L"blurstrength") {
         return applyInt(appearance.blurStrength, _wtoi(row->defaultValue));
+    }
+    if (normalized == L"overlay") {
+        uint32_t parsed = 0;
+        if (!ParseOverlayEffects(value, parsed)) {
+            warn(L"unknown overlay effect ignored; known effects kept");
+        }
+        appearance.overlay = parsed;
+        return true;
+    }
+    if (normalized == L"overlayintensity") {
+        return applyInt(appearance.overlayIntensity, _wtoi(row->defaultValue));
+    }
+    if (normalized == L"overlayspeed") {
+        return applyInt(appearance.overlaySpeed, _wtoi(row->defaultValue));
+    }
+    if (normalized == L"overlayanimate") {
+        return applyBool(appearance.overlayAnimate,
+                         wcscmp(row->defaultValue, L"true") == 0);
     }
     if (normalized == L"cornerradius") {
         return applyInt(appearance.cornerRadius, _wtoi(row->defaultValue));
@@ -2759,7 +2863,9 @@ bool AppearanceValueIsValid(const ConfigSchemaEntry& entry,
         }
         case SettingType::EffectList: {
             uint32_t effects = 0;
-            return ParseAnimationEffects(value, effects);
+            return ToLowerCopy(entry.key) == L"overlay"
+                       ? ParseOverlayEffects(value, effects)
+                       : ParseAnimationEffects(value, effects);
         }
     }
     return false;
@@ -2850,6 +2956,10 @@ std::wstring NormalizeAppearanceValue(const ConfigSchemaEntry& entry,
             // Keep the recognized subset so the rewrite matches what the
             // parser actually applied (invalid tokens are dropped).
             uint32_t effects = 0;
+            if (ToLowerCopy(entry.key) == L"overlay") {
+                ParseOverlayEffects(value, effects);
+                return OverlayEffectsText(effects);
+            }
             ParseAnimationEffects(value, effects);
             return AnimationEffectsText(effects);
         }
@@ -2942,6 +3052,13 @@ bool AppearanceValueText(const Appearance& appearance,
     if (key == L"background") return color(appearance.background);
     if (key == L"blur") return boolean(appearance.blur);
     if (key == L"blurstrength") return number(appearance.blurStrength);
+    if (key == L"overlay") {
+        out = OverlayEffectsText(appearance.overlay);
+        return true;
+    }
+    if (key == L"overlayintensity") return number(appearance.overlayIntensity);
+    if (key == L"overlayspeed") return number(appearance.overlaySpeed);
+    if (key == L"overlayanimate") return boolean(appearance.overlayAnimate);
     if (key == L"cornerradius") return number(appearance.cornerRadius);
     if (key == L"border") return color(appearance.border);
     if (key == L"borderwidth") return number(appearance.borderWidth);
@@ -4695,6 +4812,8 @@ shadowOpacity = 150
 shadowBlur = 14
 blur = false
 font = Consolas, 9
+overlay = scanlines
+overlayIntensity = 30
 animationOpen = crt
 animationClose = crt
 animationDuration = 110
@@ -4716,6 +4835,8 @@ shadowOpacity = 150
 shadowBlur = 14
 blur = false
 font = Consolas, 9
+overlay = scanlines
+overlayIntensity = 30
 animationOpen = crt
 animationClose = crt
 animationDuration = 110
@@ -5497,6 +5618,8 @@ uint32_t AppearanceColorValue(const Appearance& appearance,
 int AppearanceIntValue(const Appearance& appearance, const std::wstring& key) {
     const std::wstring k = ToLowerCopy(key);
     if (k == L"blurstrength") return appearance.blurStrength;
+    if (k == L"overlayintensity") return appearance.overlayIntensity;
+    if (k == L"overlayspeed") return appearance.overlaySpeed;
     if (k == L"cornerradius") return appearance.cornerRadius;
     if (k == L"borderwidth") return appearance.borderWidth;
     if (k == L"shadowsize") return appearance.shadowSize;
@@ -5619,6 +5742,16 @@ const SettingsEffectName kSettingsEffectNames[] = {
     {L"unfold", kAnimUnfold},
 };
 
+const SettingsEffectName kSettingsOverlayNames[] = {
+    {L"none", 0},
+    {L"noise", kOverlayNoise},
+    {L"plasma", kOverlayPlasma},
+    {L"hue", kOverlayHue},
+    {L"glow", kOverlayGlow},
+    {L"scanlines", kOverlayScanlines},
+    {L"vignette", kOverlayVignette},
+};
+
 MenuItem MakeIntSliderRow(const wchar_t* label, std::wstring key, int minValue,
                           int maxValue, int value) {
     MenuItem item = MakeSettingsItem(ItemKind::Command, label);
@@ -5648,6 +5781,10 @@ std::wstring SettingsDisplayLabel(const std::wstring& key) {
         {L"animatesubmenus", L"Animate submenus"},
         {L"showaccelerators", L"Accelerator display"},
         {L"blurstrength", L"Blur strength"},
+        {L"overlay", L"Overlay effects"},
+        {L"overlayintensity", L"Overlay intensity"},
+        {L"overlayspeed", L"Overlay speed"},
+        {L"overlayanimate", L"Animate overlays while open"},
         {L"cornerradius", L"Corner radius"},
         {L"cornerradii", L"Corner radii"},
         {L"borderwidth", L"Border width"},
@@ -5789,15 +5926,26 @@ MenuItem BuildSettingsRow(const Appearance& working,
             MakeSettingsItem(ItemKind::Submenu, SettingsDisplayLabel(entry.key));
         row.action = ActionKind::Submenu;
         row.control = spec;
+        const bool overlay = key == L"overlay";
         const bool opening = key == L"animationopen";
         const uint32_t effects =
-            opening ? working.animationOpen : working.animationClose;
-        row.controlText = AnimationEffectsText(effects);
-        for (const SettingsEffectName& effect : kSettingsEffectNames) {
+            overlay ? working.overlay
+                    : (opening ? working.animationOpen : working.animationClose);
+        row.controlText = overlay ? OverlayEffectsText(effects)
+                                  : AnimationEffectsText(effects);
+        const SettingsEffectName* names =
+            overlay ? kSettingsOverlayNames : kSettingsEffectNames;
+        const size_t nameCount = overlay ? ARRAYSIZE(kSettingsOverlayNames)
+                                         : ARRAYSIZE(kSettingsEffectNames);
+        for (size_t i = 0; i < nameCount; ++i) {
+            const SettingsEffectName& effect = names[i];
             MenuItem child = MakeSettingsItem(ItemKind::Command, effect.name);
             child.control.kind = ControlKind::Action;
             child.control.key =
-                std::wstring(opening ? L"@effect:open:" : L"@effect:close:") +
+                std::wstring(overlay
+                                 ? L"@effect:overlay:"
+                                 : (opening ? L"@effect:open:"
+                                            : L"@effect:close:")) +
                 effect.name;
             const bool checked =
                 effect.bit == 0 ? effects == 0 : (effects & effect.bit) != 0;
@@ -8751,12 +8899,308 @@ void DrawSettingsInfo(ID2D1DeviceContext* dc, const LayoutItem& item,
                      DWRITE_TEXT_ALIGNMENT_TRAILING);
 }
 
+// --- Menu overlays ---------------------------------------------------------
+
+// The effect CLSIDs are not exported by MinGW's d2d1 import library; the
+// values match d2d1effects.h.
+const GUID kClsidD2D1ColorMatrix = {
+    0x921f03d6, 0x641c, 0x47df,
+    {0x85, 0x2d, 0xb4, 0xbb, 0x61, 0x53, 0xae, 0x11}};
+const GUID kClsidD2D1Turbulence = {
+    0xcf2bb6ae, 0x889a, 0x4ad7,
+    {0xba, 0x29, 0xa2, 0xfd, 0x73, 0x2c, 0x9f, 0xc9}};
+
+struct OverlayResources {
+    ID2D1Device* device = nullptr;
+    ID2D1Effect* turbulence = nullptr;
+    ID2D1Effect* colorMatrix = nullptr;
+    ID2D1Bitmap* scanlineBitmap = nullptr;
+    ID2D1BitmapBrush* scanlineBrush = nullptr;
+
+    void Release() {
+        if (scanlineBrush) {
+            scanlineBrush->Release();
+            scanlineBrush = nullptr;
+        }
+        if (scanlineBitmap) {
+            scanlineBitmap->Release();
+            scanlineBitmap = nullptr;
+        }
+        if (colorMatrix) {
+            colorMatrix->Release();
+            colorMatrix = nullptr;
+        }
+        if (turbulence) {
+            turbulence->Release();
+            turbulence = nullptr;
+        }
+        device = nullptr;
+    }
+};
+
+inline OverlayResources g_overlayResources;
+
+void ReleaseOverlayResources() {
+    g_overlayResources.Release();
+}
+
+bool EnsureOverlayResources(ID2D1DeviceContext* dc) {
+    ID2D1Device* device = g_renderDevice.D2DDevice();
+    if (!device) {
+        return false;
+    }
+    if (g_overlayResources.device == device) {
+        return true;
+    }
+    g_overlayResources.Release();
+    if (FAILED(dc->CreateEffect(kClsidD2D1Turbulence,
+                                &g_overlayResources.turbulence)) ||
+        !g_overlayResources.turbulence) {
+        g_overlayResources.Release();
+        return false;
+    }
+    if (FAILED(dc->CreateEffect(kClsidD2D1ColorMatrix,
+                                &g_overlayResources.colorMatrix)) ||
+        !g_overlayResources.colorMatrix) {
+        g_overlayResources.Release();
+        return false;
+    }
+    const uint32_t scanlinePixels[4] = {0x80000000u, 0x00000000u, 0x80000000u,
+                                        0x00000000u};
+    const D2D1_BITMAP_PROPERTIES props = {
+        {DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED}, 96.0f,
+        96.0f};
+    if (FAILED(dc->CreateBitmap(D2D1::SizeU(1, 4), scanlinePixels, 4, props,
+                                &g_overlayResources.scanlineBitmap)) ||
+        !g_overlayResources.scanlineBitmap) {
+        g_overlayResources.Release();
+        return false;
+    }
+    const D2D1_BITMAP_BRUSH_PROPERTIES brushProps =
+        D2D1::BitmapBrushProperties(D2D1_EXTEND_MODE_WRAP,
+                                    D2D1_EXTEND_MODE_WRAP);
+    if (FAILED(dc->CreateBitmapBrush(g_overlayResources.scanlineBitmap,
+                                     brushProps,
+                                     &g_overlayResources.scanlineBrush)) ||
+        !g_overlayResources.scanlineBrush) {
+        g_overlayResources.Release();
+        return false;
+    }
+    g_overlayResources.device = device;
+    return true;
+}
+
+void DrawOverlay(ID2D1DeviceContext* dc, const LayoutPanel& panel,
+                 const Appearance& appearance, float overlayTime,
+                 ID2D1PathGeometry* panelGeometry) {
+    if (appearance.overlay == 0) {
+        return;
+    }
+    const float intensity = static_cast<float>(
+                                std::clamp(appearance.overlayIntensity, 0, 100)) /
+                            100.0f;
+    if (intensity <= 0.0f) {
+        return;
+    }
+    const float speed =
+        static_cast<float>(std::clamp(appearance.overlaySpeed, 0, 200)) /
+        100.0f;
+    const float t = overlayTime * speed;
+    const D2D1_RECT_F rect =
+        D2D1::RectF(0.0f, 0.0f, static_cast<float>(panel.size.cx),
+                    static_cast<float>(panel.size.cy));
+    const float diagonal =
+        std::sqrt((rect.right - rect.left) * (rect.right - rect.left) +
+                  (rect.bottom - rect.top) * (rect.bottom - rect.top));
+
+    if (panelGeometry) {
+        D2D1_LAYER_PARAMETERS1 layer = {};
+        layer.contentBounds = D2D1::InfiniteRect();
+        layer.geometricMask = panelGeometry;
+        layer.maskAntialiasMode = D2D1_ANTIALIAS_MODE_PER_PRIMITIVE;
+        layer.maskTransform = D2D1::IdentityMatrix();
+        layer.opacity = 1.0f;
+        layer.layerOptions = D2D1_LAYER_OPTIONS1_NONE;
+        dc->PushLayer(layer, nullptr);
+    } else {
+        dc->PushAxisAlignedClip(rect, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+    }
+
+    // Hue drift: a soft two-color gradient whose hues cycle.
+    if ((appearance.overlay & kOverlayHue) != 0) {
+        const float hue = std::fmod(t * 40.0f, 360.0f);
+        const uint8_t alpha =
+            static_cast<uint8_t>(std::lround(intensity * 90.0f));
+        const D2D1_GRADIENT_STOP stops[2] = {
+            {0.0f,
+             ColorFromArgb(HsvToRgb(HsvColor{hue, 0.7f, 1.0f}, alpha))},
+            {1.0f,
+             ColorFromArgb(HsvToRgb(
+                 HsvColor{std::fmod(hue + 140.0f, 360.0f), 0.7f, 1.0f},
+                 alpha))}};
+        ID2D1GradientStopCollection* collection = nullptr;
+        ID2D1LinearGradientBrush* brush = nullptr;
+        if (SUCCEEDED(dc->CreateGradientStopCollection(stops, 2, &collection)) &&
+            collection &&
+            SUCCEEDED(dc->CreateLinearGradientBrush(
+                D2D1::LinearGradientBrushProperties(
+                    D2D1::Point2F(rect.left, rect.top),
+                    D2D1::Point2F(rect.right, rect.bottom)),
+                collection, &brush)) &&
+            brush) {
+            dc->FillRectangle(rect, brush);
+            brush->Release();
+        }
+        if (collection) {
+            collection->Release();
+        }
+    }
+
+    // Noise / plasma: turbulence through a color matrix (gray grain, or a
+    // hue-rotating rainbow).
+    const bool wantsNoise = (appearance.overlay & kOverlayNoise) != 0;
+    const bool wantsPlasma = (appearance.overlay & kOverlayPlasma) != 0;
+    if ((wantsNoise || wantsPlasma) && EnsureOverlayResources(dc) &&
+        g_overlayResources.turbulence && g_overlayResources.colorMatrix) {
+        const float frequency = wantsPlasma ? 0.02f : 0.08f;
+        g_overlayResources.turbulence->SetValue(
+            D2D1_TURBULENCE_PROP_SIZE,
+            D2D1::Vector2F(rect.right - rect.left, rect.bottom - rect.top));
+        g_overlayResources.turbulence->SetValue(
+            D2D1_TURBULENCE_PROP_BASE_FREQUENCY,
+            D2D1::Vector2F(frequency, frequency));
+        g_overlayResources.turbulence->SetValue(
+            D2D1_TURBULENCE_PROP_NUM_OCTAVES, 2u);
+        g_overlayResources.turbulence->SetValue(
+            D2D1_TURBULENCE_PROP_SEED,
+            static_cast<UINT32>(std::fmod(t * 60.0f, 1000.0f)));
+        D2D1_MATRIX_5X4_F matrix = {};
+        if (wantsPlasma) {
+            const float angle =
+                std::fmod(t * 60.0f, 360.0f) * 3.14159265f / 180.0f;
+            const float c = std::cos(angle);
+            const float s2 = std::sin(angle);
+            const float w = intensity;
+            matrix = D2D1::Matrix5x4F(
+                w * (0.213f + 0.787f * c - 0.213f * s2),
+                w * (0.715f - 0.715f * c - 0.715f * s2),
+                w * (0.072f - 0.072f * c + 0.928f * s2), 0, 
+                w * (0.213f - 0.213f * c + 0.143f * s2),
+                w * (0.715f + 0.285f * c + 0.140f * s2),
+                w * (0.072f - 0.072f * c - 0.283f * s2), 0, 
+                w * (0.213f - 0.213f * c - 0.787f * s2),
+                w * (0.715f - 0.715f * c + 0.715f * s2),
+                w * (0.072f + 0.928f * c + 0.072f * s2), 0, 
+                0, 0, 0, 0, 
+                0, 0, 0, w);
+        } else {
+            const float w = intensity * 0.35f / 3.0f;
+            matrix = D2D1::Matrix5x4F(
+                w, w, w, 0, 
+                w, w, w, 0, 
+                w, w, w, 0, 
+                0, 0, 0, 0, 
+                0, 0, 0, intensity * 0.35f);
+        }
+        g_overlayResources.colorMatrix->SetValue(
+            D2D1_COLORMATRIX_PROP_COLOR_MATRIX, matrix);
+        ID2D1Image* turbulenceOutput = nullptr;
+        g_overlayResources.turbulence->GetOutput(&turbulenceOutput);
+        g_overlayResources.colorMatrix->SetInput(0, turbulenceOutput);
+        if (turbulenceOutput) {
+            turbulenceOutput->Release();
+        }
+        ID2D1Image* overlayOutput = nullptr;
+        g_overlayResources.colorMatrix->GetOutput(&overlayOutput);
+        if (overlayOutput) {
+            dc->DrawImage(overlayOutput, D2D1_INTERPOLATION_MODE_LINEAR,
+                          D2D1_COMPOSITE_MODE_SOURCE_OVER);
+            overlayOutput->Release();
+        }
+    }
+
+    // Glow pulse: a soft additive radial bloom from the panel center.
+    if ((appearance.overlay & kOverlayGlow) != 0) {
+        const float cx = (rect.left + rect.right) / 2.0f;
+        const float cy = (rect.top + rect.bottom) / 2.0f;
+        const float pulse = 0.75f + 0.25f * std::sin(t * 3.0f);
+        const uint32_t innerAlpha =
+            static_cast<uint32_t>(std::lround(intensity * 70.0f));
+        const D2D1_GRADIENT_STOP stops[2] = {
+            {0.0f, ColorFromArgb((innerAlpha << 24) | 0x00FFFFFFu)},
+            {1.0f, ColorFromArgb(0x00FFFFFFu)}};
+        ID2D1GradientStopCollection* collection = nullptr;
+        ID2D1RadialGradientBrush* brush = nullptr;
+        if (SUCCEEDED(dc->CreateGradientStopCollection(stops, 2, &collection)) &&
+            collection &&
+            SUCCEEDED(dc->CreateRadialGradientBrush(
+                D2D1::RadialGradientBrushProperties(
+                    D2D1::Point2F(cx, cy), D2D1::Point2F(0, 0),
+                    diagonal * 0.5f * pulse, diagonal * 0.5f * pulse),
+                collection, &brush)) &&
+            brush) {
+            dc->SetPrimitiveBlend(D2D1_PRIMITIVE_BLEND_ADD);
+            dc->FillRectangle(rect, brush);
+            dc->SetPrimitiveBlend(D2D1_PRIMITIVE_BLEND_SOURCE_OVER);
+            brush->Release();
+        }
+        if (collection) {
+            collection->Release();
+        }
+    }
+
+    // Scanlines: a tiled 1x4 pattern, scrolling slowly.
+    if ((appearance.overlay & kOverlayScanlines) != 0 &&
+        EnsureOverlayResources(dc) && g_overlayResources.scanlineBrush) {
+        const float offset = std::fmod(t * 30.0f, 4.0f);
+        g_overlayResources.scanlineBrush->SetTransform(
+            D2D1::Matrix3x2F::Translation(0.0f, offset));
+        g_overlayResources.scanlineBrush->SetOpacity(intensity);
+        dc->FillRectangle(rect, g_overlayResources.scanlineBrush);
+    }
+
+    // Vignette: darkened edges, breathing slightly.
+    if ((appearance.overlay & kOverlayVignette) != 0) {
+        const float cx = (rect.left + rect.right) / 2.0f;
+        const float cy = (rect.top + rect.bottom) / 2.0f;
+        const float breathe = 0.9f + 0.1f * std::sin(t * 1.5f);
+        const uint8_t edgeAlpha =
+            static_cast<uint8_t>(std::lround(intensity * 180.0f));
+        const D2D1_GRADIENT_STOP stops[3] = {
+            {0.0f, ColorFromArgb(0x00000000u)},
+            {0.55f, ColorFromArgb(0x00000000u)},
+            {1.0f, ColorFromArgb(static_cast<uint32_t>(edgeAlpha) << 24)}};
+        ID2D1GradientStopCollection* collection = nullptr;
+        ID2D1RadialGradientBrush* brush = nullptr;
+        if (SUCCEEDED(dc->CreateGradientStopCollection(stops, 3, &collection)) &&
+            collection &&
+            SUCCEEDED(dc->CreateRadialGradientBrush(
+                D2D1::RadialGradientBrushProperties(
+                    D2D1::Point2F(cx, cy), D2D1::Point2F(0, 0),
+                    diagonal * 0.5f * breathe, diagonal * 0.5f * breathe),
+                collection, &brush)) &&
+            brush) {
+            dc->FillRectangle(rect, brush);
+            brush->Release();
+        }
+        if (collection) {
+            collection->Release();
+        }
+    }
+
+    if (panelGeometry) {
+        dc->PopLayer();
+    } else {
+        dc->PopAxisAlignedClip();
+    }
+}
+
 void DrawPanel(ID2D1DeviceContext* dc, const LayoutPanel& panel,
                const MenuInputState& state, const LayoutMetrics& metrics,
                const Appearance& appearance, const BackdropBitmap* backdrop,
                int margin = 0, int shadowClipSide = 0,
                const AnimationFrame& frame = AnimationFrame{},
-               POINT anchor = POINT{0, 0}) {
+               POINT anchor = POINT{0, 0}, float overlayTime = 0.0f) {
     if (!dc) {
         return;
     }
@@ -9090,6 +9534,9 @@ void DrawPanel(ID2D1DeviceContext* dc, const LayoutPanel& panel,
         if (item.kind == ItemKind::Submenu) {
             DrawSubmenuArrow(dc, item, panel.size.cx, metrics, metrics.submenuArrow);
         }
+    }
+    if (appearance.overlay != 0) {
+        DrawOverlay(dc, panel, appearance, overlayTime, panelGeometry);
     }
     if (contentFading) {
         dc->PopLayer();
@@ -9480,6 +9927,11 @@ struct MenuSession {
     POINT animationAnchor = {0, 0};
     LayoutMetrics metrics;
     Appearance appearance;
+    // Overlay animation clock: seconds since the session opened.
+    ULONGLONG overlayStartTick = 0;
+    float OverlaySeconds() const {
+        return static_cast<float>(GetTickCount64() - overlayStartTick) / 1000.0f;
+    }
     // Non-null for a settings session; see [CMO:SettingsUI].
     struct SettingsSessionContext* settings = nullptr;
 };
@@ -9773,22 +10225,32 @@ void SettingsHandleReservedAction(MenuSession& session,
         }
         const std::wstring which = key.substr(8, first - 8);
         const std::wstring name = key.substr(first + 1);
+        const bool overlay = which == L"overlay";
+        const bool opening = which == L"open";
+        const SettingsEffectName* names =
+            overlay ? kSettingsOverlayNames : kSettingsEffectNames;
+        const size_t nameCount = overlay ? ARRAYSIZE(kSettingsOverlayNames)
+                                         : ARRAYSIZE(kSettingsEffectNames);
         uint32_t bit = 0;
-        for (const SettingsEffectName& effect : kSettingsEffectNames) {
-            if (name == effect.name) {
-                bit = effect.bit;
+        for (size_t i = 0; i < nameCount; ++i) {
+            if (name == names[i].name) {
+                bit = names[i].bit;
                 break;
             }
         }
-        const bool opening = which == L"open";
         const uint32_t effects =
-            ToggleAnimationEffect(opening ? settings->working.animationOpen
-                                          : settings->working.animationClose,
+            ToggleAnimationEffect(overlay
+                                      ? settings->working.overlay
+                                      : (opening
+                                             ? settings->working.animationOpen
+                                             : settings->working.animationClose),
                                   bit);
-        SettingsApplyControlChange(session,
-                                   opening ? L"animationOpen"
-                                           : L"animationClose",
-                                   AnimationEffectsText(effects), true);
+        SettingsApplyControlChange(
+            session,
+            overlay ? L"overlay"
+                    : (opening ? L"animationOpen" : L"animationClose"),
+            overlay ? OverlayEffectsText(effects) : AnimationEffectsText(effects),
+            true);
         return;
     }
     if (key.rfind(L"@color:", 0) == 0 && key.size() > 6 &&
@@ -10477,7 +10939,7 @@ void RenderMenuWindow(MenuWindow* window, const LayoutPanel& panel,
                       const BackdropBitmap* backdrop, int margin,
                       int shadowClipSide,
                       const AnimationFrame& frame = AnimationFrame{},
-                      POINT anchor = POINT{0, 0}) {
+                      POINT anchor = POINT{0, 0}, float overlayTime = 0.0f) {
     if (!window || !window->SwapChain() || !g_renderDevice.D2DDevice()) {
         return;
     }    IDXGISurface* surface = nullptr;
@@ -10506,7 +10968,7 @@ void RenderMenuWindow(MenuWindow* window, const LayoutPanel& panel,
         dc->BeginDraw();
         dc->Clear(nullptr);
         DrawPanel(dc, panel, state, metrics, appearance, backdrop, margin,
-                  shadowClipSide, frame, anchor);
+                  shadowClipSide, frame, anchor, overlayTime);
         const HRESULT drawResult = dc->EndDraw();
         target->Release();
         if (drawResult == static_cast<HRESULT>(D2DERR_RECREATE_TARGET)) {
@@ -10535,7 +10997,7 @@ void RenderSessionFrame(MenuSession& session, const AnimationFrame& frame) {
         RenderMenuWindow(window, *window->Panel(), session.states[i],
                          session.metrics, session.appearance, backdrop,
                          session.margin, shadowClipSide, frame,
-                         session.animationAnchor);
+                         session.animationAnchor, session.OverlaySeconds());
     }
 }
 
@@ -10668,7 +11130,7 @@ void RunWindowAnimation(MenuSession& session, size_t index,
         RenderMenuWindow(window, *panel, session.states[index], session.metrics,
                          session.appearance, backdrop, session.margin,
                          shadowClipSide, ComputeAnimationFrame(spec, t, true),
-                         anchor);
+                         anchor, session.OverlaySeconds());
         if (t >= 1.0f) {
             break;
         }
@@ -10716,7 +11178,7 @@ void RepaintMenuWindow(MenuSession* session, int index) {
     RenderMenuWindow(window, *window->Panel(), session->states[index],
                      session->metrics, session->appearance, backdrop,
                      session->margin, shadowClipSide, session->animationFrame,
-                     session->animationAnchor);
+                     session->animationAnchor, session->OverlaySeconds());
 }
 
 void CloseSubmenusBelow(MenuSession* session, int index) {
@@ -10839,7 +11301,7 @@ void OpenSubmenu(MenuSession* session, int index, int itemIndex) {
                      animateChild
                          ? ComputeAnimationFrame(childSpec, 0.0f, true)
                          : AnimationFrame{},
-                     childAnchor);
+                     childAnchor, session->OverlaySeconds());
     child->Show();
     if (animateChild) {
         RunWindowAnimation(*session, session->windows.size() - 1, childSpec,
@@ -10848,6 +11310,7 @@ void OpenSubmenu(MenuSession* session, int index, int itemIndex) {
 }
 
 constexpr UINT_PTR kMenuSubmenuTimerId = 1;
+constexpr UINT_PTR kMenuOverlayTimerId = 4;
 
 std::vector<RECT> SessionWindowRects(const MenuSession* session);
 std::vector<RECT> SessionPanelRects(const MenuSession* session);
@@ -11242,6 +11705,12 @@ LRESULT CustomMenuWindowProc(MenuWindow* window, HWND hwnd, UINT msg,
             return 0;
         }
         case WM_TIMER: {
+            if (wParam == kMenuOverlayTimerId) {
+                for (size_t i = 0; i < session->windows.size(); ++i) {
+                    RepaintMenuWindow(session, static_cast<int>(i));
+                }
+                return 0;
+            }
             if (wParam == kSettingsCaretTimerId && session->settings) {
                 if (session->active >= 0 &&
                     session->active <
@@ -11454,6 +11923,10 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
         }
     }
     RunSessionAnimation(session, opening, true);
+    if (appearance.overlay != 0 && appearance.overlayAnimate) {
+        // Opt-in: keep redrawing while the menu is open so the overlay moves.
+        SetTimer(root->Handle(), kMenuOverlayTimerId, 16, nullptr);
+    }
 
     MSG msg = {};
     while (!session.done) {
@@ -11498,6 +11971,7 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
         KillTimer(root->Handle(), kMenuSubmenuTimerId);
         session.submenuTimerActive = false;
     }
+    KillTimer(root->Handle(), kMenuOverlayTimerId);
     const AnimationSpec closing = ResolveAnimationSpec(appearance, false);
     RunSessionAnimation(session, closing, false);
     if (session.settings) {
@@ -11955,6 +12429,7 @@ void PrebuildLayoutsForWarmup(const std::vector<MenuModel>& models, uint32_t dpi
 void OnDeviceLost() {
     g_layoutCache.InvalidateDevice();
     g_contentCaches.Clear();
+    ReleaseOverlayResources();
     g_renderDevice.HandleDeviceLost();
 }
 

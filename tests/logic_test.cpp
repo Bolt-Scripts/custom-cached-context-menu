@@ -2845,7 +2845,7 @@ int main() {
             explicitConfig, warnings));
         CHECK(explicitConfig.appearance.animationOpen == kAnimFade);
         CHECK(explicitConfig.appearance.animationClose == kAnimSlide);
-        CHECK(kConfigSchemaVersion == 7);
+        CHECK(kConfigSchemaVersion == 8);
         RulesConfig submenuConfig;
         CHECK(ParseRulesConfig(L"[appearance]\nanimateSubmenus = true\n",
                                submenuConfig, warnings));
@@ -3562,13 +3562,13 @@ int main() {
                       entry, entry.defaultValue)) != std::wstring::npos);
         }
         CHECK(text.find(L"[meta]") != std::wstring::npos);
-        CHECK(text.find(L"schemaVersion = 7") != std::wstring::npos);
+        CHECK(text.find(L"schemaVersion = 8") != std::wstring::npos);
         CHECK(text.find(L"[rules]") != std::wstring::npos);
         CHECK(text.find(L"[command ") != std::wstring::npos);
         cmo::RulesConfig config;
         std::vector<cmo::ConfigParseError> errors;
         CHECK(cmo::ParseRulesConfig(text, config, errors));
-        CHECK(config.schemaVersion == 7);
+        CHECK(config.schemaVersion == 8);
     }
 
     // v2.3/v2.4 review fixes: inert examples, '#' comments.
@@ -3700,7 +3700,7 @@ int main() {
         CHECK(store.Snapshot()->appearance.itemHeight == 30);
         std::wstring text;
         CHECK(cmo::ReadConfigFile(path, text));
-        CHECK(text.find(L"schemaVersion = 7") != std::wstring::npos);
+        CHECK(text.find(L"schemaVersion = 8") != std::wstring::npos);
         CHECK(text.find(L"itemHeight = 30") != std::wstring::npos);
         CHECK(text.find(L"; itemPadding = 6") != std::wstring::npos);
 
@@ -3711,7 +3711,7 @@ int main() {
         std::wstring rewritten;
         CHECK(cmo::ReadConfigFile(path, rewritten));
         CHECK(rewritten.find(L"[appearance]") != std::wstring::npos);
-        CHECK(rewritten.find(L"schemaVersion = 7") != std::wstring::npos);
+        CHECK(rewritten.find(L"schemaVersion = 8") != std::wstring::npos);
         DeleteFileW(path.c_str());
     }
 
@@ -3837,7 +3837,7 @@ int main() {
         CHECK(text.find(L"none | fade | slide") != std::wstring::npos);
         CHECK(text.find(L"1-256") != std::wstring::npos);
         CHECK(text.find(L"dot | check | bar | none") != std::wstring::npos);
-        CHECK(text.find(L"schemaVersion = 7") != std::wstring::npos);
+        CHECK(text.find(L"schemaVersion = 8") != std::wstring::npos);
     }
 
     // v2.6 advanced grouping: toggles, exclude, keep.
@@ -4089,6 +4089,61 @@ int main() {
         const cmo::Appearance parsed = cmo::AppearanceFromAppearanceText(text);
         CHECK_EQ(parsed.itemHeight, 30);
         CHECK_EQ(parsed.itemPadding, -1);
+    }
+
+    // Overlays: parse/format, appearance values, canonical rows, tree.
+    {
+        uint32_t effects = 0;
+        CHECK(cmo::ParseOverlayEffects(L"scanlines, glow", effects));
+        CHECK_EQ(effects, cmo::kOverlayScanlines | cmo::kOverlayGlow);
+        CHECK_EQ(cmo::OverlayEffectsText(effects),
+                 std::wstring(L"glow, scanlines"));
+        CHECK(cmo::ParseOverlayEffects(L"none", effects));
+        CHECK_EQ(effects, 0u);
+        CHECK_EQ(cmo::OverlayEffectsText(0), std::wstring(L"none"));
+        CHECK(!cmo::ParseOverlayEffects(L"scanlines, wobble", effects));
+        CHECK_EQ(effects, cmo::kOverlayScanlines);
+
+        cmo::Appearance overlayAppearance;
+        CHECK(cmo::ApplyAppearanceValue(overlayAppearance, L"overlay",
+                                        L"noise, vignette", nullptr));
+        CHECK_EQ(overlayAppearance.overlay,
+                 cmo::kOverlayNoise | cmo::kOverlayVignette);
+        std::wstring overlayText;
+        CHECK(cmo::AppearanceValueText(
+            overlayAppearance, *cmo::SchemaFind(L"overlay"), overlayText));
+        CHECK_EQ(overlayText, std::wstring(L"noise, vignette"));
+        CHECK(cmo::ApplyAppearanceValue(overlayAppearance, L"overlayIntensity",
+                                        L"80", nullptr));
+        CHECK_EQ(overlayAppearance.overlayIntensity, 80);
+        CHECK(cmo::ApplyAppearanceValue(overlayAppearance, L"overlayAnimate",
+                                        L"true", nullptr));
+        CHECK(overlayAppearance.overlayAnimate);
+
+        const std::wstring canonical = cmo::CanonicalizeConfig(
+            L"[appearance]\noverlay = scanlines\n", cmo::kConfigSchemaVersion);
+        CHECK(canonical.find(L"overlay = scanlines") != std::wstring::npos);
+        CHECK(canonical.find(L"schemaVersion = 8") != std::wstring::npos);
+
+        cmo::SettingsModelInputs inputs;
+        const std::vector<cmo::MenuItem> root = cmo::BuildSettingsTree(inputs);
+        auto findChild = [](const std::vector<cmo::MenuItem>& items,
+                            const std::wstring& label) -> const cmo::MenuItem* {
+            for (const cmo::MenuItem& item : items) {
+                if (item.label == label) return &item;
+            }
+            return nullptr;
+        };
+        const cmo::MenuItem* effectsGroup = findChild(root, L"Effects");
+        CHECK(effectsGroup != nullptr);
+        const cmo::MenuItem* overlayRow =
+            findChild(effectsGroup->children, L"Overlay effects");
+        CHECK(overlayRow != nullptr);
+        CHECK(overlayRow->kind == cmo::ItemKind::Submenu);
+        CHECK_EQ(overlayRow->children.size(), size_t(7));
+        CHECK_EQ(overlayRow->children[0].control.key,
+                 std::wstring(L"@effect:overlay:none"));
+        CHECK((overlayRow->children[0].flags & cmo::kModelChecked) != 0);
     }
 
     {

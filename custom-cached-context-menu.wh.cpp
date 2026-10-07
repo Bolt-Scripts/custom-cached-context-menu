@@ -1306,6 +1306,7 @@ struct Appearance {
     uint32_t overlay = 0;
     int overlayIntensity = 50;
     int overlaySpeed = 100;
+    int overlayFrameMs = 16;
     bool overlayAnimate = false;
 };
 
@@ -1887,6 +1888,9 @@ const ConfigSchemaEntry kAppearanceSchema[] = {
      nullptr, 0, 100, L"Overlay strength (opacity), 0-100.", 8, false},
     {L"appearance", L"overlaySpeed", L"Effects", SettingType::Int, L"100",
      nullptr, 0, 200, L"Overlay animation speed, 100 = normal.", 8, false},
+    {L"appearance", L"overlayFrameMs", L"Effects", SettingType::Int, L"16",
+     nullptr, 1, 100, L"Milliseconds between overlay frames (lower = smoother).",
+     8, false},
     {L"appearance", L"overlayAnimate", L"Effects", SettingType::Bool, L"false",
      nullptr, 0, 0,
      L"Keep overlays animating while the menu stays open (uses a frame timer).",
@@ -2042,6 +2046,9 @@ bool ApplyAppearanceValue(Appearance& appearance, const std::wstring& key,
     }
     if (normalized == L"overlayspeed") {
         return applyInt(appearance.overlaySpeed, _wtoi(row->defaultValue));
+    }
+    if (normalized == L"overlayframems") {
+        return applyInt(appearance.overlayFrameMs, _wtoi(row->defaultValue));
     }
     if (normalized == L"overlayanimate") {
         return applyBool(appearance.overlayAnimate,
@@ -3058,6 +3065,7 @@ bool AppearanceValueText(const Appearance& appearance,
     }
     if (key == L"overlayintensity") return number(appearance.overlayIntensity);
     if (key == L"overlayspeed") return number(appearance.overlaySpeed);
+    if (key == L"overlayframems") return number(appearance.overlayFrameMs);
     if (key == L"overlayanimate") return boolean(appearance.overlayAnimate);
     if (key == L"cornerradius") return number(appearance.cornerRadius);
     if (key == L"border") return color(appearance.border);
@@ -5630,6 +5638,7 @@ int AppearanceIntValue(const Appearance& appearance, const std::wstring& key) {
     if (k == L"blurstrength") return appearance.blurStrength;
     if (k == L"overlayintensity") return appearance.overlayIntensity;
     if (k == L"overlayspeed") return appearance.overlaySpeed;
+    if (k == L"overlayframems") return appearance.overlayFrameMs;
     if (k == L"cornerradius") return appearance.cornerRadius;
     if (k == L"borderwidth") return appearance.borderWidth;
     if (k == L"shadowsize") return appearance.shadowSize;
@@ -5794,6 +5803,7 @@ std::wstring SettingsDisplayLabel(const std::wstring& key) {
         {L"overlay", L"Overlay effects"},
         {L"overlayintensity", L"Overlay intensity"},
         {L"overlayspeed", L"Overlay speed"},
+        {L"overlayframems", L"Overlay frame interval"},
         {L"overlayanimate", L"Animate overlays while open"},
         {L"cornerradius", L"Corner radius"},
         {L"cornerradii", L"Corner radii"},
@@ -8918,7 +8928,7 @@ struct OverlayResources {
     ID2D1Effect* turbulence = nullptr;
     ID2D1Effect* colorMatrix = nullptr;
     ID2D1Bitmap* scanlineBitmap = nullptr;
-    ID2D1BitmapBrush* scanlineBrush = nullptr;
+    ID2D1BitmapBrush1* scanlineBrush = nullptr;
 
     void Release() {
         if (scanlineBrush) {
@@ -8979,11 +8989,14 @@ bool EnsureOverlayResources(ID2D1DeviceContext* dc) {
         g_overlayResources.Release();
         return false;
     }
-    const D2D1_BITMAP_BRUSH_PROPERTIES brushProps =
-        D2D1::BitmapBrushProperties(D2D1_EXTEND_MODE_WRAP,
-                                    D2D1_EXTEND_MODE_WRAP);
+    D2D1_BITMAP_BRUSH_PROPERTIES1 brushProps = {};
+    brushProps.extendModeX = D2D1_EXTEND_MODE_WRAP;
+    brushProps.extendModeY = D2D1_EXTEND_MODE_WRAP;
+    // Nearest-neighbor keeps the 1px lines crisp while they scroll; linear
+    // interpolation smears them into moving gradients.
+    brushProps.interpolationMode = D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR;
     if (FAILED(dc->CreateBitmapBrush(g_overlayResources.scanlineBitmap,
-                                     brushProps,
+                                     &brushProps, nullptr,
                                      &g_overlayResources.scanlineBrush)) ||
         !g_overlayResources.scanlineBrush) {
         g_overlayResources.Release();
@@ -9155,7 +9168,9 @@ void DrawOverlay(ID2D1DeviceContext* dc, const LayoutPanel& panel,
     // Scanlines: a tiled 1x4 pattern, scrolling slowly.
     if ((appearance.overlay & kOverlayScanlines) != 0 &&
         EnsureOverlayResources(dc) && g_overlayResources.scanlineBrush) {
-        const float offset = std::fmod(t * 30.0f, 4.0f);
+        // A slow, even drift: 3 px/s at normal speed, snapped to whole
+        // pixels so the lines stay evenly spaced.
+        const float offset = std::floor(std::fmod(t * 3.0f, 4.0f));
         g_overlayResources.scanlineBrush->SetTransform(
             D2D1::Matrix3x2F::Translation(0.0f, offset));
         g_overlayResources.scanlineBrush->SetOpacity(intensity);
@@ -9933,6 +9948,9 @@ struct MenuSession {
     // Overlay animation clock: seconds since the session opened.
     ULONGLONG overlayStartTick = 0;
     float OverlaySeconds() const {
+        if (!appearance.overlayAnimate) {
+            return 0.0f;  // static overlays never advance, even on repaints
+        }
         return static_cast<float>(GetTickCount64() - overlayStartTick) / 1000.0f;
     }
     // Non-null for a settings session; see [CMO:SettingsUI].
@@ -10092,6 +10110,7 @@ void RelayoutSession(MenuSession& session);
 void SettingsApplyReset(MenuSession& session, const std::wstring& key);
 void SettingsPerformWrite(SettingsSessionContext* settings);
 void RepaintMenuWindow(MenuSession* session, int index);
+void SettingsSyncOverlayTimer(MenuSession& session);
 
 // Rebuilds the settings model from the working appearance and re-lays out the
 // open windows so changes show live.
@@ -10377,6 +10396,11 @@ void SettingsApplyControlChange(MenuSession& session, const std::wstring& key,
     }
     SettingsMarkDirty(settings->write, GetTickCount64(), 400);
     SettingsArmSaveTimer(session);
+    const std::wstring appliedKey = ToLowerCopy(entry->key);
+    if (appliedKey == L"overlay" || appliedKey == L"overlayanimate" ||
+        appliedKey == L"overlayframems") {
+        SettingsSyncOverlayTimer(session);
+    }
     if (!SettingsKeyIsGeometry(entry->key) || commitGeometry) {
         SettingsRefreshSession(session);
     }
@@ -11315,6 +11339,26 @@ void OpenSubmenu(MenuSession* session, int index, int itemIndex) {
 constexpr UINT_PTR kMenuSubmenuTimerId = 1;
 constexpr UINT_PTR kMenuOverlayTimerId = 4;
 
+UINT OverlayTimerInterval(const Appearance& appearance) {
+    return static_cast<UINT>(std::clamp(appearance.overlayFrameMs, 1, 100));
+}
+
+// While the settings menu is open, the overlay timer follows the setting so
+// toggling it takes effect immediately instead of on the next open.
+void SettingsSyncOverlayTimer(MenuSession& session) {
+    if (!session.settings || session.windows.empty() || !session.windows[0]) {
+        return;
+    }
+    const bool animate = session.settings->working.overlay != 0 &&
+                         session.settings->working.overlayAnimate;
+    if (animate) {
+        SetTimer(session.windows[0]->Handle(), kMenuOverlayTimerId,
+                 OverlayTimerInterval(session.settings->working), nullptr);
+    } else {
+        KillTimer(session.windows[0]->Handle(), kMenuOverlayTimerId);
+    }
+}
+
 std::vector<RECT> SessionWindowRects(const MenuSession* session);
 std::vector<RECT> SessionPanelRects(const MenuSession* session);
 bool IsSessionWindow(const MenuSession* session, HWND hwnd);
@@ -11864,6 +11908,7 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
     session.model = &model;
     session.metrics = metrics;
     session.appearance = appearance;
+    session.overlayStartTick = GetTickCount64();
     session.settings = settings;
     if (settings) {
         settings->panel = std::const_pointer_cast<LayoutPanel>(panel);
@@ -11928,7 +11973,8 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
     RunSessionAnimation(session, opening, true);
     if (appearance.overlay != 0 && appearance.overlayAnimate) {
         // Opt-in: keep redrawing while the menu is open so the overlay moves.
-        SetTimer(root->Handle(), kMenuOverlayTimerId, 16, nullptr);
+        SetTimer(root->Handle(), kMenuOverlayTimerId,
+                 OverlayTimerInterval(appearance), nullptr);
     }
 
     MSG msg = {};

@@ -4145,6 +4145,28 @@ int main() {
                  std::wstring(L"@effect:overlay:none"));
         CHECK((overlayRow->children[0].flags & cmo::kModelChecked) != 0);
 
+        // Overlay frame interval clamps to a usable range.
+        {
+            cmo::Appearance timing;
+            timing.overlayFrameMs = 16;
+            CHECK_EQ(cmo::OverlayTimerInterval(timing), UINT(16));
+            timing.overlayFrameMs = 0;
+            CHECK_EQ(cmo::OverlayTimerInterval(timing), UINT(1));
+            timing.overlayFrameMs = 500;
+            CHECK_EQ(cmo::OverlayTimerInterval(timing), UINT(100));
+        }
+
+        // Overlay time: frozen while animation is off, elapsed when on.
+        {
+            cmo::MenuSession session;
+            session.appearance.overlayAnimate = false;
+            CHECK_EQ(session.OverlaySeconds(), 0.0f);
+            session.appearance.overlayAnimate = true;
+            session.overlayStartTick = GetTickCount64() - 1000;
+            CHECK(session.OverlaySeconds() >= 0.9f);
+            CHECK(session.OverlaySeconds() <= 2.0f);
+        }
+
         // Every bool key must show its real value, not just the old three.
         inputs.working.overlayAnimate = true;
         const std::vector<cmo::MenuItem> boolRoot =

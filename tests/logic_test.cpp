@@ -4145,6 +4145,18 @@ int main() {
                  std::wstring(L"@effect:overlay:none"));
         CHECK((overlayRow->children[0].flags & cmo::kModelChecked) != 0);
 
+        // Overlay size factor clamps to 0.25x-4x, 1.0 at the default.
+        {
+            cmo::Appearance sized;
+            CHECK_EQ(cmo::OverlaySizeFactor(sized), 1.0f);
+            sized.overlaySize = 0;
+            CHECK_EQ(cmo::OverlaySizeFactor(sized), 0.25f);
+            sized.overlaySize = 1000;
+            CHECK_EQ(cmo::OverlaySizeFactor(sized), 4.0f);
+            sized.overlaySize = 200;
+            CHECK_EQ(cmo::OverlaySizeFactor(sized), 2.0f);
+        }
+
         // Adaptive shadow: unchanged on light backdrops, faded and tinted on
         // dark ones so it cannot read as a black halo.
         {

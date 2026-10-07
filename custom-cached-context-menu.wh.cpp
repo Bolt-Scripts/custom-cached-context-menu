@@ -1307,6 +1307,7 @@ struct Appearance {
     uint32_t overlay = 0;
     int overlayIntensity = 50;
     int overlaySpeed = 100;
+    int overlaySize = 100;
     int overlayFrameMs = 16;
     bool overlayAnimate = false;
 };
@@ -1893,6 +1894,10 @@ const ConfigSchemaEntry kAppearanceSchema[] = {
      nullptr, 0, 100, L"Overlay strength (opacity), 0-100.", 8, false},
     {L"appearance", L"overlaySpeed", L"Effects", SettingType::Int, L"100",
      nullptr, 0, 200, L"Overlay animation speed, 100 = normal.", 8, false},
+    {L"appearance", L"overlaySize", L"Effects", SettingType::Int, L"100",
+     nullptr, 25, 400,
+     L"Overlay scale in percent: line spacing, grain size, glow reach.",
+     8, false},
     {L"appearance", L"overlayFrameMs", L"Effects", SettingType::Int, L"16",
      nullptr, 1, 100, L"Milliseconds between overlay frames (lower = smoother).",
      8, false},
@@ -2051,6 +2056,9 @@ bool ApplyAppearanceValue(Appearance& appearance, const std::wstring& key,
     }
     if (normalized == L"overlayspeed") {
         return applyInt(appearance.overlaySpeed, _wtoi(row->defaultValue));
+    }
+    if (normalized == L"overlaysize") {
+        return applyInt(appearance.overlaySize, _wtoi(row->defaultValue));
     }
     if (normalized == L"overlayframems") {
         return applyInt(appearance.overlayFrameMs, _wtoi(row->defaultValue));
@@ -3074,6 +3082,7 @@ bool AppearanceValueText(const Appearance& appearance,
     }
     if (key == L"overlayintensity") return number(appearance.overlayIntensity);
     if (key == L"overlayspeed") return number(appearance.overlaySpeed);
+    if (key == L"overlaysize") return number(appearance.overlaySize);
     if (key == L"overlayframems") return number(appearance.overlayFrameMs);
     if (key == L"overlayanimate") return boolean(appearance.overlayAnimate);
     if (key == L"cornerradius") return number(appearance.cornerRadius);
@@ -5649,6 +5658,7 @@ int AppearanceIntValue(const Appearance& appearance, const std::wstring& key) {
     if (k == L"blurstrength") return appearance.blurStrength;
     if (k == L"overlayintensity") return appearance.overlayIntensity;
     if (k == L"overlayspeed") return appearance.overlaySpeed;
+    if (k == L"overlaysize") return appearance.overlaySize;
     if (k == L"overlayframems") return appearance.overlayFrameMs;
     if (k == L"cornerradius") return appearance.cornerRadius;
     if (k == L"borderwidth") return appearance.borderWidth;
@@ -5814,6 +5824,7 @@ std::wstring SettingsDisplayLabel(const std::wstring& key) {
         {L"overlay", L"Overlay effects"},
         {L"overlayintensity", L"Overlay intensity"},
         {L"overlayspeed", L"Overlay speed"},
+        {L"overlaysize", L"Overlay size"},
         {L"overlayframems", L"Overlay frame interval"},
         {L"overlayanimate", L"Animate overlays while open"},
         {L"cornerradius", L"Corner radius"},
@@ -9077,6 +9088,12 @@ bool EnsureOverlayResources(ID2D1DeviceContext* dc) {
     return true;
 }
 
+// Overlay size as a multiplier: 1.0 at the default 100%.
+float OverlaySizeFactor(const Appearance& appearance) {
+    return static_cast<float>(std::clamp(appearance.overlaySize, 25, 400)) /
+           100.0f;
+}
+
 void DrawOverlay(ID2D1DeviceContext* dc, const LayoutPanel& panel,
                  const Appearance& appearance, float overlayTime,
                  ID2D1PathGeometry* panelGeometry) {
@@ -9113,21 +9130,28 @@ void DrawOverlay(ID2D1DeviceContext* dc, const LayoutPanel& panel,
         dc->PushAxisAlignedClip(rect, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
     }
 
-    // Hue drift: a soft two-color gradient whose hues cycle.
+    // Hue drift: a soft gradient whose hues cycle; the size factor sets how
+    // many color bands span the panel.
     if ((appearance.overlay & kOverlayHue) != 0) {
         const float hue = std::fmod(t * 40.0f, 360.0f);
         const uint8_t alpha =
             static_cast<uint8_t>(std::lround(intensity * 90.0f));
-        const D2D1_GRADIENT_STOP stops[2] = {
-            {0.0f,
-             ColorFromArgb(HsvToRgb(HsvColor{hue, 0.7f, 1.0f}, alpha))},
-            {1.0f,
-             ColorFromArgb(HsvToRgb(
-                 HsvColor{std::fmod(hue + 140.0f, 360.0f), 0.7f, 1.0f},
-                 alpha))}};
+        const int bands = std::clamp(
+            static_cast<int>(std::lround(OverlaySizeFactor(appearance))), 1, 8);
+        std::vector<D2D1_GRADIENT_STOP> stops(
+            static_cast<size_t>(bands) + 1);
+        for (int i = 0; i <= bands; ++i) {
+            stops[static_cast<size_t>(i)] = {
+                static_cast<float>(i) / static_cast<float>(bands),
+                ColorFromArgb(HsvToRgb(
+                    HsvColor{std::fmod(hue + i * 140.0f, 360.0f), 0.7f, 1.0f},
+                    alpha))};
+        }
         ID2D1GradientStopCollection* collection = nullptr;
         ID2D1LinearGradientBrush* brush = nullptr;
-        if (SUCCEEDED(dc->CreateGradientStopCollection(stops, 2, &collection)) &&
+        if (SUCCEEDED(dc->CreateGradientStopCollection(
+                stops.data(), static_cast<UINT32>(stops.size()),
+                &collection)) &&
             collection &&
             SUCCEEDED(dc->CreateLinearGradientBrush(
                 D2D1::LinearGradientBrushProperties(
@@ -9149,7 +9173,10 @@ void DrawOverlay(ID2D1DeviceContext* dc, const LayoutPanel& panel,
     const bool wantsPlasma = (appearance.overlay & kOverlayPlasma) != 0;
     if ((wantsNoise || wantsPlasma) && EnsureOverlayResources(dc) &&
         g_overlayResources.turbulence && g_overlayResources.colorMatrix) {
-        const float frequency = wantsPlasma ? 0.02f : 0.08f;
+        const float frequency =
+            std::clamp((wantsPlasma ? 0.02f : 0.08f) /
+                           OverlaySizeFactor(appearance),
+                       0.001f, 1.0f);
         g_overlayResources.turbulence->SetValue(
             D2D1_TURBULENCE_PROP_SIZE,
             D2D1::Vector2F(rect.right - rect.left, rect.bottom - rect.top));
@@ -9211,6 +9238,8 @@ void DrawOverlay(ID2D1DeviceContext* dc, const LayoutPanel& panel,
         const float cx = (rect.left + rect.right) / 2.0f;
         const float cy = (rect.top + rect.bottom) / 2.0f;
         const float pulse = 0.75f + 0.25f * std::sin(t * 3.0f);
+        const float glowRadius = std::min(
+            diagonal * 0.5f * pulse * OverlaySizeFactor(appearance), diagonal);
         const uint32_t innerAlpha =
             static_cast<uint32_t>(std::lround(intensity * 70.0f));
         const D2D1_GRADIENT_STOP stops[2] = {
@@ -9222,8 +9251,8 @@ void DrawOverlay(ID2D1DeviceContext* dc, const LayoutPanel& panel,
             collection &&
             SUCCEEDED(dc->CreateRadialGradientBrush(
                 D2D1::RadialGradientBrushProperties(
-                    D2D1::Point2F(cx, cy), D2D1::Point2F(0, 0),
-                    diagonal * 0.5f * pulse, diagonal * 0.5f * pulse),
+                    D2D1::Point2F(cx, cy), D2D1::Point2F(0, 0), glowRadius,
+                    glowRadius),
                 collection, &brush)) &&
             brush) {
             dc->SetPrimitiveBlend(D2D1_PRIMITIVE_BLEND_ADD);
@@ -9240,9 +9269,14 @@ void DrawOverlay(ID2D1DeviceContext* dc, const LayoutPanel& panel,
     if ((appearance.overlay & kOverlayScanlines) != 0 &&
         EnsureOverlayResources(dc) && g_overlayResources.scanlineBrush) {
         // A slow, even drift: 3 px/s at normal speed, snapped to whole
-        // pixels so the lines stay evenly spaced.
-        const float offset = std::floor(std::fmod(t * 3.0f, 4.0f));
+        // pixels so the lines stay evenly spaced. The size factor scales both
+        // line thickness and spacing (kept integral for crisp lines).
+        const int lineScale = std::max(
+            1, static_cast<int>(std::lround(OverlaySizeFactor(appearance))));
+        const float period = 4.0f * static_cast<float>(lineScale);
+        const float offset = std::floor(std::fmod(t * 3.0f, period));
         g_overlayResources.scanlineBrush->SetTransform(
+            D2D1::Matrix3x2F::Scale(1.0f, static_cast<float>(lineScale)) *
             D2D1::Matrix3x2F::Translation(0.0f, offset));
         g_overlayResources.scanlineBrush->SetOpacity(intensity);
         dc->FillRectangle(rect, g_overlayResources.scanlineBrush);
@@ -9255,9 +9289,13 @@ void DrawOverlay(ID2D1DeviceContext* dc, const LayoutPanel& panel,
         const float breathe = 0.9f + 0.1f * std::sin(t * 1.5f);
         const uint8_t edgeAlpha =
             static_cast<uint8_t>(std::lround(intensity * 180.0f));
+        // A larger size pushes the clear center outward, so the dark edge
+        // reaches further in.
+        const float innerStop = std::clamp(
+            0.55f / OverlaySizeFactor(appearance), 0.1f, 0.9f);
         const D2D1_GRADIENT_STOP stops[3] = {
             {0.0f, ColorFromArgb(0x00000000u)},
-            {0.55f, ColorFromArgb(0x00000000u)},
+            {innerStop, ColorFromArgb(0x00000000u)},
             {1.0f, ColorFromArgb(static_cast<uint32_t>(edgeAlpha) << 24)}};
         ID2D1GradientStopCollection* collection = nullptr;
         ID2D1RadialGradientBrush* brush = nullptr;

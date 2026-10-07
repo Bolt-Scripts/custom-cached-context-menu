@@ -87,6 +87,7 @@ rewritten.
 | overlay | effect list | `none` | none, noise, plasma, hue, glow, scanlines, vignette; combinable, drawn over the menu content |
 | overlayIntensity | int | `50` | 0–100 opacity |
 | overlaySpeed | int | `100` | 0–200 animation speed |
+| overlaySize | int | `100` | 25–400 overlay scale: scanline spacing, grain size, glow reach, hue banding |
 | overlayFrameMs | int | `16` | 1–100 ms between overlay frames (lower = smoother) |
 | overlayAnimate | bool | `false` | keep overlays animating while the menu is open |
 | cornerRadius | int | `8` | 0–256 px |

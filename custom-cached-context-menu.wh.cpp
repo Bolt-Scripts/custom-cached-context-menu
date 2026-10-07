@@ -38,7 +38,8 @@ and discovers extension items in the background, so repeated opens are instant.
   `dissolve`, `crt`, `unfold`) with easing, timing, direction, and optional
   submenu animation.
 - **Overlays** — combinable effects drawn over the menu content (`noise`,
-  `plasma`, `hue`, `glow`, `scanlines`, `vignette`) with intensity and speed.
+  `plasma`, `hue`, `glow`, `scanlines`, `vignette`) with intensity, animation
+  speed, size, and frame interval.
   `overlayAnimate` keeps them moving while the menu stays open (off by
   default); otherwise they animate only during the open/close. The Terminal
   Green and Amber CRT themes ship with scanlines.

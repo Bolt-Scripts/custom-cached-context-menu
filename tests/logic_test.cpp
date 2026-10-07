@@ -4144,6 +4144,18 @@ int main() {
         CHECK_EQ(overlayRow->children[0].control.key,
                  std::wstring(L"@effect:overlay:none"));
         CHECK((overlayRow->children[0].flags & cmo::kModelChecked) != 0);
+
+        // Every bool key must show its real value, not just the old three.
+        inputs.working.overlayAnimate = true;
+        const std::vector<cmo::MenuItem> boolRoot =
+            cmo::BuildSettingsTree(inputs);
+        const cmo::MenuItem* boolEffects = findChild(boolRoot, L"Effects");
+        CHECK(boolEffects != nullptr);
+        const cmo::MenuItem* animateRow = findChild(
+            boolEffects->children, L"Animate overlays while open");
+        CHECK(animateRow != nullptr);
+        CHECK_EQ(animateRow->controlValue, 1);
+        CHECK_EQ(animateRow->controlText, std::wstring(L"on"));
     }
 
     {

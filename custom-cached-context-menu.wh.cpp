@@ -5615,6 +5615,16 @@ uint32_t AppearanceColorValue(const Appearance& appearance,
     return 0;
 }
 
+bool AppearanceBoolValue(const Appearance& appearance,
+                        const std::wstring& key) {
+    const std::wstring k = ToLowerCopy(key);
+    if (k == L"blur") return appearance.blur;
+    if (k == L"shadow") return appearance.shadow;
+    if (k == L"animatesubmenus") return appearance.animateSubmenus;
+    if (k == L"overlayanimate") return appearance.overlayAnimate;
+    return false;
+}
+
 int AppearanceIntValue(const Appearance& appearance, const std::wstring& key) {
     const std::wstring k = ToLowerCopy(key);
     if (k == L"blurstrength") return appearance.blurStrength;
@@ -6008,14 +6018,7 @@ MenuItem BuildSettingsRow(const Appearance& working,
         MakeSettingsItem(ItemKind::Command, SettingsDisplayLabel(entry.key));
     row.control = spec;
     if (spec.kind == ControlKind::Toggle) {
-        bool value = false;
-        if (key == L"blur") {
-            value = working.blur;
-        } else if (key == L"shadow") {
-            value = working.shadow;
-        } else if (key == L"animatesubmenus") {
-            value = working.animateSubmenus;
-        }
+        const bool value = AppearanceBoolValue(working, entry.key);
         row.controlValue = value ? 1 : 0;
         row.controlText = value ? L"on" : L"off";
     } else if (spec.kind == ControlKind::IntSlider) {

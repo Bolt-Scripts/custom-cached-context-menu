@@ -43,8 +43,6 @@ and discovers extension items in the background, so repeated opens are instant.
   `menu.ini`.
 - **No code needed** — `menu.ini` supports rules (`hide`/`keep`/`move`),
   custom commands, custom submenus, per-item overrides, and an icon library.
-- **Native behavior** — hover everywhere, keyboard navigation, click-through
-  shadows, and Shift+right-click for the untouched native menu.
 
 ## Settings
 
@@ -54,7 +52,7 @@ and discovers extension items in the background, so repeated opens are instant.
 | Menu mode | 0 (custom) | 0 = self-rendered menu (automatic fallback to the classic menu after repeated failures); 1 = classic owner-drawn menu. |
 | Theme | Custom (menu.ini) | Loads the appearance from `<mod storage>\themes\<name>.ini` (created from the bundled preset on first use). `menu.ini` is never modified by theme selection. |
 | Show classic menu item | on | Adds a "Show classic menu" entry at the bottom of the menu. |
-| Warm-up extensions | common list | File types pre-built at Explorer startup. |
+| Warm-up extensions | common list | Comma-separated file types pre-built at Explorer startup. |
 | Warm-up delay | 5 s | Delay before background warm-up starts. |
 | Clear cache | off | Turn on to delete cached models; they rebuild on next use. |
 | Debug logging | off | Logs timings and diagnostics. |

@@ -15212,55 +15212,17 @@ bool InstallVtableHook() {
     return installed;
 }
 
-// Version-independent fallback: locate CDefaultContextMenu::QueryContextMenu
-// through the symbol server if the vtable discovery failed.
-bool InstallSymbolHook() {
-    HMODULE shell32 = GetModuleHandleW(L"shell32.dll");
-    if (!shell32) {
-        return false;
-    }
-
-    WH_FIND_SYMBOL_OPTIONS options = {};
-    options.optionsSize = sizeof(options);
-    options.symbolServer = nullptr;
-    options.noUndecoratedSymbols = FALSE;
-
-    WH_FIND_SYMBOL symbol = {};
-    HANDLE search = Wh_FindFirstSymbol(shell32, &options, &symbol);
-    if (!search) {
-        Wh_Log(L"Symbol enumeration failed");
-        return false;
-    }
-
-    void* target = nullptr;
-    do {
-        if (symbol.symbol &&
-            wcsstr(symbol.symbol, L"CDefaultContextMenu::QueryContextMenu")) {
-            target = symbol.address;
-            break;
-        }
-    } while (Wh_FindNextSymbol(search, &symbol));
-    Wh_FindCloseSymbol(search);
-
-    if (!target) {
-        Wh_Log(L"CDefaultContextMenu::QueryContextMenu not found in symbols");
-        return false;
-    }
-
-    Wh_Log(L"Found CDefaultContextMenu::QueryContextMenu at %p", target);
-    return Wh_SetFunctionHook(target, (void*)QueryContextMenu_Hook,
-                              (void**)&QueryContextMenu_Original);
-}
-
 bool InstallPopulationHook() {
     if (QueryContextMenu_Original) {
         return true;
     }
+    // The hook is set on the class function itself, so one successful vtable
+    // lookup covers every menu instance in the process.
     if (InstallVtableHook()) {
         return true;
     }
-    Wh_Log(L"Vtable discovery failed; trying the symbol fallback");
-    return InstallSymbolHook();
+    Wh_Log(L"Failed to install the context menu population hook");
+    return false;
 }
 
 // --- Selection context ------------------------------------------------------
@@ -18906,9 +18868,9 @@ void InstallWin11Suppression() {
         auto queryService =
             (IUnknown_QueryService_t)GetProcAddress(shcore, "IUnknown_QueryService");
         if (queryService) {
-            if (!WindhawkUtils::Wh_SetFunctionHookT(queryService,
-                                                    IUnknown_QueryService_Hook,
-                                                    &IUnknown_QueryService_Original)) {
+            if (!WindhawkUtils::SetFunctionHook(queryService,
+                                                IUnknown_QueryService_Hook,
+                                                &IUnknown_QueryService_Original)) {
                 Wh_Log(L"Failed to hook IUnknown_QueryService");
             }
         }
@@ -18918,7 +18880,7 @@ void InstallWin11Suppression() {
 
     HMODULE explorerFrame = LoadLibraryW(L"explorerframe.dll");
     if (explorerFrame) {
-        WindhawkUtils::SYMBOL_HOOK symbolHooks[] = {
+        WindhawkUtils::SYMBOL_HOOK explorerFrameDllHooks[] = {
             {
                 {LR"(private: bool __cdecl CNscTree::ShouldShowMiniMenu(struct _TREEITEM *))"},
                 (void**)&ShouldShowMiniMenu_Original,
@@ -18926,8 +18888,8 @@ void InstallWin11Suppression() {
                 false,
             },
         };
-        if (!WindhawkUtils::HookSymbols(explorerFrame, symbolHooks,
-                                        ARRAYSIZE(symbolHooks))) {
+        if (!WindhawkUtils::HookSymbols(explorerFrame, explorerFrameDllHooks,
+                                        ARRAYSIZE(explorerFrameDllHooks))) {
             Wh_Log(L"Failed to hook CNscTree::ShouldShowMiniMenu");
         }
     } else {

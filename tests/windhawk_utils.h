@@ -21,6 +21,12 @@ inline bool HookSymbols(HMODULE module, SYMBOL_HOOK* hooks, size_t hookCount) {
 }
 
 template <typename T>
+inline bool SetFunctionHook(T targetFunction, T hookFunction, T* originalFunction) {
+    return Wh_SetFunctionHook((void*)targetFunction, (void*)hookFunction,
+                              (void**)originalFunction);
+}
+
+template <typename T>
 inline bool Wh_SetFunctionHookT(T targetFunction, T hookFunction, T* originalFunction) {
     return Wh_SetFunctionHook((void*)targetFunction, (void*)hookFunction,
                               (void**)originalFunction);

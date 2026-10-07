@@ -8072,6 +8072,96 @@ bool BuildShadowBitmap(int width, int height, const CornerRadii& radii,
     return true;
 }
 
+// Reuses the software shadow bitmap when the same panel is drawn again: every
+// hover repaint redraws the panel, and the software blur is the expensive
+// part. Only the serialized renderer touches this cache.
+class ShadowBitmapCache {
+public:
+    bool Get(uint64_t key, std::vector<uint32_t>& pixels, int& w, int& h) {
+        for (Entry& entry : entries_) {
+            if (entry.valid && entry.key == key) {
+                pixels = entry.pixels;
+                w = entry.w;
+                h = entry.h;
+                entry.lastUse = ++clock_;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    void Put(uint64_t key, const std::vector<uint32_t>& pixels, int w, int h) {
+        if (pixels.size() > kMaxCachedPixels) {
+            return;  // too large to keep resident
+        }
+        Entry* victim = &entries_[0];
+        for (Entry& entry : entries_) {
+            if (!entry.valid) {
+                victim = &entry;
+                break;
+            }
+            if (entry.lastUse < victim->lastUse) {
+                victim = &entry;
+            }
+        }
+        victim->valid = true;
+        victim->key = key;
+        victim->pixels = pixels;
+        victim->w = w;
+        victim->h = h;
+        victim->lastUse = ++clock_;
+    }
+
+private:
+    struct Entry {
+        bool valid = false;
+        uint64_t key = 0;
+        int w = 0;
+        int h = 0;
+        std::vector<uint32_t> pixels;
+        uint64_t lastUse = 0;
+    };
+
+    static constexpr size_t kEntries = 2;
+    static constexpr size_t kMaxCachedPixels = 4 * 1024 * 1024;  // ~16 MB
+
+    Entry entries_[kEntries];
+    uint64_t clock_ = 0;
+};
+
+ShadowBitmapCache g_shadowCache;
+
+bool GetCachedShadowBitmap(int width, int height, const CornerRadii& radii,
+                           int spread, int blur, int opacity, uint32_t color,
+                           int downscale, std::vector<uint32_t>& pixels,
+                           int& outW, int& outH) {
+    uint64_t key = HashCombine(
+        1469598103934665603ULL,
+        (static_cast<uint64_t>(width) << 32) | static_cast<uint64_t>(height));
+    key = HashCombine(key,
+                      (static_cast<uint64_t>(spread) << 32) |
+                          static_cast<uint64_t>(blur));
+    key = HashCombine(key,
+                      (static_cast<uint64_t>(opacity) << 32) |
+                          static_cast<uint64_t>(color));
+    key = HashCombine(key, static_cast<uint64_t>(downscale));
+    key = HashCombine(key,
+                      (static_cast<uint64_t>(radii.topLeft) << 48) |
+                          (static_cast<uint64_t>(radii.topRight) << 32) |
+                          (static_cast<uint64_t>(radii.bottomRight) << 16) |
+                          static_cast<uint64_t>(radii.bottomLeft));
+
+    if (g_shadowCache.Get(key, pixels, outW, outH)) {
+        return true;
+    }
+    if (!BuildShadowBitmap(width, height, radii, spread, blur, opacity, color,
+                           downscale, pixels, outW, outH)) {
+        return false;
+    }
+    g_shadowCache.Put(key, pixels, outW, outH);
+    return true;
+}
+
 constexpr int kBackdropDownscaleFactor = 4;
 
 bool CaptureBackdrop(const RECT& screenRect, int factor, int passes,
@@ -9444,9 +9534,9 @@ void DrawPanel(ID2D1DeviceContext* dc, const LayoutPanel& panel,
         std::vector<uint32_t> shadowPixels;
         int shadowW = 0;
         int shadowH = 0;
-        if (BuildShadowBitmap(panel.size.cx, panel.size.cy, radii, spread, blur,
-                              shadowOpacity, shadowColor, 4, shadowPixels,
-                              shadowW, shadowH)) {
+        if (GetCachedShadowBitmap(panel.size.cx, panel.size.cy, radii, spread,
+                                  blur, shadowOpacity, shadowColor, 4,
+                                  shadowPixels, shadowW, shadowH)) {
             const float maskW = static_cast<float>(
                 panel.size.cx + 2 * spread + 2 * blur);
             const float maskH = static_cast<float>(
@@ -11258,7 +11348,11 @@ void RunSessionAnimation(MenuSession& session, const AnimationSpec& spec,
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }
-        Sleep(static_cast<DWORD>(std::clamp(spec.frameMs, 1, 100)));
+        // Wait out the frame while staying responsive to the low-level mouse
+        // hook, which the system dispatches when this thread pumps messages.
+        MsgWaitForMultipleObjectsEx(
+            0, nullptr, static_cast<DWORD>(std::clamp(spec.frameMs, 1, 100)),
+            QS_ALLINPUT, MWMO_INPUTAVAILABLE);
     }
 }
 
@@ -11332,7 +11426,11 @@ void RunWindowAnimation(MenuSession& session, size_t index,
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }
-        Sleep(static_cast<DWORD>(std::clamp(spec.frameMs, 1, 100)));
+        // Wait out the frame while staying responsive to the low-level mouse
+        // hook, which the system dispatches when this thread pumps messages.
+        MsgWaitForMultipleObjectsEx(
+            0, nullptr, static_cast<DWORD>(std::clamp(spec.frameMs, 1, 100)),
+            QS_ALLINPUT, MWMO_INPUTAVAILABLE);
     }
     if (index < session.windowAnimating.size() &&
         index < session.windows.size() && session.windows[index] == window) {
@@ -12141,6 +12239,9 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
     // at full opacity.
     RenderSessionFrame(session, ComputeAnimationFrame(opening, 0.0f, true));
     root->Show();
+    RunSessionAnimation(session, opening, true);
+    // Install the mouse hook after the open animation: while it is installed,
+    // a sleeping animation loop delays mouse input system-wide.
     if (!g_menuMouseHook.load()) {
         HHOOK hook = SetWindowsHookExW(WH_MOUSE_LL, MenuMouseHookProc,
                                        ModModuleHandle(), 0);
@@ -12150,7 +12251,6 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
             Wh_Log(L"Failed to install the menu mouse hook");
         }
     }
-    RunSessionAnimation(session, opening, true);
     if (appearance.overlay != 0 && appearance.overlayAnimate) {
         // Opt-in: keep redrawing while the menu is open so the overlay moves.
         SetTimer(root->Handle(), kMenuOverlayTimerId,

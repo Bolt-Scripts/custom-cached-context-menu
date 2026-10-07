@@ -10100,6 +10100,9 @@ struct MenuSession {
     std::shared_ptr<const RulesConfig> config;
     const MenuModel* model = nullptr;
     std::vector<MenuWindow*> windows;
+    // Windows currently running their own open animation; repaints must not
+    // interleave identity frames with the animation's frames.
+    std::vector<uint8_t> windowAnimating;
     std::vector<MenuInputState> states;
     std::vector<BackdropBitmap> backdrops;
     // Per level: 0 = draw the full shadow, 1 = clip the left side, 2 = clip the
@@ -11316,6 +11319,9 @@ void RunWindowAnimation(MenuSession& session, size_t index,
     const int shadowClipSide =
         index < session.shadowClipSides.size() ? session.shadowClipSides[index]
                                                : 0;
+    if (index < session.windowAnimating.size()) {
+        session.windowAnimating[index] = 1;
+    }
     const ULONGLONG start = GetTickCount64();
     for (;;) {
         if (session.done || index >= session.windows.size() ||
@@ -11356,12 +11362,20 @@ void RunWindowAnimation(MenuSession& session, size_t index,
         }
         Sleep(static_cast<DWORD>(std::clamp(spec.frameMs, 1, 100)));
     }
+    if (index < session.windowAnimating.size() &&
+        index < session.windows.size() && session.windows[index] == window) {
+        session.windowAnimating[index] = 0;
+    }
 }
 
 void RepaintMenuWindow(MenuSession* session, int index) {
     if (!session || index < 0 ||
         index >= static_cast<int>(session->windows.size())) {
         return;
+    }
+    if (index < static_cast<int>(session->windowAnimating.size()) &&
+        session->windowAnimating[index]) {
+        return;  // the window animation owns this window's frames
     }
     MenuWindow* window = session->windows[index];
     if (!window || !window->Panel()) {
@@ -11393,6 +11407,9 @@ void CloseSubmenusBelow(MenuSession* session, int index) {
             session->states.back().caretVisible = false;
         }
         session->windows.pop_back();
+        if (!session->windowAnimating.empty()) {
+            session->windowAnimating.pop_back();
+        }
         session->states.pop_back();
         if (!session->shadowClipSides.empty()) {
             session->shadowClipSides.pop_back();
@@ -11462,6 +11479,7 @@ void OpenSubmenu(MenuSession* session, int index, int itemIndex) {
                         BackdropBlurPasses(session->appearance), backdrop);
 
     session->windows.push_back(child);
+    session->windowAnimating.push_back(0);
     session->states.push_back(MenuInputState{});
     // A submenu does not cast its shadow onto the parent menu: clip the
     // parent-facing side so the items underneath stay readable.
@@ -12103,6 +12121,7 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
     session.maxHeight = workArea.bottom - workArea.top;
     session.margin = margin;
     session.windows.push_back(root);
+    session.windowAnimating.push_back(0);
     session.states.push_back(MenuInputState{});
     session.shadowClipSides.push_back(0);
 

@@ -6,7 +6,7 @@ real shell extension items asynchronously in the background. It can render the
 menu itself (DirectComposition/Direct2D, fully configurable via `menu.ini`) or
 keep the classic owner-drawn menu as a fallback mode.
 
-![Demo:](assets/menu.gif)
+<img src="assets/menu.gif" width="407" alt="Demo">
 
 ## Why
 
@@ -101,7 +101,7 @@ hints.
 
 ## Themes
 
-![The bundled themes](assets/theme-collage.png)
+<img src="assets/theme-collage.png" width="653" alt="The bundled themes">
 
 Pick a theme in the mod settings. The first time a theme is selected its file is
 created from the bundled preset at

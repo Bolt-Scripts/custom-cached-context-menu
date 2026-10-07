@@ -8354,6 +8354,9 @@ public:
         glyphs_.SetMaxEntries(128);
     }
 
+    // The maps hold raw D2D/DWrite pointers; only Clear() releases them.
+    ~ContentCaches() { Clear(); }
+
     void SetDevice(ID2D1DeviceContext* dc, IDWriteFactory* dwrite) {
         dc_ = dc;
         dwrite_ = dwrite;
@@ -12651,6 +12654,9 @@ void OpenSettingsMenu(HWND owner, POINT pt, bool activate = false) {
     if (g_unloading.load() || g_settings->menuMode != 0 || g_menuSession) {
         return;
     }
+    // The hotkey path activates the menu; remember where the user was so
+    // focus can return there when the menu closes.
+    HWND previousForeground = activate ? GetForegroundWindow() : nullptr;
     if (!g_renderDevice.IsReady() && !g_renderDevice.Initialize()) {
         return;
     }
@@ -12708,6 +12714,9 @@ void OpenSettingsMenu(HWND owner, POINT pt, bool activate = false) {
         ShowCustomMenu(model, key, owner, pt, &settings, activate);
     if (result.busy && g_settings->debugLogging) {
         Wh_Log(L"Settings menu not shown; another menu is open");
+    }
+    if (result.handled && previousForeground && IsWindow(previousForeground)) {
+        SetForegroundWindow(previousForeground);
     }
 }
 
@@ -19442,6 +19451,10 @@ void Wh_ModUninit() {
     if (hook) {
         UnhookWindowsHookEx(hook);
     }
+    // Captures on unreachable threads stay leaked (their COM references are
+    // intentionally not released from the wrong thread); the queue's own
+    // memory can go.
+    cmo::g_pending.reset();
     cmo::ReleaseOverlayResources();
     // Best effort: the per-thread cleanup may have raced an open session and
     // failed to unregister the classes; all windows are gone by now.

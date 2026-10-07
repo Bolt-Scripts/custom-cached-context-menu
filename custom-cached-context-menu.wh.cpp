@@ -1156,10 +1156,27 @@ bool CreateNewItemInFolder(const NewTemplate& tmpl, const std::wstring& director
 
     if (tmpl.kind == NewTemplate::Kind::Shortcut ||
         tmpl.kind == NewTemplate::Kind::Command) {
+        // Explorer creates the new item first and passes its full path to the
+        // ShellNew command, quoted so paths with spaces survive.
+        std::wstring itemPath;
+        if (tmpl.kind == NewTemplate::Kind::Shortcut) {
+            itemPath = MakeUniquePath(directory, L"New shortcut", L".lnk");
+            if (itemPath.empty()) {
+                return false;
+            }
+            HANDLE file = CreateFileW(itemPath.c_str(), GENERIC_WRITE, 0, nullptr,
+                                      CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (file == INVALID_HANDLE_VALUE) {
+                return false;
+            }
+            CloseHandle(file);
+        }
+
         std::wstring command = ExpandEnv(tmpl.command);
         const size_t placeholder = command.find(L"%1");
         if (placeholder != std::wstring::npos) {
-            command.replace(placeholder, 2, directory);
+            const std::wstring argument = itemPath.empty() ? directory : itemPath;
+            command.replace(placeholder, 2, L"\"" + argument + L"\"");
         }
         STARTUPINFOW si = {};
         si.cb = sizeof(si);
@@ -1171,6 +1188,9 @@ bool CreateNewItemInFolder(const NewTemplate& tmpl, const std::wstring& director
         if (ok) {
             CloseHandle(pi.hThread);
             CloseHandle(pi.hProcess);
+            if (!itemPath.empty()) {
+                createdPath = itemPath;
+            }
         }
         return ok != FALSE;
     }
@@ -15356,7 +15376,7 @@ void RebuildSendToChildren() {
     if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_SendTo, 0, nullptr, &sendToPath)) &&
         sendToPath) {
         const std::wstring directory(sendToPath);
-        const std::wstring pattern = directory + L"\\*.lnk";
+        const std::wstring pattern = directory + L"\\*";
         WIN32_FIND_DATAW findData = {};
         HANDLE find = FindFirstFileW(pattern.c_str(), &findData);
         if (find != INVALID_HANDLE_VALUE) {
@@ -16000,6 +16020,9 @@ bool CreateNewItemFromTemplate(const MenuItem& item, const InvocationContext& ct
     return true;
 }
 
+std::wstring MakeShortcutPath(const std::wstring& directory,
+                              const std::wstring& sourceName);
+
 bool CreateShortcutForPaths(const std::vector<std::wstring>& paths) {
     if (paths.empty()) {
         return false;
@@ -16020,11 +16043,11 @@ bool CreateShortcutForPaths(const std::vector<std::wstring>& paths) {
             name.resize(dot);
         }
 
-        std::wstring target;
-        if (!directory.empty()) {
-            target = directory + L"\\";
-        }
-        target += name + L" - Shortcut.lnk";
+        // Explorer never overwrites an existing shortcut; MakeShortcutPath
+        // adds the usual " (2)" suffix when the name is taken.
+        std::wstring target =
+            directory.empty() ? name + L" - Shortcut.lnk"
+                              : MakeShortcutPath(directory, name);
 
         IShellLinkW* link = nullptr;
         if (FAILED(CoCreateInstance(CLSID_ShellLink, nullptr, CLSCTX_INPROC_SERVER,

@@ -1,5 +1,20 @@
+# Logs and crash dumps
 *.log
 *.dmp
+
+# Test build output
 tests/logic_test.exe
 cmo-test-storage/
+
+# Agent session artifacts (not part of the published mod)
+.superpowers/
+docs/superpowers/
 .worktrees/
+
+# Raw screenshot sources; the published collage is assets/theme-collage.png
+assets/theme screenshots/
+
+# OS junk
+.DS_Store
+Thumbs.db
+desktop.ini

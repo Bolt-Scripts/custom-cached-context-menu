@@ -6,7 +6,7 @@ real shell extension items asynchronously in the background. It can render the
 menu itself (DirectComposition/Direct2D, fully configurable via `menu.ini`) or
 keep the classic owner-drawn menu as a fallback mode.
 
-![Animated demo: opening the menu, browsing submenus, and the settings browser](assets/menu.gif)
+![Demo:](assets/menu.gif)
 
 ## Why
 
@@ -399,10 +399,6 @@ and which items the More options submenu moved or kept (with their verbs).
 
 ## Development
 
-- Design: `docs/superpowers/specs/2026-10-04-context-menu-overhaul-design.md`
-- Implementation plan: `docs/superpowers/plans/2026-10-04-context-menu-overhaul.md`
-- Custom renderer design: `docs/superpowers/specs/2026-10-04-custom-menu-renderer-design.md`
-- Custom renderer plan: `docs/superpowers/plans/2026-10-04-custom-menu-renderer.md`
 - Configuration guide: `docs/CONFIG.md`
 - Tests: `bash tests/run.sh` (mingw-w64 cross-compile + Wine), covering
   signatures, models, cache serialization, LRU, invalidation stamps, warm-up

@@ -43,6 +43,8 @@ and discovers extension items in the background, so repeated opens are instant.
   `overlayAnimate` keeps them moving while the menu stays open (off by
   default); otherwise they animate only during the open/close. The Terminal
   Green and Amber CRT themes ship with scanlines.
+- **Adaptive shadow** — the drop shadow fades on dark backgrounds instead of
+  reading as a black halo; colored theme glows keep their exact hue.
 - **Settings menu** — in the advanced ("More options") submenu, or via the
   optional global hotkey. Appearance is edited live (sliders with typed values,
   a color picker, a font-face field with installed-font validation, instant
@@ -55,7 +57,7 @@ and discovers extension items in the background, so repeated opens are instant.
 | Setting | Default | Description |
 |---|---|---|
 | Shift bypass | on | Hold Shift while right-clicking for the native menu. |
-| Menu mode | 0 (custom) | 0 = self-rendered menu (automatic fallback to the classic menu after repeated failures); 1 = classic owner-drawn menu. |
+| Menu mode | Custom (recommended) | Custom draws the self-rendered menu and falls back to the classic menu after repeated failures; Classic always uses the owner-drawn menu. |
 | Theme | Custom (menu.ini) | Loads the appearance from `<mod storage>\themes\<name>.ini` (created from the bundled preset on first use). `menu.ini` is never modified by theme selection. |
 | Show classic menu item | on | Adds a "Show classic menu" entry at the bottom of the menu. |
 | Warm-up extensions | common list | Comma-separated file types pre-built at Explorer startup. |

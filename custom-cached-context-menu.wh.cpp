@@ -260,7 +260,6 @@ struct Settings {
 inline Settings g_settings;
 
 // Set in Wh_ModInit; only the UI thread may touch the render device/caches.
-inline DWORD g_uiThreadId = 0;
 
 // Defined in [CMO:Themes]; declared here for the settings and theme store.
 int ThemeIndexFromName(const std::wstring& name);
@@ -7489,6 +7488,9 @@ class MenuWindow {
 public:
     ~MenuWindow() { Destroy(); }
 
+    DWORD OwnerThread() const { return ownerThread_; }
+    void SetOwnerThread(DWORD threadId) { ownerThread_ = threadId; }
+
     bool Create(HWND owner, const LayoutPanel* panel, bool isRoot,
                 int margin = 0) {
         // Pooled windows may carry a previous window/surface; release it so
@@ -7496,6 +7498,7 @@ public:
         Destroy();
 
         owner_ = owner;
+        ownerThread_ = GetCurrentThreadId();
         panel_ = panel;
         isRoot_ = isRoot;
         margin_ = margin > 0 ? margin : 0;
@@ -7696,6 +7699,7 @@ private:
 
     HWND hwnd_ = nullptr;
     HWND owner_ = nullptr;
+    DWORD ownerThread_ = 0;
     const LayoutPanel* panel_ = nullptr;
     bool isRoot_ = false;
     int margin_ = 0;
@@ -7730,16 +7734,23 @@ public:
     static constexpr size_t kMaxWindows = 8;
 
     MenuWindow* Acquire() {
-        if (!free_.empty()) {
-            MenuWindow* window = free_.back();
-            free_.pop_back();
-            return window;
+        // Reuse only windows created by this thread: DestroyWindow cannot
+        // destroy another thread's window, and a cross-thread window would
+        // outlive the DLL with its class procedure.
+        const DWORD self = GetCurrentThreadId();
+        for (size_t i = free_.size(); i-- > 0;) {
+            if (free_[i]->OwnerThread() == self) {
+                MenuWindow* window = free_[i];
+                free_.erase(free_.begin() + static_cast<std::ptrdiff_t>(i));
+                return window;
+            }
         }
         if (all_.size() >= kMaxWindows) {
             return nullptr;
         }
         auto window = std::make_unique<MenuWindow>();
         MenuWindow* raw = window.get();
+        raw->SetOwnerThread(GetCurrentThreadId());
         all_.push_back(std::move(window));
         return raw;
     }
@@ -7767,10 +7778,15 @@ public:
     // Destroys idle windows only. Windows checked out by a live session stay
     // valid; that session's teardown destroys them (see Release).
     void DestroyFreeWindows() {
-        for (MenuWindow* window : free_) {
-            window->Destroy();
+        const DWORD self = GetCurrentThreadId();
+        for (size_t i = 0; i < free_.size();) {
+            if (free_[i]->OwnerThread() == self) {
+                free_[i]->Destroy();
+                free_.erase(free_.begin() + static_cast<std::ptrdiff_t>(i));
+            } else {
+                ++i;
+            }
         }
-        free_.clear();
     }
 
     size_t Size() const { return all_.size(); }
@@ -12212,6 +12228,12 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
 
     MSG msg = {};
     while (!session.done) {
+        if (g_unloading.load()) {
+            // The control window asked this thread to tear down; leave the
+            // modal loop so the session teardown can run.
+            session.done = true;
+            break;
+        }
         const BOOL got = GetMessageW(&msg, nullptr, 0, 0);
         if (got <= 0) {
             if (got == 0) {
@@ -12683,6 +12705,14 @@ void PrebuildLayoutsForWarmup(const std::vector<MenuModel>& models, uint32_t dpi
     if (g_unloading.load()) {
         return;
     }
+    // The render device, layout cache and content caches are shared with the
+    // menus; serialize with the same gate so no two threads touch them.
+    if (g_customMenuBusy.exchange(true)) {
+        return;
+    }
+    struct BusyGuard {
+        ~BusyGuard() { g_customMenuBusy.store(false); }
+    } busyGuard;
     if (!g_renderDevice.IsReady() && !g_renderDevice.Initialize()) {
         return;
     }
@@ -15161,12 +15191,10 @@ void DiscoverIntoCache(PendingCapture& capture, const ContextSignature& signatur
         DumpModelItems(model.items, 0);
     }
     // Warm the render-ready layout for the custom menu while we are already
-    // paying discovery cost, so the next open is a cache hit. Only the UI
-    // thread may touch the render device and content caches.
-    if (GetCurrentThreadId() == g_uiThreadId) {
-        PrebuildLayoutsForWarmup({model}, DpiForWindow(GetDesktopWindow()),
-                                 IsDarkThemeActive());
-    }
+    // paying discovery cost, so the next open is a cache hit. The prebuild
+    // serializes itself with the menus through the shared gate.
+    PrebuildLayoutsForWarmup({model}, DpiForWindow(GetDesktopWindow()),
+                             IsDarkThemeActive());
     g_cache.Put(std::move(model));
 }
 
@@ -18803,6 +18831,9 @@ BOOL WINAPI TrackPopupMenuEx_Hook(HMENU hMenu, UINT uFlags, int x, int y, HWND h
 
     if (path == MenuPath::NativeBypass && hasPending) {
         if (g_settings.debugLogging) Wh_Log(L"Shift bypass: showing the native menu");
+        // The hook frame stays on this thread's stack while the native menu
+        // runs, so unload must wait for it.
+        UiBusyScope uiBusy;
         ShowNativeReplay(pending, hWnd, POINT{x, y});
         ReleaseCapture(pending);
         return 0;
@@ -18814,7 +18845,10 @@ BOOL WINAPI TrackPopupMenuEx_Hook(HMENU hMenu, UINT uFlags, int x, int y, HWND h
                    pending.idCmdLast, pending.flags);
         ReleaseCapture(pending);
     }
-    return TrackPopupMenuEx_Original(hMenu, uFlags, x, y, hWnd, lptpm);
+    {
+        UiBusyScope uiBusy;
+        return TrackPopupMenuEx_Original(hMenu, uFlags, x, y, hWnd, lptpm);
+    }
 }
 
 BOOL WINAPI TrackPopupMenu_Hook(HMENU hMenu, UINT uFlags, int x, int y, int nReserved,
@@ -18838,6 +18872,9 @@ BOOL WINAPI TrackPopupMenu_Hook(HMENU hMenu, UINT uFlags, int x, int y, int nRes
 
     if (path == MenuPath::NativeBypass && hasPending) {
         if (g_settings.debugLogging) Wh_Log(L"Shift bypass: showing the native menu");
+        // The hook frame stays on this thread's stack while the native menu
+        // runs, so unload must wait for it.
+        UiBusyScope uiBusy;
         ShowNativeReplay(pending, hWnd, POINT{x, y});
         ReleaseCapture(pending);
         return 0;
@@ -18849,7 +18886,10 @@ BOOL WINAPI TrackPopupMenu_Hook(HMENU hMenu, UINT uFlags, int x, int y, int nRes
                    pending.idCmdLast, pending.flags);
         ReleaseCapture(pending);
     }
-    return TrackPopupMenu_Original(hMenu, uFlags, x, y, nReserved, hWnd, prcRect);
+    {
+        UiBusyScope uiBusy;
+        return TrackPopupMenu_Original(hMenu, uFlags, x, y, nReserved, hWnd, prcRect);
+    }
 }
 
 // --- Windows 11 modern menu suppression ------------------------------------
@@ -18970,7 +19010,6 @@ bool g_populationHookDeferred = false;
 
 BOOL Wh_ModInit() {
     Wh_Log(L"Custom Cached Context Menu init");
-    cmo::g_uiThreadId = GetCurrentThreadId();
 
     if (!Wh_SetFunctionHook((void*)TrackPopupMenuEx, (void*)cmo::TrackPopupMenuEx_Hook,
                             (void**)&cmo::TrackPopupMenuEx_Original)) {

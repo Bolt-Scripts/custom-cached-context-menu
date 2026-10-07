@@ -4181,14 +4181,17 @@ int main() {
             CHECK_EQ(color & 0xFF000000u, 0xFF000000u);
             CHECK(((color >> 16) & 0xFF) > 0);  // tinted toward the backdrop
 
-            // Colored and bright shadows are intentional glows: never adapted.
+            // Colored and bright shadows keep their hue but still fade on
+            // dark backdrops, so the setting always has an effect.
             cmo::AdaptShadowToBackdrop(0xFF101010u, 150, 0xFF00FF78u, opacity,
                                        color);
-            CHECK_EQ(opacity, 150);
+            CHECK(opacity < 150);
+            CHECK(opacity > 90);
             CHECK_EQ(color, 0xFF00FF78u);
             cmo::AdaptShadowToBackdrop(0xFF101010u, 120, 0xFFFFFFFFu, opacity,
                                        color);
-            CHECK_EQ(opacity, 120);
+            CHECK(opacity < 120);
+            CHECK(opacity > 70);
             CHECK_EQ(color, 0xFFFFFFFFu);
 
             cmo::Appearance shadowAppearance;

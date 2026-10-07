@@ -7991,9 +7991,9 @@ void AdaptShadowToBackdrop(uint32_t averageColor, int configuredOpacity,
         shadowMax <= 0.0f ? 0.0f : (shadowMax - shadowMin) / shadowMax;
     const float shadowLuminance =
         0.2126f * sr + 0.7152f * sg + 0.0722f * sb;
-    if (shadowSaturation > 0.25f || shadowLuminance > 0.5f) {
-        return;  // colored or bright shadow: leave it alone
-    }
+    // Dark neutral shadows are the ones that read as a black halo and get the
+    // full treatment; colored or bright shadows (theme glows) keep their hue.
+    const bool neutral = shadowSaturation <= 0.25f && shadowLuminance <= 0.5f;
 
     const float r = ((averageColor >> 16) & 0xFF) / 255.0f;
     const float g = ((averageColor >> 8) & 0xFF) / 255.0f;
@@ -8004,8 +8004,14 @@ void AdaptShadowToBackdrop(uint32_t averageColor, int configuredOpacity,
     if (darkness <= 0.0f) {
         return;
     }
+    // Every shadow fades on dark backdrops so the setting always has a
+    // visible effect; the fade is gentler for colored glows.
+    const float fade = neutral ? 0.70f : 0.35f;
     outOpacity = static_cast<int>(std::lround(
-        static_cast<float>(configuredOpacity) * (1.0f - 0.70f * darkness)));
+        static_cast<float>(configuredOpacity) * (1.0f - fade * darkness)));
+    if (!neutral) {
+        return;
+    }
     const float mix = 0.6f * darkness;
     auto blend = [&](int channel, float target) {
         return static_cast<uint32_t>(std::lround(
@@ -8793,8 +8799,10 @@ void DrawSettingsField(ID2D1DeviceContext* dc, const LayoutItem& item,
                                                 state.editBuffer.size()));
         const float fullWidth = SettingsTextWidth(text, metrics);
         const float prefixWidth = SettingsTextWidth(prefix, metrics);
-        const float caretX = static_cast<float>(item.fieldRect.right) - 6.0f -
-                             fullWidth + prefixWidth;
+        // The field text is right-aligned to the field's right edge, so the
+        // caret needs no extra inset; six pixels here was about one digit.
+        const float caretX =
+            static_cast<float>(item.fieldRect.right) - fullWidth + prefixWidth;
         if (SUCCEEDED(dc->CreateSolidColorBrush(ColorFromArgb(metrics.textColor),
                                                 &brush)) &&
             brush) {
@@ -11919,8 +11927,12 @@ LRESULT CustomMenuWindowProc(MenuWindow* window, HWND hwnd, UINT msg,
         }
         case WM_TIMER: {
             if (wParam == kMenuOverlayTimerId) {
-                for (size_t i = 0; i < session->windows.size(); ++i) {
-                    RepaintMenuWindow(session, static_cast<int>(i));
+                // Never repaint mid-teardown: a timer frame interleaved with
+                // the close animation would stall it on a frozen frame.
+                if (!session->done) {
+                    for (size_t i = 0; i < session->windows.size(); ++i) {
+                        RepaintMenuWindow(session, static_cast<int>(i));
+                    }
                 }
                 return 0;
             }
@@ -12186,6 +12198,7 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
         KillTimer(root->Handle(), kMenuSubmenuTimerId);
         session.submenuTimerActive = false;
     }
+    KillTimer(root->Handle(), kMenuOverlayTimerId);
     KillTimer(root->Handle(), kMenuOverlayTimerId);
     const AnimationSpec closing = ResolveAnimationSpec(appearance, false);
     RunSessionAnimation(session, closing, false);

@@ -64,7 +64,7 @@ and discovers extension items in the background, so repeated opens are instant.
 | Warm-up delay | 5 s | Delay before background warm-up starts. |
 | Clear cache | off | Turn on to delete cached models; they rebuild on next use. |
 | Debug logging | off | Logs timings and diagnostics. |
-| Instant menu open | on | Temporarily disables the system menu animation while this mod's menu opens. |
+| Instant menu open | on | Shows native fallback menus without the system open animation. |
 | Submenu open delay | 150 ms | Hover delay before a submenu opens; 0 = instant, -1 = keep the Windows setting. |
 | Move Windows extras | on | Moves the configured Windows extras into the More options submenu. |
 | Move third-party handlers | on | Moves third-party shell extension entries into the More options submenu. |
@@ -141,7 +141,7 @@ MIT
   $description: Hold Shift while right-clicking to show the untouched native menu.
 - instantMenuFade: true
   $name: Instant menu open
-  $description: Temporarily disables system menu animation (fade and slide) while this mod's menu opens, so it appears instantly. Session-only; the previous setting is restored immediately.
+  $description: Shows native fallback menus (classic mode, Shift bypass, fallbacks) without the system open animation, via TPM_NOANIMATION.
 - showMoreOptionsItem: true
   $name: Show classic menu item
   $description: Add a "Show classic menu" entry at the bottom of the replacement menu.
@@ -224,6 +224,14 @@ MIT
 #include <unordered_set>
 #include <utility>
 #include <vector>
+
+// Windhawk's compiler is clang; other compilers (the local test build) ignore
+// the attribute with a warning, so guard it.
+#if defined(__clang__)
+#define CMO_NO_DESTROY [[clang::no_destroy]]
+#else
+#define CMO_NO_DESTROY
+#endif
 
 // ===========================================================================
 // [CMO:Settings] User settings.
@@ -7189,7 +7197,10 @@ private:
     size_t maxEntries_ = 32;
 };
 
-inline LayoutCache g_layoutCache;
+// Resource-owning globals: their destructors must not run at process exit
+// (Explorer restart/sign-out), where the threads and subsystems they assume
+// are gone. They are released explicitly in Wh_ModUninit instead.
+CMO_NO_DESTROY inline LayoutCache g_layoutCache;
 
 // Bounded least-recently-used map; Find promotes, Insert evicts the oldest
 // and releases its value.
@@ -7451,7 +7462,7 @@ private:
     IDCompositionDevice* comp_ = nullptr;
 };
 
-inline RenderDevice g_renderDevice;
+CMO_NO_DESTROY inline RenderDevice g_renderDevice;
 
 // ===========================================================================
 // [CMO:MenuWindow] DirectComposition-backed popup windows.
@@ -7769,7 +7780,7 @@ private:
     std::vector<MenuWindow*> free_;
 };
 
-inline MenuWindowPool g_menuWindowPool;
+CMO_NO_DESTROY inline MenuWindowPool g_menuWindowPool;
 
 // ===========================================================================
 // [CMO:MenuWindow] Input state, content caches, and Direct2D drawing.
@@ -8471,7 +8482,7 @@ private:
     bool iconFontUnavailable_ = false;
 };
 
-inline ContentCaches g_contentCaches;
+CMO_NO_DESTROY inline ContentCaches g_contentCaches;
 
 void DrawCheckmark(ID2D1DeviceContext* dc, const RECT& gutterRect,
                    uint32_t color) {
@@ -11586,15 +11597,17 @@ LRESULT CALLBACK MenuMouseHookProc(int code, WPARAM wParam, LPARAM lParam) {
             // Wake the modal loop first so the session tears down immediately.
             PostThreadMessageW(GetCurrentThreadId(), WM_NULL, 0, 0);
             if (wParam == WM_RBUTTONDOWN) {
-                // Consume the real button-down and replay it to the window
-                // under the cursor. The target then sees exactly one down, and
-                // the real button-up reaches the same window after this
-                // session is gone, so the context-menu gesture completes
-                // reliably. Letting the real down through is racy: when it is
-                // the message the modal loop unwinds on, the target never
-                // records the gesture.
+                // Explorer targets need the replay: the real button-down can
+                // be the message the modal loop unwinds on, and the target
+                // would never record the gesture. Clicks into other processes
+                // must reach them untouched - consuming and re-posting would
+                // lose non-client clicks and clicks into elevated windows.
                 const HWND target = TargetWindowUnderPoint(session, info->pt);
+                DWORD targetProcess = 0;
                 if (target) {
+                    GetWindowThreadProcessId(target, &targetProcess);
+                }
+                if (target && targetProcess == GetCurrentProcessId()) {
                     POINT client = info->pt;
                     ScreenToClient(target, &client);
                     PostMessageW(target, WM_RBUTTONDOWN, MK_RBUTTON,
@@ -11602,8 +11615,9 @@ LRESULT CALLBACK MenuMouseHookProc(int code, WPARAM wParam, LPARAM lParam) {
                     if (g_settings.debugLogging) {
                         Wh_Log(L"Replaying the right-click down for %p", target);
                     }
+                    return 1;
                 }
-                return 1;
+                return CallNextHookEx(nullptr, code, wParam, lParam);
             }
             // Left/middle clicks pass through: the menu closes and the target
             // still receives the click, so the clicked item is selected just
@@ -16682,53 +16696,8 @@ inline TrackPopupMenuEx_t TrackPopupMenuEx_Original = nullptr;
 using TrackPopupMenu_t = decltype(&TrackPopupMenu);
 inline TrackPopupMenu_t TrackPopupMenu_Original = nullptr;
 
-// Temporarily disables menu animation (the master switch) while a menu we
-// display is opening, so it appears instantly. Disabling only the fade is not
-// enough: per the SPI_SETMENUFADE contract, menus then fall back to the slide
-// animation. The previous value is restored on scope exit; the change is
-// session-only (never written to disk, no broadcast).
-std::atomic<bool> g_animationSuppressed{false};
-
-class MenuAnimationSuppressor {
-public:
-    MenuAnimationSuppressor() {
-        if (!g_settings.instantMenuFade) {
-            return;
-        }
-        BOOL enabled = FALSE;
-        if (!SystemParametersInfoW(SPI_GETMENUANIMATION, 0, &enabled, 0) || !enabled) {
-            return;
-        }
-        if (SystemParametersInfoW(
-                SPI_SETMENUANIMATION, 0,
-                reinterpret_cast<PVOID>(static_cast<ULONG_PTR>(FALSE)), 0)) {
-            active_ = true;
-            g_animationSuppressed.store(true);
-        }
-    }
-
-    ~MenuAnimationSuppressor() {
-        if (!active_) {
-            return;
-        }
-        SystemParametersInfoW(
-            SPI_SETMENUANIMATION, 0,
-            reinterpret_cast<PVOID>(static_cast<ULONG_PTR>(TRUE)), 0);
-        g_animationSuppressed.store(false);
-    }
-
-private:
-    bool active_ = false;
-};
-
-// Defensive restore in case a suppressor was active when the mod unloaded.
-void RestoreMenuAnimation() {
-    if (g_animationSuppressed.exchange(false)) {
-        SystemParametersInfoW(
-            SPI_SETMENUANIMATION, 0,
-            reinterpret_cast<PVOID>(static_cast<ULONG_PTR>(TRUE)), 0);
-    }
-}
+// Native menus open instantly via TPM_NOANIMATION on the individual
+// TrackPopupMenuEx call; no global SPI_SETMENUANIMATION change is needed.
 
 // Temporarily lowers the system submenu show delay (MenuShowDelay, default
 // 400 ms) while the replacement menu is open; the previous value is restored
@@ -17463,7 +17432,7 @@ private:
     std::unordered_map<std::wstring, HICON> icons_;
 };
 
-inline IconCache g_iconCache;
+CMO_NO_DESTROY inline IconCache g_iconCache;
 
 HBITMAP GetIconBitmapForMenu(const std::wstring& iconRef,
                              const std::vector<uint8_t>& iconPixels, int sizePx) {
@@ -17503,8 +17472,9 @@ public:
             return std::nullopt;
         }
 
-        const UINT flags = TPM_RETURNCMD | TPM_NONOTIFY | TPM_LEFTALIGN | TPM_TOPALIGN;
-        MenuAnimationSuppressor animationSuppressor;
+        const UINT flags = TPM_RETURNCMD | TPM_NONOTIFY | TPM_LEFTALIGN |
+                           TPM_TOPALIGN |
+                           (g_settings.instantMenuFade ? TPM_NOANIMATION : 0);
         MenuDelaySuppressor delaySuppressor;
         int command = TrackPopupMenuEx_Original(menu, flags, pt.x, pt.y, owner, nullptr);
         DestroyMenu(menu);
@@ -17712,8 +17682,9 @@ std::optional<uint32_t> ShowNativeReplay(PendingCapture& capture, HWND owner, PO
 
     OwnerSubclass subclass(owner, &capture, /*forwardMenuMessages=*/true);
 
-    const UINT flags = TPM_RETURNCMD | TPM_NONOTIFY | TPM_LEFTALIGN | TPM_TOPALIGN;
-    MenuAnimationSuppressor animationSuppressor;
+    const UINT flags = TPM_RETURNCMD | TPM_NONOTIFY | TPM_LEFTALIGN |
+                       TPM_TOPALIGN |
+                       (g_settings.instantMenuFade ? TPM_NOANIMATION : 0);
     int command = TrackPopupMenuEx_Original(capture.populatedMenu, flags, pt.x, pt.y, owner,
                                             nullptr);
     if (command == 0 || !capture.obj) {
@@ -18966,8 +18937,10 @@ BOOL Wh_ModInit() {
 void Wh_ModAfterInit() {
     if (g_populationHookDeferred && cmo::InstallPopulationHook()) {
         g_populationHookDeferred = false;
-        Wh_ApplyHookOperations();
+        // Register every hook before applying: operations registered after
+        // Wh_ModInit returns are not applied automatically.
         cmo::InstallWin11Suppression();
+        Wh_ApplyHookOperations();
         Wh_Log(L"Population hook installed after init");
     }
 }
@@ -19025,7 +18998,6 @@ void Wh_ModUninit() {
     cmo::g_contentCaches.Clear();
     cmo::g_layoutCache.InvalidateAll();
     cmo::g_renderDevice.Shutdown();
-    cmo::RestoreMenuAnimation();
     cmo::RestoreMenuDelay();
     cmo::g_iconCache.Clear();
 

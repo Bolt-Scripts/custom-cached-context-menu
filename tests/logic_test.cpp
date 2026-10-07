@@ -1817,25 +1817,6 @@ int main() {
         CHECK(adoptedOpenWith);
     }
 
-    // Instant menu open: while the suppressor is active the master menu
-    // animation switch is off, and it is restored afterwards. Skipped when
-    // the environment does not implement the SPI.
-    {
-        BOOL originalAnimation = TRUE;
-        if (SystemParametersInfoW(SPI_GETMENUANIMATION, 0, &originalAnimation, 0)) {
-            {
-                cmo::MenuAnimationSuppressor suppressor;
-                BOOL duringAnimation = TRUE;
-                CHECK(SystemParametersInfoW(SPI_GETMENUANIMATION, 0, &duringAnimation,
-                                            0));
-                CHECK(duringAnimation == FALSE);
-            }
-            BOOL restoredAnimation = !originalAnimation;
-            CHECK(SystemParametersInfoW(SPI_GETMENUANIMATION, 0, &restoredAnimation, 0));
-            CHECK(restoredAnimation == originalAnimation);
-        }
-    }
-
     // Submenu open delay: while the replacement menu is shown the system
     // MenuShowDelay is lowered and restored afterwards; it is never lengthened
     // and -1 leaves it alone. Skipped when the SPI is unavailable.

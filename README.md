@@ -65,7 +65,7 @@ untouched native menu, including extended verbs.
 | Theme | Custom (menu.ini) | Appearance source: `menu.ini`, or a theme file under `<mod storage>\themes\<name>.ini` created from the bundled preset on first use. |
 | Menu mode | Custom (recommended) | Custom draws the self-rendered menu and falls back to the classic menu after repeated failures; Classic always uses the owner-drawn menu. |
 | Shift bypass | on | Hold Shift while right-clicking to show the untouched native menu. |
-| Instant menu open | on | Temporarily disables the system menu animation (fade and slide) while this mod's menu opens. Session-only; restored immediately. |
+| Instant menu open | on | Native fallback menus (classic mode, Shift bypass, fallbacks) are shown without the system open animation, via `TPM_NOANIMATION`. |
 | Show classic menu item | on | Adds a "Show classic menu" entry at the bottom of the replacement menu. |
 | Submenu open delay | 150 ms | Hover delay before a submenu opens; 0 = instant, -1 = keep the Windows setting. |
 | Move Windows extras | on | Moves the configured Windows extras into the More options submenu. |
@@ -365,6 +365,10 @@ every key next to it, with commented examples for each section.
   (wheel input is tracked but the drawing does not offset).
 - Animations and overlays are drawn by the UI thread; `animationFrameMs` and
   `overlayFrameMs` trade smoothness for CPU/GPU time.
+- Native fallback menus open with `TPM_NOANIMATION` when **Instant menu open**
+  is on. The configured **Submenu open delay** is applied to them by
+  temporarily lowering the system `MenuShowDelay` value while the menu is open
+  and restoring it on close; Windows offers no per-menu delay API.
 
 Menu models persist to disk (`menu-cache.bin` in the mod's storage directory)
 and are pre-warmed at Explorer start, so extension items survive restarts.

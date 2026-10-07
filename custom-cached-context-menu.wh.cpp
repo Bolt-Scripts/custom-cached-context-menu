@@ -12340,6 +12340,7 @@ LRESULT CALLBACK ControlWindowProc(HWND hwnd, UINT msg, WPARAM wParam,
             UnhookWindowsHookEx(hook);
         }
         g_menuWindowPool.DestroyFreeWindows();
+        ReleaseOverlayResources();
         DestroyWindow(hwnd);
         if (g_controlWindow.load() == hwnd) {
             g_controlWindow.store(nullptr);

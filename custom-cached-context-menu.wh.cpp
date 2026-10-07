@@ -7976,6 +7976,25 @@ void BuildRoundedRectMaskRadii(int width, int height, int topLeft, int topRight,
 void AdaptShadowToBackdrop(uint32_t averageColor, int configuredOpacity,
                            uint32_t configuredColor, int& outOpacity,
                            uint32_t& outColor) {
+    outOpacity = configuredOpacity;
+    outColor = configuredColor;
+
+    // The adaptation is for dark, neutral shadows that would read as a black
+    // halo. Colored or bright shadows (theme glows) are intentional effects
+    // and keep their look on every backdrop.
+    const float sr = ((configuredColor >> 16) & 0xFF) / 255.0f;
+    const float sg = ((configuredColor >> 8) & 0xFF) / 255.0f;
+    const float sb = (configuredColor & 0xFF) / 255.0f;
+    const float shadowMax = std::max({sr, sg, sb});
+    const float shadowMin = std::min({sr, sg, sb});
+    const float shadowSaturation =
+        shadowMax <= 0.0f ? 0.0f : (shadowMax - shadowMin) / shadowMax;
+    const float shadowLuminance =
+        0.2126f * sr + 0.7152f * sg + 0.0722f * sb;
+    if (shadowSaturation > 0.25f || shadowLuminance > 0.5f) {
+        return;  // colored or bright shadow: leave it alone
+    }
+
     const float r = ((averageColor >> 16) & 0xFF) / 255.0f;
     const float g = ((averageColor >> 8) & 0xFF) / 255.0f;
     const float b = (averageColor & 0xFF) / 255.0f;
@@ -7983,8 +8002,6 @@ void AdaptShadowToBackdrop(uint32_t averageColor, int configuredOpacity,
     const float darkness =
         std::clamp((0.55f - luminance) / 0.40f, 0.0f, 1.0f);
     if (darkness <= 0.0f) {
-        outOpacity = configuredOpacity;
-        outColor = configuredColor;
         return;
     }
     outOpacity = static_cast<int>(std::lround(

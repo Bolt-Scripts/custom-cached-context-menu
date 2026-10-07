@@ -4193,27 +4193,51 @@ int main() {
 
         std::wstring buf = L"1";
         size_t caret = 1;
-        CHECK(cmo::ApplyFieldKey(buf, caret, 0, L'2', true, false));
+        CHECK(cmo::ApplyFieldKey(buf, caret, 0, L'2', cmo::FieldInputMode::IntSigned));
         CHECK_EQ(buf, std::wstring(L"12"));
         CHECK_EQ(caret, size_t(2));
-        CHECK(cmo::ApplyFieldKey(buf, caret, VK_BACK, 0, true, false));
+        CHECK(cmo::ApplyFieldKey(buf, caret, VK_BACK, 0, cmo::FieldInputMode::IntSigned));
         CHECK_EQ(buf, std::wstring(L"1"));
-        CHECK(cmo::ApplyFieldKey(buf, caret, 0, L'-', true, false));
+        CHECK(cmo::ApplyFieldKey(buf, caret, 0, L'-', cmo::FieldInputMode::IntSigned));
         CHECK_EQ(buf, std::wstring(L"-1"));
         CHECK_EQ(caret, size_t(2));  // the insert shifts the caret
-        CHECK(!cmo::ApplyFieldKey(buf, caret, 0, L'-', true, false));
+        CHECK(!cmo::ApplyFieldKey(buf, caret, 0, L'-', cmo::FieldInputMode::IntSigned));
         buf = L"";
         caret = 0;
-        CHECK(!cmo::ApplyFieldKey(buf, caret, 0, L'x', true, false));
-        CHECK(cmo::ApplyFieldKey(buf, caret, 0, L'a', false, true));
-        CHECK(cmo::ApplyFieldKey(buf, caret, 0, L'F', false, true));
+        CHECK(!cmo::ApplyFieldKey(buf, caret, 0, L'x', cmo::FieldInputMode::IntSigned));
+        CHECK(cmo::ApplyFieldKey(buf, caret, 0, L'a', cmo::FieldInputMode::Hex));
+        CHECK(cmo::ApplyFieldKey(buf, caret, 0, L'F', cmo::FieldInputMode::Hex));
         CHECK_EQ(buf, std::wstring(L"aF"));
-        CHECK(!cmo::ApplyFieldKey(buf, caret, 0, L'g', false, true));
+        CHECK(!cmo::ApplyFieldKey(buf, caret, 0, L'g', cmo::FieldInputMode::Hex));
         caret = 1;
-        CHECK(cmo::ApplyFieldKey(buf, caret, VK_LEFT, 0, false, true));
+        CHECK(cmo::ApplyFieldKey(buf, caret, VK_LEFT, 0, cmo::FieldInputMode::Hex));
         CHECK_EQ(caret, size_t(0));
-        CHECK(cmo::ApplyFieldKey(buf, caret, VK_DELETE, 0, false, true));
+        CHECK(cmo::ApplyFieldKey(buf, caret, VK_DELETE, 0, cmo::FieldInputMode::Hex));
         CHECK_EQ(buf, std::wstring(L"F"));
+
+        // Free-text fields (font face): any printable character, control
+        // characters rejected.
+        std::wstring face = L"Segoe";
+        size_t faceCaret = face.size();
+        CHECK(cmo::ApplyFieldKey(face, faceCaret, 0, L' ',
+                                 cmo::FieldInputMode::FreeText));
+        CHECK(cmo::ApplyFieldKey(face, faceCaret, 0, L'U',
+                                 cmo::FieldInputMode::FreeText));
+        CHECK(cmo::ApplyFieldKey(face, faceCaret, 0, L'I',
+                                 cmo::FieldInputMode::FreeText));
+        CHECK_EQ(face, std::wstring(L"Segoe UI"));
+        CHECK(!cmo::ApplyFieldKey(face, faceCaret, 0, 0x01,
+                                  cmo::FieldInputMode::FreeText));
+        CHECK(cmo::ApplyFieldKey(face, faceCaret, VK_BACK, 0,
+                                 cmo::FieldInputMode::FreeText));
+        CHECK_EQ(face, std::wstring(L"Segoe U"));
+
+        cmo::ControlSpec input{};
+        input.kind = cmo::ControlKind::TextInput;
+        std::wstring inputCanonical;
+        CHECK(cmo::CommitFieldBuffer(input, L"  Consolas  ", inputCanonical));
+        CHECK_EQ(inputCanonical, std::wstring(L"Consolas"));
+        CHECK(!cmo::CommitFieldBuffer(input, L"   ", inputCanonical));
 
         cmo::ControlSpec slider{};
         slider.kind = cmo::ControlKind::IntSlider;

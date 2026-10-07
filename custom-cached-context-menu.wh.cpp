@@ -39,8 +39,8 @@ and discovers extension items in the background, so repeated opens are instant.
   submenu animation.
 - **Settings menu** — in the advanced ("More options") submenu, or via the
   optional global hotkey. Appearance is edited live (sliders with typed values,
-  a color picker, instant preview) and written back to the active theme file or
-  `menu.ini`.
+  a color picker, a font-face field with installed-font validation, instant
+  preview) and written back to the active theme file or `menu.ini`.
 - **No code needed** — `menu.ini` supports rules (`hide`/`keep`/`move`),
   custom commands, custom submenus, per-item overrides, and an icon library.
 
@@ -492,6 +492,7 @@ enum class ControlKind : uint8_t {
     Enum,
     ColorSwatch,
     TextField,
+    TextInput,
     ColorArea,
     HueStrip,
     AlphaStrip,
@@ -5845,7 +5846,7 @@ MenuItem BuildSettingsRow(const Appearance& working,
         row.controlText =
             working.fontFace + L", " + FormatFontSize(working.fontSize);
         MenuItem face = MakeSettingsItem(ItemKind::Command, L"Face");
-        face.control.kind = ControlKind::Info;
+        face.control.kind = ControlKind::TextInput;
         face.control.key = L"@font:face";
         face.controlText = working.fontFace;
         row.children.push_back(std::move(face));
@@ -6471,6 +6472,7 @@ LayoutPanel BuildLayoutPanel(const std::vector<MenuItem>& items,
             case ControlKind::ColorSwatch:
                 return 48;
             case ControlKind::TextField:
+            case ControlKind::TextInput:
                 return 140;
             case ControlKind::Info:
                 return measureText(item.controlText);
@@ -6597,6 +6599,7 @@ LayoutPanel BuildLayoutPanel(const std::vector<MenuItem>& items,
                                          offset + (height + 18) / 2};
                     break;
                 case ControlKind::TextField:
+                case ControlKind::TextInput:
                     layout.fieldRect = {controlLeft, offset + (height - 20) / 2,
                                         layout.controlRect.right,
                                         offset + (height + 20) / 2};
@@ -6676,6 +6679,7 @@ ControlPart HitTestControlPart(const LayoutItem& item, POINT pt) {
             }
             return ControlPart::Row;
         case ControlKind::TextField:
+        case ControlKind::TextInput:
             if (PointInRect(item.fieldRect, pt)) {
                 return ControlPart::Field;
             }
@@ -6705,10 +6709,12 @@ ControlPart HitTestControlPart(const LayoutItem& item, POINT pt) {
     }
 }
 
+enum class FieldInputMode : uint8_t { IntSigned, IntUnsigned, Hex, FreeText };
+
 // Field editing: control keys move the caret/delete; a typed character is
 // passed with key == 0 and ch set. Returns true when the buffer changed.
 bool ApplyFieldKey(std::wstring& buffer, size_t& caret, UINT key, wchar_t ch,
-                   bool allowNegative, bool hexOnly) {
+                   FieldInputMode mode) {
     if (caret > buffer.size()) {
         caret = buffer.size();
     }
@@ -6756,8 +6762,17 @@ bool ApplyFieldKey(std::wstring& buffer, size_t& caret, UINT key, wchar_t ch,
     if (key != 0 || ch == 0) {
         return false;
     }
+    if (mode == FieldInputMode::FreeText) {
+        if (ch < 0x20 || ch == 0x7F) {
+            return false;  // control characters
+        }
+        buffer.insert(caret, 1, ch);
+        ++caret;
+        return true;
+    }
     if (ch == L'-') {
-        if (!allowNegative || buffer.find(L'-') != std::wstring::npos) {
+        if (mode != FieldInputMode::IntSigned ||
+            buffer.find(L'-') != std::wstring::npos) {
             return false;
         }
         buffer.insert(0, 1, L'-');
@@ -6765,7 +6780,8 @@ bool ApplyFieldKey(std::wstring& buffer, size_t& caret, UINT key, wchar_t ch,
         return true;
     }
     if (ch == L'#') {
-        if (!hexOnly || buffer.find(L'#') != std::wstring::npos) {
+        if (mode != FieldInputMode::Hex ||
+            buffer.find(L'#') != std::wstring::npos) {
             return false;
         }
         buffer.insert(0, 1, L'#');
@@ -6775,7 +6791,7 @@ bool ApplyFieldKey(std::wstring& buffer, size_t& caret, UINT key, wchar_t ch,
     const bool digit = ch >= L'0' && ch <= L'9';
     const bool hexDigit =
         digit || (ch >= L'a' && ch <= L'f') || (ch >= L'A' && ch <= L'F');
-    if (hexOnly ? !hexDigit : !digit) {
+    if (mode == FieldInputMode::Hex ? !hexDigit : !digit) {
         return false;
     }
     buffer.insert(caret, 1, ch);
@@ -6800,6 +6816,10 @@ bool CommitFieldBuffer(const ControlSpec& control, const std::wstring& buffer,
         }
         canonicalOut = FormatColorRgba(argb);
         return true;
+    }
+    if (control.kind == ControlKind::TextInput) {
+        canonicalOut = TrimWhitespace(buffer);
+        return !canonicalOut.empty();
     }
     return false;
 }
@@ -9056,6 +9076,7 @@ void DrawPanel(ID2D1DeviceContext* dc, const LayoutPanel& panel,
                     DrawSettingsSwatch(dc, item, metrics, appearance);
                     break;
                 case ControlKind::TextField:
+                case ControlKind::TextInput:
                     DrawSettingsField(dc, item, state, metrics, appearance);
                     break;
                 case ControlKind::ColorArea:
@@ -9634,6 +9655,7 @@ void SettingsRefreshSession(MenuSession& session) {
         return;
     }
     settings->inputs.working = settings->working;
+    settings->inputs.statusText = settings->statusText;
     settings->model = BuildSettingsTree(settings->inputs);
     // Recompute the live metrics so geometry changes actually take effect.
     session.appearance = settings->working;
@@ -9653,6 +9675,77 @@ void SettingsApplyControlChange(MenuSession& session, const std::wstring& key,
                                 const std::wstring& canonicalText,
                                 bool commitGeometry);
 void SettingsReplayOpenAnimation(MenuSession& session);
+
+// True when the face exists in the DirectWrite system font collection. When
+// the factory or collection is unavailable the value is accepted rather than
+// blocking the edit.
+bool FontFaceInstalled(const std::wstring& face) {
+    if (face.empty()) {
+        return false;
+    }
+    IDWriteFactory* dwrite = g_renderDevice.DWriteFactory();
+    if (!dwrite) {
+        return true;
+    }
+    IDWriteFontCollection* collection = nullptr;
+    if (FAILED(dwrite->GetSystemFontCollection(&collection, FALSE)) ||
+        !collection) {
+        return true;
+    }
+    UINT32 index = 0;
+    BOOL exists = FALSE;
+    const HRESULT hr = collection->FindFamilyName(face.c_str(), &index, &exists);
+    collection->Release();
+    return SUCCEEDED(hr) && exists;
+}
+
+// Commits (Enter or blur) or discards (Esc) the field edit on one level.
+void SettingsCommitFieldAt(MenuSession& session, int level) {
+    if (!session.settings || level < 0 ||
+        level >= static_cast<int>(session.states.size())) {
+        return;
+    }
+    MenuInputState& state = session.states[level];
+    if (state.focusedControl.empty()) {
+        return;
+    }
+    const LayoutItem* item =
+        SettingsFindItem(session, level, state.focusedControl);
+    if (item) {
+        std::wstring canonical;
+        if (CommitFieldBuffer(item->control, state.editBuffer, canonical)) {
+            SettingsApplyControlChange(session, item->control.key, canonical,
+                                       true);
+        }
+    }
+    state.focusedControl.clear();
+    state.editBuffer.clear();
+    state.caretVisible = false;
+    if (level < static_cast<int>(session.windows.size()) &&
+        session.windows[level]) {
+        KillTimer(session.windows[level]->Handle(), kSettingsCaretTimerId);
+    }
+    SettingsRefreshSession(session);
+}
+
+void SettingsCancelFieldAt(MenuSession& session, int level) {
+    if (!session.settings || level < 0 ||
+        level >= static_cast<int>(session.states.size())) {
+        return;
+    }
+    MenuInputState& state = session.states[level];
+    if (state.focusedControl.empty()) {
+        return;
+    }
+    state.focusedControl.clear();
+    state.editBuffer.clear();
+    state.caretVisible = false;
+    if (level < static_cast<int>(session.windows.size()) &&
+        session.windows[level]) {
+        KillTimer(session.windows[level]->Handle(), kSettingsCaretTimerId);
+    }
+    SettingsRefreshSession(session);
+}
 
 void SettingsHandleReservedAction(MenuSession& session,
                                   const std::wstring& key,
@@ -9792,6 +9885,25 @@ void SettingsApplyControlChange(MenuSession& session, const std::wstring& key,
                 SettingsRefreshSession(session);
             }
         }
+        return;
+    }
+    if (key == L"@font:face") {
+        const std::wstring face = TrimWhitespace(canonicalText);
+        if (!face.empty() && FontFaceInstalled(face)) {
+            session.settings->working.fontFace = face;
+            if (std::find(session.settings->dirtyKeys.begin(),
+                          session.settings->dirtyKeys.end(),
+                          std::wstring(L"font")) ==
+                session.settings->dirtyKeys.end()) {
+                session.settings->dirtyKeys.push_back(L"font");
+            }
+            SettingsMarkDirty(session.settings->write, GetTickCount64(), 400);
+            SettingsArmSaveTimer(session);
+            session.settings->statusText = L"Saved";
+        } else {
+            session.settings->statusText = L"Font not found";
+        }
+        SettingsRefreshSession(session);
         return;
     }
     if (key[0] == L'@') {
@@ -9964,10 +10076,28 @@ bool SettingsHandleMouseDown(MenuSession& session, int level,
     if (hit < 0) {
         return false;
     }
-    const LayoutItem& item = panel.items[hit];
-    if (item.control.kind == ControlKind::None) {
+    const std::wstring clickedKey = panel.items[hit].control.key;
+    if (panel.items[hit].control.kind == ControlKind::None) {
         return false;
     }
+    // Leaving a field commits its edit; clicking the field itself keeps the
+    // caret where it is. The commit may relayout and rebuild panels, so the
+    // clicked item is re-resolved afterwards.
+    for (size_t i = 0; i < session.states.size(); ++i) {
+        if (session.states[i].focusedControl.empty()) {
+            continue;
+        }
+        if (static_cast<int>(i) == level &&
+            session.states[i].focusedControl == clickedKey) {
+            continue;
+        }
+        SettingsCommitFieldAt(session, static_cast<int>(i));
+    }
+    const LayoutItem* clicked = SettingsFindItem(session, level, clickedKey);
+    if (!clicked) {
+        return false;
+    }
+    const LayoutItem& item = *clicked;
     const ControlPart part = HitTestControlPart(item, panelPoint);
     switch (item.control.kind) {
         case ControlKind::Toggle:
@@ -9977,7 +10107,9 @@ bool SettingsHandleMouseDown(MenuSession& session, int level,
             return true;
         case ControlKind::IntSlider:
             if (part == ControlPart::Field) {
-                SettingsFocusField(session, level, item);
+                if (state.focusedControl != item.control.key) {
+                    SettingsFocusField(session, level, item);
+                }
                 return true;
             }
             state.dragControl = item.control.key;
@@ -9994,7 +10126,10 @@ bool SettingsHandleMouseDown(MenuSession& session, int level,
             SettingsHandleMouseMove(session, level, panelPoint);
             return true;
         case ControlKind::TextField:
-            SettingsFocusField(session, level, item);
+        case ControlKind::TextInput:
+            if (state.focusedControl != item.control.key) {
+                SettingsFocusField(session, level, item);
+            }
             return true;
         default:
             return false;  // submenu rows open through the generic path
@@ -10075,28 +10210,13 @@ bool SettingsHandleKey(MenuSession& session, UINT key, wchar_t ch) {
             state.focusedControl.clear();
             return false;
         }
-        const ControlSpec& control = item->control;
+        const ControlSpec control = item->control;
         if (key == VK_RETURN) {
-            std::wstring canonical;
-            if (CommitFieldBuffer(control, state.editBuffer, canonical)) {
-                SettingsApplyControlChange(session, control.key, canonical,
-                                           true);
-            }
-            state.focusedControl.clear();
-            state.editBuffer.clear();
-            state.caretVisible = false;
-            KillTimer(session.windows[session.active]->Handle(),
-                      kSettingsCaretTimerId);
-            SettingsRefreshSession(session);
+            SettingsCommitFieldAt(session, session.active);
             return true;
         }
         if (key == VK_ESCAPE) {
-            state.focusedControl.clear();
-            state.editBuffer.clear();
-            state.caretVisible = false;
-            KillTimer(session.windows[session.active]->Handle(),
-                      kSettingsCaretTimerId);
-            SettingsRefreshSession(session);
+            SettingsCancelFieldAt(session, session.active);
             return true;
         }
         if (key == VK_UP || key == VK_DOWN) {
@@ -10106,24 +10226,31 @@ bool SettingsHandleKey(MenuSession& session, UINT key, wchar_t ch) {
                                        std::to_wstring(value), true);
             return true;
         }
-        const bool allowNegative = control.minValue < 0;
-        const bool hexOnly = control.kind == ControlKind::TextField;
-        ApplyFieldKey(state.editBuffer, state.caretPos, key, ch, allowNegative,
-                      hexOnly);
+        const FieldInputMode mode =
+            control.kind == ControlKind::TextInput
+                ? FieldInputMode::FreeText
+                : control.kind == ControlKind::TextField
+                      ? FieldInputMode::Hex
+                      : (control.minValue < 0 ? FieldInputMode::IntSigned
+                                              : FieldInputMode::IntUnsigned);
+        ApplyFieldKey(state.editBuffer, state.caretPos, key, ch, mode);
         SettingsRefreshSession(session);
         return true;
     }
     if (key == VK_TAB) {
-        if (panel.items.empty()) {
+        SettingsCommitFieldAt(session, session.active);
+        const LayoutPanel& tabPanel = *session.windows[session.active]->Panel();
+        if (tabPanel.items.empty()) {
             return true;
         }
-        for (size_t i = 1; i <= panel.items.size(); ++i) {
+        for (size_t i = 1; i <= tabPanel.items.size(); ++i) {
             const int candidate = (std::max(0, state.keyboardIndex) +
                                    static_cast<int>(i)) %
-                                  static_cast<int>(panel.items.size());
-            const LayoutItem& item = panel.items[candidate];
+                                  static_cast<int>(tabPanel.items.size());
+            const LayoutItem& item = tabPanel.items[candidate];
             if (item.control.kind == ControlKind::IntSlider ||
-                item.control.kind == ControlKind::TextField) {
+                item.control.kind == ControlKind::TextField ||
+                item.control.kind == ControlKind::TextInput) {
                 state.keyboardIndex = candidate;
                 SettingsFocusField(session, session.active, item);
                 SettingsRefreshSession(session);
@@ -10185,22 +10312,37 @@ bool SettingsHandleKey(MenuSession& session, UINT key, wchar_t ch) {
             return true;
         }
         if (control.kind == ControlKind::IntSlider ||
-            control.kind == ControlKind::TextField) {
+            control.kind == ControlKind::TextField ||
+            control.kind == ControlKind::TextInput) {
             SettingsFocusField(session, session.active, *item);
             SettingsRefreshSession(session);
             return true;
         }
         return false;  // submenus open through the generic path
     }
-    if (ch >= L'0' && ch <= L'9') {
+    if (ch != 0) {
         const LayoutItem* item = MenuStateActiveItem(panel, state);
-        if (item && item->control.kind == ControlKind::IntSlider) {
-            SettingsFocusField(session, session.active, *item);
-            MenuInputState& focused = session.states[session.active];
-            ApplyFieldKey(focused.editBuffer, focused.caretPos, 0, ch,
-                          item->control.minValue < 0, false);
-            SettingsRefreshSession(session);
-            return true;
+        if (item) {
+            const ControlSpec control = item->control;
+            FieldInputMode mode = FieldInputMode::FreeText;
+            bool startsEdit = false;
+            if (control.kind == ControlKind::IntSlider && ch >= L'0' &&
+                ch <= L'9') {
+                mode = control.minValue < 0 ? FieldInputMode::IntSigned
+                                            : FieldInputMode::IntUnsigned;
+                startsEdit = true;
+            } else if (control.kind == ControlKind::TextInput && ch >= 0x20 &&
+                       ch != 0x7F) {
+                startsEdit = true;
+            }
+            if (startsEdit) {
+                SettingsFocusField(session, session.active, *item);
+                MenuInputState& focused = session.states[session.active];
+                ApplyFieldKey(focused.editBuffer, focused.caretPos, 0, ch,
+                              mode);
+                SettingsRefreshSession(session);
+                return true;
+            }
         }
     }
     return false;

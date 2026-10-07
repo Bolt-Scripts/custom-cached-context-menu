@@ -9061,12 +9061,16 @@ bool EnsureOverlayResources(ID2D1DeviceContext* dc) {
         g_overlayResources.Release();
         return false;
     }
-    const uint32_t scanlinePixels[4] = {0x80000000u, 0x00000000u, 0x80000000u,
-                                        0x00000000u};
+    // 1x8 scanline profile: a two-pixel core with a one-pixel feather on each
+    // side. The soft edges let the lines scroll subpixel-smoothly under linear
+    // interpolation; a hard two-pixel-period pattern can only toggle.
+    const uint32_t scanlinePixels[8] = {
+        0x80000000u, 0x80000000u, 0x40000000u, 0x00000000u,
+        0x00000000u, 0x00000000u, 0x00000000u, 0x40000000u};
     const D2D1_BITMAP_PROPERTIES props = {
         {DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED}, 96.0f,
         96.0f};
-    if (FAILED(dc->CreateBitmap(D2D1::SizeU(1, 4), scanlinePixels, 4, props,
+    if (FAILED(dc->CreateBitmap(D2D1::SizeU(1, 8), scanlinePixels, 4, props,
                                 &g_overlayResources.scanlineBitmap)) ||
         !g_overlayResources.scanlineBitmap) {
         g_overlayResources.Release();
@@ -9075,9 +9079,9 @@ bool EnsureOverlayResources(ID2D1DeviceContext* dc) {
     D2D1_BITMAP_BRUSH_PROPERTIES1 brushProps = {};
     brushProps.extendModeX = D2D1_EXTEND_MODE_WRAP;
     brushProps.extendModeY = D2D1_EXTEND_MODE_WRAP;
-    // Nearest-neighbor keeps the 1px lines crisp while they scroll; linear
-    // interpolation smears them into moving gradients.
-    brushProps.interpolationMode = D2D1_INTERPOLATION_MODE_NEAREST_NEIGHBOR;
+    // Linear interpolation is what makes subpixel scrolling smooth; the soft
+    // profile keeps the lines from smearing into gradients.
+    brushProps.interpolationMode = D2D1_INTERPOLATION_MODE_LINEAR;
     if (FAILED(dc->CreateBitmapBrush(g_overlayResources.scanlineBitmap,
                                      &brushProps, nullptr,
                                      &g_overlayResources.scanlineBrush)) ||
@@ -9269,13 +9273,12 @@ void DrawOverlay(ID2D1DeviceContext* dc, const LayoutPanel& panel,
     // Scanlines: a tiled 1x4 pattern, scrolling slowly.
     if ((appearance.overlay & kOverlayScanlines) != 0 &&
         EnsureOverlayResources(dc) && g_overlayResources.scanlineBrush) {
-        // A slow, even drift: 3 px/s at normal speed, snapped to whole
-        // pixels so the lines stay evenly spaced. The size factor scales both
-        // line thickness and spacing (kept integral for crisp lines).
+        // A slow, even drift: 10 px/s at normal speed, scrolling in subpixel
+        // steps. The size factor scales both line thickness and spacing.
         const int lineScale = std::max(
             1, static_cast<int>(std::lround(OverlaySizeFactor(appearance))));
-        const float period = 4.0f * static_cast<float>(lineScale);
-        const float offset = std::floor(std::fmod(t * 3.0f, period));
+        const float period = 8.0f * static_cast<float>(lineScale);
+        const float offset = std::fmod(t * 10.0f, period);
         g_overlayResources.scanlineBrush->SetTransform(
             D2D1::Matrix3x2F::Scale(1.0f, static_cast<float>(lineScale)) *
             D2D1::Matrix3x2F::Translation(0.0f, offset));

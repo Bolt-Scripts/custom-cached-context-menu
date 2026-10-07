@@ -1,6 +1,7 @@
 #define CMO_TESTING 1
 #include "wh_api_stub.h"
 #include "../custom-cached-context-menu.wh.cpp"
+#include "test_hooks.inc"
 #include <functional>
 
 static int g_failures = 0;
@@ -1500,21 +1501,21 @@ int main() {
     // into one submenu placed above the native fallback, with separators
     // collapsed. Disabled or empty cases leave the menu untouched.
     {
-        const bool previousWindows = cmo::g_settings.advancedSubmenuWindows;
-        const bool previousThirdParty = cmo::g_settings.advancedSubmenuThirdParty;
-        const std::wstring previousLabel = cmo::g_settings.advancedSubmenuLabel;
+        const bool previousWindows = cmo::g_settings->advancedSubmenuWindows;
+        const bool previousThirdParty = cmo::g_settings->advancedSubmenuThirdParty;
+        const std::wstring previousLabel = cmo::g_settings->advancedSubmenuLabel;
         const std::vector<std::wstring> previousItems =
-            cmo::g_settings.advancedSubmenuItems;
+            cmo::g_settings->advancedSubmenuItems;
         const std::vector<std::wstring> previousExclude =
-            cmo::g_settings.advancedSubmenuExclude;
+            cmo::g_settings->advancedSubmenuExclude;
 
         auto reorganize = [](std::vector<cmo::MenuItem>& items) {
             cmo::AdvancedGroupingOptions options;
-            options.moveWindows = cmo::g_settings.advancedSubmenuWindows;
-            options.moveThirdParty = cmo::g_settings.advancedSubmenuThirdParty;
-            options.label = cmo::g_settings.advancedSubmenuLabel;
-            options.windowsItems = cmo::g_settings.advancedSubmenuItems;
-            options.exclude = cmo::g_settings.advancedSubmenuExclude;
+            options.moveWindows = cmo::g_settings->advancedSubmenuWindows;
+            options.moveThirdParty = cmo::g_settings->advancedSubmenuThirdParty;
+            options.label = cmo::g_settings->advancedSubmenuLabel;
+            options.windowsItems = cmo::g_settings->advancedSubmenuItems;
+            options.exclude = cmo::g_settings->advancedSubmenuExclude;
             cmo::ReorganizeAdvancedItems(items, options);
         };
 
@@ -1558,19 +1559,21 @@ int main() {
             return model;
         };
 
-        cmo::g_settings.advancedSubmenuWindows = false;
-        cmo::g_settings.advancedSubmenuThirdParty = false;
-        cmo::g_settings.advancedSubmenuLabel = L"Advanced";
-        cmo::g_settings.advancedSubmenuItems =
-            cmo::ParseAdvancedItems(L"Pin to Start, Open in Terminal");
+        cmo::SetSettingForTesting(&cmo::Settings::advancedSubmenuWindows, false);
+        cmo::SetSettingForTesting(&cmo::Settings::advancedSubmenuThirdParty, false);
+        cmo::SetSettingForTesting(&cmo::Settings::advancedSubmenuLabel,
+                                  std::wstring(L"Advanced"));
+        cmo::SetSettingForTesting(
+            &cmo::Settings::advancedSubmenuItems,
+            cmo::ParseAdvancedItems(L"Pin to Start, Open in Terminal"));
         {
             cmo::MenuModel untouched = buildMenu();
             reorganize(untouched.items);
             CHECK(untouched.items.size() == 7);
         }
 
-        cmo::g_settings.advancedSubmenuWindows = true;
-        cmo::g_settings.advancedSubmenuThirdParty = true;
+        cmo::SetSettingForTesting(&cmo::Settings::advancedSubmenuWindows, true);
+        cmo::SetSettingForTesting(&cmo::Settings::advancedSubmenuThirdParty, true);
         {
             cmo::MenuModel model = buildMenu();
             reorganize(model.items);
@@ -1606,7 +1609,8 @@ int main() {
         }
 
         // No advanced items: no submenu is added.
-        cmo::g_settings.advancedSubmenuItems.clear();
+        cmo::SetSettingForTesting(&cmo::Settings::advancedSubmenuItems,
+                                  std::vector<std::wstring>{});
         {
             cmo::MenuModel model = buildMenu();
             model.items.erase(model.items.begin() + 2);
@@ -1617,11 +1621,16 @@ int main() {
             }
         }
 
-        cmo::g_settings.advancedSubmenuWindows = previousWindows;
-        cmo::g_settings.advancedSubmenuThirdParty = previousThirdParty;
-        cmo::g_settings.advancedSubmenuLabel = previousLabel;
-        cmo::g_settings.advancedSubmenuItems = previousItems;
-        cmo::g_settings.advancedSubmenuExclude = previousExclude;
+        cmo::SetSettingForTesting(&cmo::Settings::advancedSubmenuWindows,
+                                  previousWindows);
+        cmo::SetSettingForTesting(&cmo::Settings::advancedSubmenuThirdParty,
+                                  previousThirdParty);
+        cmo::SetSettingForTesting(&cmo::Settings::advancedSubmenuLabel,
+                                  previousLabel);
+        cmo::SetSettingForTesting(&cmo::Settings::advancedSubmenuItems,
+                                  previousItems);
+        cmo::SetSettingForTesting(&cmo::Settings::advancedSubmenuExclude,
+                                  previousExclude);
     }
 
     // Ampersand accelerators and trailing ellipses are normalized before
@@ -1632,19 +1641,21 @@ int main() {
         CHECK(cmo::NormalizeMenuLabel(L"Open wit&h...") == L"Open with");
         CHECK(cmo::NormalizeMenuLabel(L"Smith && Sons") == L"Smith & Sons");
 
-        const bool previousWindows = cmo::g_settings.advancedSubmenuWindows;
-        const bool previousThirdParty = cmo::g_settings.advancedSubmenuThirdParty;
-        const std::wstring previousLabel = cmo::g_settings.advancedSubmenuLabel;
+        const bool previousWindows = cmo::g_settings->advancedSubmenuWindows;
+        const bool previousThirdParty = cmo::g_settings->advancedSubmenuThirdParty;
+        const std::wstring previousLabel = cmo::g_settings->advancedSubmenuLabel;
         const std::vector<std::wstring> previousItems =
-            cmo::g_settings.advancedSubmenuItems;
-        cmo::g_settings.advancedSubmenuWindows = true;
-        cmo::g_settings.advancedSubmenuThirdParty = true;
-        cmo::g_settings.advancedSubmenuLabel = L"More options";
-        cmo::g_settings.advancedSubmenuItems =
-            cmo::ParseAdvancedItems(L"Add to Favorites, Open with");
+            cmo::g_settings->advancedSubmenuItems;
+        cmo::SetSettingForTesting(&cmo::Settings::advancedSubmenuWindows, true);
+        cmo::SetSettingForTesting(&cmo::Settings::advancedSubmenuThirdParty, true);
+        cmo::SetSettingForTesting(&cmo::Settings::advancedSubmenuLabel,
+                                  std::wstring(L"More options"));
+        cmo::SetSettingForTesting(
+            &cmo::Settings::advancedSubmenuItems,
+            cmo::ParseAdvancedItems(L"Add to Favorites, Open with"));
 
         auto isAdvanced = [](const cmo::MenuItem& item) {
-            return cmo::MatchesAnyToken(item, cmo::g_settings.advancedSubmenuItems) ||
+            return cmo::MatchesAnyToken(item, cmo::g_settings->advancedSubmenuItems) ||
                    cmo::IsThirdPartyItem(item);
         };
 
@@ -1671,34 +1682,40 @@ int main() {
         CHECK(!isAdvanced(extensionCommand(5, L"Print", L"Print")));
         CHECK(!isAdvanced(extensionCommand(6, L"Cu&t", L"cut")));
 
-        cmo::g_settings.advancedSubmenuWindows = previousWindows;
-        cmo::g_settings.advancedSubmenuThirdParty = previousThirdParty;
-        cmo::g_settings.advancedSubmenuLabel = previousLabel;
-        cmo::g_settings.advancedSubmenuItems = previousItems;
+        cmo::SetSettingForTesting(&cmo::Settings::advancedSubmenuWindows,
+                                  previousWindows);
+        cmo::SetSettingForTesting(&cmo::Settings::advancedSubmenuThirdParty,
+                                  previousThirdParty);
+        cmo::SetSettingForTesting(&cmo::Settings::advancedSubmenuLabel,
+                                  previousLabel);
+        cmo::SetSettingForTesting(&cmo::Settings::advancedSubmenuItems,
+                                  previousItems);
     }
 
     // More options ordering: Windows extras group above third-party handlers,
     // each group keeping the shell's relative order, with one separator
     // between them only when both groups exist.
     {
-        const bool previousWindows = cmo::g_settings.advancedSubmenuWindows;
-        const bool previousThirdParty = cmo::g_settings.advancedSubmenuThirdParty;
-        const std::wstring previousLabel = cmo::g_settings.advancedSubmenuLabel;
+        const bool previousWindows = cmo::g_settings->advancedSubmenuWindows;
+        const bool previousThirdParty = cmo::g_settings->advancedSubmenuThirdParty;
+        const std::wstring previousLabel = cmo::g_settings->advancedSubmenuLabel;
         const std::vector<std::wstring> previousItems =
-            cmo::g_settings.advancedSubmenuItems;
-        cmo::g_settings.advancedSubmenuWindows = true;
-        cmo::g_settings.advancedSubmenuThirdParty = true;
-        cmo::g_settings.advancedSubmenuLabel = L"More options";
-        cmo::g_settings.advancedSubmenuItems =
-            cmo::ParseAdvancedItems(L"Share, Add to Favorites");
+            cmo::g_settings->advancedSubmenuItems;
+        cmo::SetSettingForTesting(&cmo::Settings::advancedSubmenuWindows, true);
+        cmo::SetSettingForTesting(&cmo::Settings::advancedSubmenuThirdParty, true);
+        cmo::SetSettingForTesting(&cmo::Settings::advancedSubmenuLabel,
+                                  std::wstring(L"More options"));
+        cmo::SetSettingForTesting(
+            &cmo::Settings::advancedSubmenuItems,
+            cmo::ParseAdvancedItems(L"Share, Add to Favorites"));
 
         auto reorganize = [](std::vector<cmo::MenuItem>& items) {
             cmo::AdvancedGroupingOptions options;
-            options.moveWindows = cmo::g_settings.advancedSubmenuWindows;
-            options.moveThirdParty = cmo::g_settings.advancedSubmenuThirdParty;
-            options.label = cmo::g_settings.advancedSubmenuLabel;
-            options.windowsItems = cmo::g_settings.advancedSubmenuItems;
-            options.exclude = cmo::g_settings.advancedSubmenuExclude;
+            options.moveWindows = cmo::g_settings->advancedSubmenuWindows;
+            options.moveThirdParty = cmo::g_settings->advancedSubmenuThirdParty;
+            options.label = cmo::g_settings->advancedSubmenuLabel;
+            options.windowsItems = cmo::g_settings->advancedSubmenuItems;
+            options.exclude = cmo::g_settings->advancedSubmenuExclude;
             cmo::ReorganizeAdvancedItems(items, options);
         };
 
@@ -1765,10 +1782,14 @@ int main() {
             }
         }
 
-        cmo::g_settings.advancedSubmenuWindows = previousWindows;
-        cmo::g_settings.advancedSubmenuThirdParty = previousThirdParty;
-        cmo::g_settings.advancedSubmenuLabel = previousLabel;
-        cmo::g_settings.advancedSubmenuItems = previousItems;
+        cmo::SetSettingForTesting(&cmo::Settings::advancedSubmenuWindows,
+                                  previousWindows);
+        cmo::SetSettingForTesting(&cmo::Settings::advancedSubmenuThirdParty,
+                                  previousThirdParty);
+        cmo::SetSettingForTesting(&cmo::Settings::advancedSubmenuLabel,
+                                  previousLabel);
+        cmo::SetSettingForTesting(&cmo::Settings::advancedSubmenuItems,
+                                  previousItems);
     }
 
     // Merge dedup normalizes accelerators and ellipses so the shell's version
@@ -1823,12 +1844,12 @@ int main() {
     {
         DWORD systemDelay = 0;
         if (SystemParametersInfoW(SPI_GETMENUSHOWDELAY, 0, &systemDelay, 0)) {
-            const int previousDelay = cmo::g_settings.submenuDelayMs;
+            const int previousDelay = cmo::g_settings->submenuDelayMs;
             DWORD check = 0;
             if (SystemParametersInfoW(SPI_SETMENUSHOWDELAY, 400, nullptr, 0) &&
                 SystemParametersInfoW(SPI_GETMENUSHOWDELAY, 0, &check, 0) &&
                 check == 400) {
-                cmo::g_settings.submenuDelayMs = 100;
+                cmo::SetSettingForTesting(&cmo::Settings::submenuDelayMs, 100);
                 {
                     cmo::MenuDelaySuppressor suppressor;
                     DWORD during = 0;
@@ -1841,7 +1862,7 @@ int main() {
 
                 // Never lengthens the delay.
                 SystemParametersInfoW(SPI_SETMENUSHOWDELAY, 50, nullptr, 0);
-                cmo::g_settings.submenuDelayMs = 150;
+                cmo::SetSettingForTesting(&cmo::Settings::submenuDelayMs, 150);
                 {
                     cmo::MenuDelaySuppressor suppressor;
                     DWORD during = 0;
@@ -1853,7 +1874,7 @@ int main() {
 
                 // -1 leaves the system value untouched.
                 SystemParametersInfoW(SPI_SETMENUSHOWDELAY, 400, nullptr, 0);
-                cmo::g_settings.submenuDelayMs = -1;
+                cmo::SetSettingForTesting(&cmo::Settings::submenuDelayMs, -1);
                 {
                     cmo::MenuDelaySuppressor suppressor;
                     DWORD during = 0;
@@ -1862,7 +1883,7 @@ int main() {
                 }
             }
             SystemParametersInfoW(SPI_SETMENUSHOWDELAY, systemDelay, nullptr, 0);
-            cmo::g_settings.submenuDelayMs = previousDelay;
+            cmo::SetSettingForTesting(&cmo::Settings::submenuDelayMs, previousDelay);
         }
     }
 
@@ -2585,7 +2606,6 @@ int main() {
         CHECK(cmo::ResolveMenuMode(1, 0) == cmo::MenuMode::HMenu);
         CHECK(cmo::ResolveMenuMode(0, 3) == cmo::MenuMode::HMenu);
         cmo::ModeController controller;
-        controller.SetMode(cmo::MenuMode::Custom);
         CHECK(controller.Current() == cmo::MenuMode::Custom);
         controller.RecordFailure();
         controller.RecordFailure();

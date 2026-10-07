@@ -295,6 +295,11 @@ public:
         return SettingsRef(current_);
     }
 
+    Settings Snapshot() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return *current_;
+    }
+
     void Publish(Settings next) {
         auto snapshot = std::make_shared<const Settings>(std::move(next));
         std::lock_guard<std::mutex> lock(mutex_);
@@ -306,19 +311,7 @@ private:
     std::shared_ptr<const Settings> current_;
 };
 
-#ifdef CMO_TESTING
-// The test build reads and writes the settings directly; Publish keeps the
-// same call sites working.
-struct TestSettings : Settings {
-    const Settings* operator->() const { return this; }
-    Settings* operator->() { return this; }
-    void Publish(Settings next) { static_cast<Settings&>(*this) = std::move(next); }
-};
-
-inline TestSettings g_settings;
-#else
 inline SettingsPublisher g_settings;
-#endif
 
 // Set in Wh_ModInit; only the UI thread may touch the render device/caches.
 
@@ -7314,10 +7307,6 @@ MenuMode ResolveMenuMode(int settingValue, int consecutiveCustomFailures) {
 class ModeController {
 public:
     MenuMode Current() const { return mode_; }
-
-#ifdef CMO_TESTING
-    void SetMode(MenuMode mode);
-#endif
 
     void RecordSuccess() { consecutiveFailures_ = 0; }
 
@@ -19373,10 +19362,3 @@ void Wh_ModSettingsChanged() {
         }
     }
 }
-
-#ifdef CMO_TESTING
-// Test-only helpers for the repository's test suite (tests/logic_test.cpp).
-// Windhawk compiles without CMO_TESTING, so this include is never processed
-// and none of the test hooks are part of the submitted mod.
-#include "tests/test_hooks.inc"
-#endif

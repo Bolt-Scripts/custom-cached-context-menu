@@ -1,7 +1,17 @@
 // Test-only helpers for the repository's test suite (tests/logic_test.cpp).
 // Included by the mod only when CMO_TESTING is defined; the Windhawk build
 // never opens this file, so none of it is part of the submitted mod.
+#include <type_traits>
+
 namespace cmo {
+
+// Publishes a single settings change through the production publisher.
+template <typename T>
+void SetSettingForTesting(T Settings::* member, std::type_identity_t<T> value) {
+    Settings next = g_settings.Snapshot();
+    next.*member = std::move(value);
+    g_settings.Publish(std::move(next));
+}
 
 std::vector<uint32_t> FlattenIds(const MenuModel& model) {
     std::vector<uint32_t> ids;
@@ -131,10 +141,6 @@ bool StampMatches(const SourceStamp& cached, const SourceStamp& current) {
 
 bool ConfigStore::ApplyTextForTesting(const std::wstring& text) {
     return ApplyText(text);
-}
-
-void ModeController::SetMode(MenuMode mode) {
-    mode_ = mode;
 }
 
 bool Warmup::IsPaused() const {

@@ -95,6 +95,11 @@ or use the in-menu settings browser.
 - Tall menus do not scroll; they are capped to the work area.
 - Nav-pane menus are cached per tree node for the session and refresh after
   use, so the first open of each node pays the shell's population cost.
+- Core menu labels are English; cached extension labels come from the shell
+  and are localized.
+- Native fallback menus apply the configured submenu delay through the system
+  `MenuShowDelay` value while the menu is open (restored on close); Windows
+  has no per-menu delay API.
 
 ## Feedback
 
@@ -238,8 +243,9 @@ MIT
 // ===========================================================================
 namespace cmo {
 
-// The mod's own module handle. ModModuleHandle() returns Explorer's,
-// while the window classes and hook procedures live in the mod DLL.
+// The mod's own module handle. GetModuleHandleW(nullptr) would return
+// Explorer's, while the window classes and hook procedures live in the mod
+// DLL.
 HMODULE ModModuleHandle() {
     static HMODULE module = [] {
         HMODULE result = nullptr;
@@ -1236,6 +1242,10 @@ bool CreateNewItemInFolder(const NewTemplate& tmpl, const std::wstring& director
             if (!itemPath.empty()) {
                 createdPath = itemPath;
             }
+        } else if (!itemPath.empty()) {
+            // Do not leave the empty placeholder behind when the wizard
+            // could not be started.
+            DeleteFileW(itemPath.c_str());
         }
         return ok != FALSE;
     }
@@ -7220,7 +7230,7 @@ private:
 // Resource-owning globals: their destructors must not run at process exit
 // (Explorer restart/sign-out), where the threads and subsystems they assume
 // are gone. They are released explicitly in Wh_ModUninit instead.
-CMO_NO_DESTROY inline LayoutCache g_layoutCache;
+CMO_NO_DESTROY inline std::optional<LayoutCache> g_layoutCache{std::in_place};
 
 // Bounded least-recently-used map; Find promotes, Insert evicts the oldest
 // and releases its value.
@@ -7480,7 +7490,9 @@ private:
     IDCompositionDevice* comp_ = nullptr;
 };
 
-CMO_NO_DESTROY inline RenderDevice g_renderDevice;
+// RenderDevice holds raw COM pointers and releases them in Shutdown(); its
+// destructor is trivial, so it needs neither the attribute nor reset().
+inline RenderDevice g_renderDevice;
 
 // ===========================================================================
 // [CMO:MenuWindow] DirectComposition-backed popup windows.
@@ -7493,9 +7505,15 @@ const wchar_t kMenuWindowClass[] = L"ContextMenuOverhaulV2Window";
 
 DWORD MenuWindowStyle() { return WS_POPUP; }
 
-DWORD MenuWindowExStyle() {
-    return WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOREDIRECTIONBITMAP |
-           WS_EX_NOACTIVATE;
+DWORD MenuWindowExStyle(bool activate = false) {
+    DWORD style = WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOREDIRECTIONBITMAP;
+    // Menus normally never activate so the owner keeps its active look. The
+    // hotkey-opened settings menu must activate: it runs on the hotkey thread
+    // and needs keyboard input delivered to that thread's queue.
+    if (!activate) {
+        style |= WS_EX_NOACTIVATE;
+    }
+    return style;
 }
 
 class MenuWindow;
@@ -7511,7 +7529,7 @@ public:
     void SetOwnerThread(DWORD threadId) { ownerThread_ = threadId; }
 
     bool Create(HWND owner, const LayoutPanel* panel, bool isRoot,
-                int margin = 0) {
+                int margin = 0, bool activate = false) {
         // Pooled windows may carry a previous window/surface; release it so
         // reuse never leaks an HWND, swap chain, target, or visual.
         Destroy();
@@ -7530,9 +7548,9 @@ public:
                           2 * margin_;
         const int height = (panel && panel->size.cy > 0 ? panel->size.cy : 100) +
                            2 * margin_;
-        hwnd_ = CreateWindowExW(MenuWindowExStyle(), kMenuWindowClass, L"",
-                                MenuWindowStyle(), 0, 0, width, height, owner, nullptr,
-                                ModModuleHandle(), this);
+        hwnd_ = CreateWindowExW(MenuWindowExStyle(activate), kMenuWindowClass,
+                                L"", MenuWindowStyle(), 0, 0, width, height,
+                                owner, nullptr, ModModuleHandle(), this);
         if (!hwnd_) {
             return false;
         }
@@ -7756,6 +7774,7 @@ public:
     static constexpr size_t kMaxWindows = 8;
 
     MenuWindow* Acquire() {
+        std::lock_guard<std::mutex> lock(mutex_);
         // Reuse only windows created by this thread: DestroyWindow cannot
         // destroy another thread's window, and a cross-thread window would
         // outlive the DLL with its class procedure.
@@ -7781,6 +7800,7 @@ public:
         if (!window) {
             return;
         }
+        std::lock_guard<std::mutex> lock(mutex_);
         if (g_unloading.load()) {
             window->Destroy();
             return;
@@ -7792,6 +7812,7 @@ public:
     // Destroys idle windows only. Windows checked out by a live session stay
     // valid; that session's teardown destroys them (see Release).
     void DestroyFreeWindows() {
+        std::lock_guard<std::mutex> lock(mutex_);
         const DWORD self = GetCurrentThreadId();
         for (size_t i = 0; i < free_.size();) {
             if (free_[i]->OwnerThread() == self) {
@@ -7805,6 +7826,7 @@ public:
 
     // Destroys every window; only safe when no session is using the pool.
     void DestroyAll() {
+        std::lock_guard<std::mutex> lock(mutex_);
         for (auto& window : all_) {
             window->Destroy();
         }
@@ -7812,14 +7834,18 @@ public:
         free_.clear();
     }
 
-    size_t Size() const { return all_.size(); }
+    size_t Size() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return all_.size();
+    }
 
 private:
+    mutable std::mutex mutex_;
     std::vector<std::unique_ptr<MenuWindow>> all_;
     std::vector<MenuWindow*> free_;
 };
 
-CMO_NO_DESTROY inline MenuWindowPool g_menuWindowPool;
+CMO_NO_DESTROY inline std::optional<MenuWindowPool> g_menuWindowPool{std::in_place};
 
 // ===========================================================================
 // [CMO:MenuWindow] Input state, content caches, and Direct2D drawing.
@@ -8611,7 +8637,7 @@ private:
     bool iconFontUnavailable_ = false;
 };
 
-CMO_NO_DESTROY inline ContentCaches g_contentCaches;
+CMO_NO_DESTROY inline std::optional<ContentCaches> g_contentCaches{std::in_place};
 
 void DrawCheckmark(ID2D1DeviceContext* dc, const RECT& gutterRect,
                    uint32_t color) {
@@ -11548,7 +11574,7 @@ void CloseSubmenusBelow(MenuSession* session, int index) {
         if (session->backdrops.size() >= session->windows.size() + 1) {
             session->backdrops.pop_back();
         }
-        g_menuWindowPool.Release(window);
+        g_menuWindowPool->Release(window);
     }
     session->active = index;
     if (index >= 0 && index < static_cast<int>(session->states.size())) {
@@ -11575,12 +11601,12 @@ void OpenSubmenu(MenuSession* session, int index, int itemIndex) {
     CloseSubmenusBelow(session, index);
     const LayoutPanel& childPanel = parent->children[item.submenuIndex];
 
-    MenuWindow* child = g_menuWindowPool.Acquire();
+    MenuWindow* child = g_menuWindowPool->Acquire();
     if (!child ||
         !child->Create(session->windows[index]->Handle(), &childPanel, false,
                        session->margin)) {
         if (child) {
-            g_menuWindowPool.Release(child);
+            g_menuWindowPool->Release(child);
         }
         return;
     }
@@ -12166,7 +12192,8 @@ LRESULT CustomMenuWindowProc(MenuWindow* window, HWND hwnd, UINT msg,
 
 CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
                                 HWND owner, POINT pt,
-                                SettingsSessionContext* settings = nullptr) {
+                                SettingsSessionContext* settings = nullptr,
+                                bool activate = false) {
     CustomMenuResult result;
     if (g_unloading.load()) {
         result.failed = true;
@@ -12197,7 +12224,7 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
 
     std::shared_ptr<const LayoutPanel> panel;
     if (!settings) {
-        panel = g_layoutCache.Find(key);
+        panel = g_layoutCache->Find(key);
     }
     if (!panel) {
         auto built = std::make_shared<LayoutPanel>(
@@ -12207,12 +12234,12 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
         if (SUCCEEDED(g_renderDevice.D2DDevice()->CreateDeviceContext(
                 D2D1_DEVICE_CONTEXT_OPTIONS_NONE, &bindDc)) &&
             bindDc) {
-            g_contentCaches.Bind(*built, metrics, bindDc);
+            g_contentCaches->Bind(*built, metrics, bindDc);
             bindDc->Release();
             bound = true;
         }
         if (bound && !settings) {
-            g_layoutCache.Put(key, built);
+            g_layoutCache->Put(key, built);
         }
         panel = built;
     }
@@ -12221,15 +12248,15 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
         return result;
     }
 
-    MenuWindow* root = g_menuWindowPool.Acquire();
+    MenuWindow* root = g_menuWindowPool->Acquire();
     const int margin =
         appearance.shadow && (metrics.shadowSize > 0 || metrics.shadowBlur > 0)
             ? ShadowMargin(metrics.shadowSize, metrics.shadowBlur,
                            metrics.shadowOffsetX, metrics.shadowOffsetY)
             : 0;
-    if (!root || !root->Create(owner, panel.get(), true, margin)) {
+    if (!root || !root->Create(owner, panel.get(), true, margin, activate)) {
         if (root) {
-            g_menuWindowPool.Release(root);
+            g_menuWindowPool->Release(root);
         }
         result.failed = true;
         return result;
@@ -12300,6 +12327,10 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
     // at full opacity.
     RenderSessionFrame(session, ComputeAnimationFrame(opening, 0.0f, true));
     root->Show();
+    if (activate) {
+        // WM_HOTKEY grants this thread the right to set the foreground window.
+        SetForegroundWindow(root->Handle());
+    }
     RunSessionAnimation(session, opening, true);
     // Install the mouse hook after the open animation: while it is installed,
     // a sleeping animation loop delays mouse input system-wide.
@@ -12384,9 +12415,9 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
         }
     }
     for (size_t i = session.windows.size(); i > 1; --i) {
-        g_menuWindowPool.Release(session.windows[i - 1]);
+        g_menuWindowPool->Release(session.windows[i - 1]);
     }
-    g_menuWindowPool.Release(root);
+    g_menuWindowPool->Release(root);
     if (g_menuSession == &session) {
         g_menuWindowMessageHook = nullptr;
         g_menuSession = nullptr;
@@ -12424,7 +12455,7 @@ void RelayoutSession(MenuSession& session) {
     if (SUCCEEDED(g_renderDevice.D2DDevice()->CreateDeviceContext(
             D2D1_DEVICE_CONTEXT_OPTIONS_NONE, &bindDc)) &&
         bindDc) {
-        g_contentCaches.Bind(*panel, session.metrics, bindDc);
+        g_contentCaches->Bind(*panel, session.metrics, bindDc);
         bindDc->Release();
     }
     settings->panel = panel;
@@ -12616,7 +12647,7 @@ void SettingsApplyReset(MenuSession& session, const std::wstring& key) {
     SettingsRefreshSession(session);
 }
 
-void OpenSettingsMenu(HWND owner, POINT pt) {
+void OpenSettingsMenu(HWND owner, POINT pt, bool activate = false) {
     if (g_unloading.load() || g_settings->menuMode != 0 || g_menuSession) {
         return;
     }
@@ -12674,27 +12705,27 @@ void OpenSettingsMenu(HWND owner, POINT pt) {
     key.darkTheme = settings.darkSystemTheme;
     settings.dpi = key.dpi;
     const CustomMenuResult result =
-        ShowCustomMenu(model, key, owner, pt, &settings);
+        ShowCustomMenu(model, key, owner, pt, &settings, activate);
     if (result.busy && g_settings->debugLogging) {
         Wh_Log(L"Settings menu not shown; another menu is open");
     }
 }
 
+// Defined with the pending-capture queue later in this file.
+void ReleasePendingCapturesForCurrentThread();
+
 // ---------------------------------------------------------------------------
-// Unload coordination. Every mod window belongs to the UI thread. Wh_ModUninit
-// runs on Windhawk's management thread, where DestroyWindow cannot destroy
-// windows owned by another thread; they would survive the unload with dangling
-// window procedures (a CFG crash on the next message). A hidden message-only
-// window created on the UI thread receives a synchronous cleanup request
-// instead, so all windows are destroyed and the classes unregistered before
-// the DLL goes away.
+// Unload coordination. Every mod window belongs to the thread that created
+// it, and Wh_ModUninit runs on Windhawk's management thread, where
+// DestroyWindow cannot destroy another thread's window; survivors would keep
+// window procedures that point into the unloaded DLL. Each thread that shows
+// a menu therefore gets its own hidden message-only control window, and
+// Wh_ModUninit posts a teardown request to every one of them and waits until
+// they are all gone.
 constexpr wchar_t kControlWindowClass[] = L"ContextMenuOverhaulV2Control";
 constexpr UINT kControlUninitMessage = WM_APP + 37;
 constexpr int kSettingsHotkeyId = 0x5E77;
 
-// (Re-)registers the optional global settings hotkey on the control window.
-// Only one explorer process can own a given combination; failures are logged
-// and the menu row remains the primary entry point.
 // The optional global hotkey lives on its own message-only window and thread,
 // so it works before any menu has been shown and RegisterHotKey /
 // UnregisterHotKey always run on the thread that owns the window.
@@ -12737,7 +12768,7 @@ LRESULT CALLBACK HotkeyWindowProc(HWND hwnd, UINT msg, WPARAM wParam,
     if (msg == WM_HOTKEY && wParam == kSettingsHotkeyId) {
         POINT pt = {};
         GetCursorPos(&pt);
-        OpenSettingsMenu(SettingsMenuOwner(), pt);
+        OpenSettingsMenu(SettingsMenuOwner(), pt, /*activate=*/true);
         return 0;
     }
     if (msg == kHotkeyReregisterMessage) {
@@ -12831,6 +12862,7 @@ private:
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }
+        g_menuWindowPool->DestroyFreeWindows();
         if (window) {
             DestroyWindow(window);
         }
@@ -12853,6 +12885,9 @@ LRESULT CALLBACK ControlWindowProc(HWND hwnd, UINT msg, WPARAM wParam,
                                    LPARAM lParam) {
     if (msg == kControlUninitMessage) {
         g_unloading.store(true);
+        // Captures belong to the thread that parked them; release them here,
+        // on that thread, while the shell objects are still valid.
+        ReleasePendingCapturesForCurrentThread();
         if (g_menuSession) {
             g_menuSession->done = true;
             PostThreadMessageW(GetCurrentThreadId(), WM_NULL, 0, 0);
@@ -12866,7 +12901,7 @@ LRESULT CALLBACK ControlWindowProc(HWND hwnd, UINT msg, WPARAM wParam,
         if (hook) {
             UnhookWindowsHookEx(hook);
         }
-        g_menuWindowPool.DestroyFreeWindows();
+        g_menuWindowPool->DestroyFreeWindows();
         DestroyWindow(hwnd);
         {
             std::lock_guard<std::mutex> lock(g_controlWindowsMutex);
@@ -12879,11 +12914,21 @@ LRESULT CALLBACK ControlWindowProc(HWND hwnd, UINT msg, WPARAM wParam,
         UnregisterClassW(kControlWindowClass, ModModuleHandle());
         return 0;
     }
+    if (msg == WM_NCDESTROY) {
+        std::lock_guard<std::mutex> lock(g_controlWindowsMutex);
+        const auto it = g_controlWindows.find(GetCurrentThreadId());
+        if (it != g_controlWindows.end() && it->second == hwnd) {
+            g_controlWindows.erase(it);
+        }
+    }
     return DefWindowProcW(hwnd, msg, wParam, lParam);
 }
 
 // Must be called on the UI thread (the TrackPopupMenu hook thread).
 bool EnsureControlWindow() {
+    if (g_unloading.load()) {
+        return false;
+    }
     const DWORD threadId = GetCurrentThreadId();
     {
         std::lock_guard<std::mutex> lock(g_controlWindowsMutex);
@@ -12966,21 +13011,21 @@ void PrebuildLayoutsForWarmup(const std::vector<MenuModel>& models, uint32_t dpi
         const LayoutKey key =
             MakeLayoutKey(model.sig, effective, dpi, darkTheme, model,
                           g_themeStore.Revision());
-        if (g_layoutCache.Find(key)) {
+        if (g_layoutCache->Find(key)) {
             continue;
         }
         auto panel =
             std::make_shared<LayoutPanel>(BuildLayoutPanel(
                 model.items, metrics, &MeasureTextWidthDirectWrite));
-        g_contentCaches.Bind(*panel, metrics, dc);
-        g_layoutCache.Put(key, panel);
+        g_contentCaches->Bind(*panel, metrics, dc);
+        g_layoutCache->Put(key, panel);
     }
     dc->Release();
 }
 
 void OnDeviceLost() {
-    g_layoutCache.InvalidateDevice();
-    g_contentCaches.Clear();
+    g_layoutCache->InvalidateDevice();
+    g_contentCaches->Clear();
     ReleaseOverlayResources();
     g_renderDevice.HandleDeviceLost();
 }
@@ -14265,17 +14310,22 @@ void ReleaseCapture(PendingCapture& capture) {
 class PendingQueue {
 public:
     void Push(PendingCapture capture) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        capture.ownerThread = GetCurrentThreadId();
-        if (capture.tick == 0) {
-            capture.tick = GetTickCount64();
+        std::vector<PendingCapture> victims;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            capture.ownerThread = GetCurrentThreadId();
+            if (capture.tick == 0) {
+                capture.tick = GetTickCount64();
+            }
+            ExpireOwnedLocked(capture.ownerThread, GetTickCount64(), 60000, victims);
+            if (captures_.size() >= kMaxCaptures) {
+                // Evict only this thread's oldest capture; another thread's
+                // capture must be released on its own thread.
+                EvictOldestOwnedLocked(capture.ownerThread, victims);
+            }
+            captures_.push_back(capture);
         }
-        ExpireOlderThanLocked(GetTickCount64(), 60000);
-        if (captures_.size() >= kMaxCaptures) {
-            ReleaseCapture(captures_.front());
-            captures_.erase(captures_.begin());
-        }
-        captures_.push_back(capture);
+        ReleaseAll(victims);
     }
 
     // Takes the capture whose deferred menu is the one being shown. A capture
@@ -14285,66 +14335,84 @@ public:
     // unrelated captures are released instead of being replayed into a menu
     // they do not belong to.
     bool TakeForMenu(HMENU menu, PendingCapture& out, bool navFallback = false) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        const DWORD self = GetCurrentThreadId();
-        const ULONGLONG now = GetTickCount64();
+        std::vector<PendingCapture> victims;
+        bool found = false;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            const DWORD self = GetCurrentThreadId();
+            const ULONGLONG now = GetTickCount64();
 
-        size_t index = kNoIndex;
-        for (size_t i = 0; i < captures_.size(); ++i) {
-            if (captures_[i].ownerThread == self && captures_[i].menu == menu) {
-                index = i;
-                break;
-            }
-        }
-        if (index == kNoIndex && navFallback) {
-            for (size_t i = captures_.size(); i-- > 0;) {
-                if (captures_[i].ownerThread == self &&
-                    now - captures_[i].tick <= kNavFallbackFreshMs) {
+            size_t index = kNoIndex;
+            for (size_t i = 0; i < captures_.size(); ++i) {
+                if (captures_[i].ownerThread == self && captures_[i].menu == menu) {
                     index = i;
                     break;
                 }
             }
+            if (index == kNoIndex && navFallback) {
+                for (size_t i = captures_.size(); i-- > 0;) {
+                    if (captures_[i].ownerThread == self &&
+                        now - captures_[i].tick <= kNavFallbackFreshMs) {
+                        index = i;
+                        break;
+                    }
+                }
+            }
+            if (index != kNoIndex) {
+                out = captures_[index];
+                captures_.erase(captures_.begin() + static_cast<std::ptrdiff_t>(index));
+                found = true;
+            }
+            MoveOwnedLocked(self, victims);
         }
-        if (index == kNoIndex) {
-            ReleaseOwnedLocked(self);
-            return false;
-        }
-        out = captures_[index];
-        captures_.erase(captures_.begin() + static_cast<std::ptrdiff_t>(index));
-        ReleaseOwnedLocked(self);
-        return true;
+        ReleaseAll(victims);
+        return found;
     }
 
     // Takes the newest capture owned by the calling thread. Returns false when
     // nothing is pending for it.
     bool Take(PendingCapture& out) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        const DWORD self = GetCurrentThreadId();
-        for (size_t i = captures_.size(); i-- > 0;) {
-            if (captures_[i].ownerThread == self) {
-                out = captures_[i];
-                captures_.erase(captures_.begin() + static_cast<std::ptrdiff_t>(i));
-                ReleaseOwnedLocked(self);
-                return true;
+        std::vector<PendingCapture> victims;
+        bool found = false;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            const DWORD self = GetCurrentThreadId();
+            for (size_t i = captures_.size(); i-- > 0;) {
+                if (captures_[i].ownerThread == self) {
+                    out = captures_[i];
+                    captures_.erase(captures_.begin() + static_cast<std::ptrdiff_t>(i));
+                    found = true;
+                    break;
+                }
+            }
+            if (found) {
+                MoveOwnedLocked(self, victims);
             }
         }
-        return false;
+        ReleaseAll(victims);
+        return found;
     }
 
-    // Releases every capture, from any thread. Only used at unload, where the
-    // queue must not outlive the module.
-    void Clear() {
-        std::lock_guard<std::mutex> lock(mutex_);
-        for (PendingCapture& capture : captures_) {
-            ReleaseCapture(capture);
+    // Releases the calling thread's captures; called from that thread's
+    // control-window teardown. Captures on threads that cannot be reached are
+    // intentionally leaked rather than released from the wrong thread.
+    void ReleaseOwnedBy(DWORD ownerThread) {
+        std::vector<PendingCapture> victims;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            MoveOwnedLocked(ownerThread, victims);
         }
-        captures_.clear();
+        ReleaseAll(victims);
     }
 
-    // Drops captures older than maxAgeMs; no caller holds them at that point.
+    // Drops the calling thread's captures older than maxAgeMs.
     void ExpireOlderThan(ULONGLONG now, ULONGLONG maxAgeMs) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        ExpireOlderThanLocked(now, maxAgeMs);
+        std::vector<PendingCapture> victims;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            ExpireOwnedLocked(GetCurrentThreadId(), now, maxAgeMs, victims);
+        }
+        ReleaseAll(victims);
     }
 
     bool HasPending() const {
@@ -14357,12 +14425,12 @@ private:
     static constexpr size_t kNoIndex = static_cast<size_t>(-1);
     static constexpr ULONGLONG kNavFallbackFreshMs = 1000;
 
-    // Releases only the calling thread's captures; another thread's captures
-    // are still waiting for their own menu.
-    void ReleaseOwnedLocked(DWORD ownerThread) {
+    // Moves the given thread's captures into `victims` so they can be released
+    // after the lock is dropped.
+    void MoveOwnedLocked(DWORD ownerThread, std::vector<PendingCapture>& victims) {
         for (size_t i = 0; i < captures_.size();) {
             if (captures_[i].ownerThread == ownerThread) {
-                ReleaseCapture(captures_[i]);
+                victims.push_back(captures_[i]);
                 captures_.erase(captures_.begin() + static_cast<std::ptrdiff_t>(i));
             } else {
                 ++i;
@@ -14370,25 +14438,50 @@ private:
         }
     }
 
-    void ExpireOlderThanLocked(ULONGLONG now, ULONGLONG maxAgeMs) {
+    void ExpireOwnedLocked(DWORD ownerThread, ULONGLONG now, ULONGLONG maxAgeMs,
+                           std::vector<PendingCapture>& victims) {
         for (size_t i = 0; i < captures_.size();) {
-            if (now - captures_[i].tick > maxAgeMs) {
-                ReleaseCapture(captures_[i]);
+            if (captures_[i].ownerThread == ownerThread &&
+                now - captures_[i].tick > maxAgeMs) {
+                victims.push_back(captures_[i]);
                 captures_.erase(captures_.begin() + static_cast<std::ptrdiff_t>(i));
             } else {
                 ++i;
             }
         }
+    }
+
+    void EvictOldestOwnedLocked(DWORD ownerThread,
+                                std::vector<PendingCapture>& victims) {
+        for (size_t i = 0; i < captures_.size(); ++i) {
+            if (captures_[i].ownerThread == ownerThread) {
+                victims.push_back(captures_[i]);
+                captures_.erase(captures_.begin() + static_cast<std::ptrdiff_t>(i));
+                return;
+            }
+        }
+    }
+
+    static void ReleaseAll(std::vector<PendingCapture>& victims) {
+        for (PendingCapture& capture : victims) {
+            ReleaseCapture(capture);
+        }
+        victims.clear();
     }
 
     mutable std::mutex mutex_;
     std::vector<PendingCapture> captures_;
 };
 
-// Not thread_local: unload must release captures parked on any thread, and a
-// thread_local destructor would run after the module is unmapped. Only the
-// thread that parked a capture can take it back out.
+// One queue shared by all threads: a capture is only ever handed back to the
+// thread that parked it, and it is released from that thread's teardown (or
+// leaked if the thread is gone). No thread_local destructor can run after the
+// module is unmapped.
 CMO_NO_DESTROY inline std::optional<PendingQueue> g_pending{std::in_place};
+
+void ReleasePendingCapturesForCurrentThread() {
+    g_pending->ReleaseOwnedBy(GetCurrentThreadId());
+}
 
 // Undocumented shell32 bit set for every menu that is actually shown as a
 // popup. Desktop menus (icons and background) pass the same flags as Explorer
@@ -15426,11 +15519,21 @@ void RebuildSendToChildren() {
                 if (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
                     continue;
                 }
+                if (findData.dwFileAttributes &
+                    (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM)) {
+                    continue;
+                }
                 std::wstring label = findData.cFileName;
                 const size_t dot = label.find_last_of(L'.');
-                if (dot != std::wstring::npos) {
-                    label.resize(dot);
+                // Only .lnk entries can be "sent" with ShellExecute. The
+                // other entries (.ZFSendToTarget, .DeskLink, .MAPIMail,
+                // .mydocs) are drop targets that need IDropTarget::Drop; the
+                // captured shell menu supplies the real Send to submenu.
+                if (dot == std::wstring::npos || dot == 0 ||
+                    _wcsicmp(label.c_str() + dot, L".lnk") != 0) {
+                    continue;
                 }
+                label.resize(dot);
 
                 MenuItem child{};
                 child.id = nextChildId++;
@@ -17744,17 +17847,17 @@ private:
     std::unordered_map<std::wstring, HICON> icons_;
 };
 
-CMO_NO_DESTROY inline IconCache g_iconCache;
+CMO_NO_DESTROY inline std::optional<IconCache> g_iconCache{std::in_place};
 
 HBITMAP GetIconBitmapForMenu(const std::wstring& iconRef,
                              const std::vector<uint8_t>& iconPixels, int sizePx) {
-    return g_iconCache.GetBitmapFor(iconRef, iconPixels, sizePx);
+    return g_iconCache->GetBitmapFor(iconRef, iconPixels, sizePx);
 }
 
 HBITMAP GetAlphaIconBitmapForMenu(const std::wstring& iconRef,
                                   const std::vector<uint8_t>& iconPixels,
                                   int sizePx) {
-    return g_iconCache.GetAlphaBitmapFor(iconRef, iconPixels, sizePx);
+    return g_iconCache->GetAlphaBitmapFor(iconRef, iconPixels, sizePx);
 }
 
 class NativeMenuView {
@@ -17773,7 +17876,7 @@ public:
             return std::nullopt;
         }
         const int iconSize = GetSystemMetrics(SM_CXSMICON);
-        g_iconCache.SetThemeOwner(owner);
+        g_iconCache->SetThemeOwner(owner);
         AppendItems(menu, model.items, iconSize);
 
         if (!TrackPopupMenuEx_Original) {
@@ -17835,7 +17938,7 @@ private:
             // Checked items keep the checkmark gutter; everything else may
             // carry a cached icon bitmap.
             if (!(item.flags & kModelChecked)) {
-                HBITMAP bitmap = g_iconCache.GetBitmap(item, iconSize);
+                HBITMAP bitmap = g_iconCache->GetBitmap(item, iconSize);
                 if (bitmap) {
                     MENUITEMINFOW bitmapInfo = {};
                     bitmapInfo.cbSize = sizeof(bitmapInfo);
@@ -18129,20 +18232,24 @@ public:
         if (thread_ || g_unloading.load()) {
             return;
         }
-        stopEvent_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-        resumeEvent_ = CreateEventW(nullptr, TRUE, TRUE, nullptr);
-        if (!stopEvent_ || !resumeEvent_) {
-            if (stopEvent_) CloseHandle(stopEvent_);
-            if (resumeEvent_) CloseHandle(resumeEvent_);
-            stopEvent_ = nullptr;
-            resumeEvent_ = nullptr;
-            return;
+        {
+            std::lock_guard<std::mutex> eventsLock(eventsMutex_);
+            stopEvent_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+            resumeEvent_ = CreateEventW(nullptr, TRUE, TRUE, nullptr);
+            if (!stopEvent_ || !resumeEvent_) {
+                if (stopEvent_) CloseHandle(stopEvent_);
+                if (resumeEvent_) CloseHandle(resumeEvent_);
+                stopEvent_ = nullptr;
+                resumeEvent_ = nullptr;
+                return;
+            }
         }
 
         thread_ = CreateThread(nullptr, 0, &Warmup::ThreadProc, this, 0, nullptr);
         if (thread_) {
             SetThreadPriority(thread_, THREAD_PRIORITY_BELOW_NORMAL);
         } else {
+            std::lock_guard<std::mutex> eventsLock(eventsMutex_);
             CloseHandle(stopEvent_);
             CloseHandle(resumeEvent_);
             stopEvent_ = nullptr;
@@ -18152,22 +18259,28 @@ public:
 
     void Stop() {
         std::lock_guard<std::mutex> lock(lifecycleMutex_);
-        if (stopEvent_) {
-            SetEvent(stopEvent_);
+        {
+            std::lock_guard<std::mutex> eventsLock(eventsMutex_);
+            if (stopEvent_) {
+                SetEvent(stopEvent_);
+            }
+            // Wake a paused worker so it can observe the stop event.
+            if (resumeEvent_) {
+                SetEvent(resumeEvent_);
+            }
+            paused_.store(false);
         }
-        // Wake a paused worker so it can observe the stop event.
-        if (resumeEvent_) {
-            SetEvent(resumeEvent_);
-        }
-        paused_.store(false);
 
         // The worker must be joined before the module can unload; there is no
-        // safe give-up path while its code is still on the stack.
+        // safe give-up path while its code is still on the stack. The events
+        // lock is not held here, so a menu opening on a UI thread can still
+        // pause the worker while this join runs.
         if (thread_) {
             WaitForSingleObject(thread_, INFINITE);
             CloseHandle(thread_);
             thread_ = nullptr;
         }
+        std::lock_guard<std::mutex> eventsLock(eventsMutex_);
         if (stopEvent_) {
             CloseHandle(stopEvent_);
             stopEvent_ = nullptr;
@@ -18180,7 +18293,9 @@ public:
 
     // Pauses warm-up between contexts while a menu is open.
     void SetMenuOpen(bool open) {
-        std::lock_guard<std::mutex> lock(lifecycleMutex_);
+        // Only the small events lock: opening a menu must not block behind a
+        // Stop() that is joining the worker.
+        std::lock_guard<std::mutex> lock(eventsMutex_);
         paused_.store(open);
         if (resumeEvent_) {
             if (open) {
@@ -18426,6 +18541,7 @@ private:
     }
 
     std::mutex lifecycleMutex_;
+    std::mutex eventsMutex_;
     HANDLE thread_ = nullptr;
     HANDLE stopEvent_ = nullptr;
     HANDLE resumeEvent_ = nullptr;
@@ -18727,11 +18843,6 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
     const bool clipboardHadData = ClipboardHasFileData();
 
     g_warmup.SetMenuOpen(true);
-
-    // Ensure the UI-thread cleanup window exists before any menu (custom or
-    // native) can block the thread, so unload can close it and remove
-    // subclasses.
-    EnsureControlWindow();
 
     while (true) {
         std::optional<MenuModel> cached;
@@ -19230,7 +19341,7 @@ BOOL Wh_ModInit() {
     cmo::LoadSettings();
     cmo::g_themeStore.EnsureLoaded();
     cmo::g_lastAppliedTheme = cmo::g_settings->themeIndex;
-    cmo::g_iconCache.PreloadCoreIcons(GetSystemMetrics(SM_CXSMICON));
+    cmo::g_iconCache->PreloadCoreIcons(GetSystemMetrics(SM_CXSMICON));
     cmo::g_hotkeyHost.Start();
 
     const std::wstring cachePath = cmo::CacheFilePath();
@@ -19280,9 +19391,6 @@ void Wh_ModUninit() {
     cmo::g_invalidation.Stop();
     cmo::g_warmup.Stop();
 
-    // Captures parked on UI threads hold context menu objects; release them
-    // while the module is still loaded.
-    cmo::g_pending->Clear();
 
     // The hotkey thread may be running a settings session; join it before the
     // per-thread teardown below.
@@ -19310,6 +19418,16 @@ void Wh_ModUninit() {
         size_t remaining = 0;
         {
             std::lock_guard<std::mutex> lock(cmo::g_controlWindowsMutex);
+            // A thread can exit and have its window destroyed before the
+            // teardown message is processed; drop those entries here.
+            for (auto it = cmo::g_controlWindows.begin();
+                 it != cmo::g_controlWindows.end();) {
+                if (IsWindow(it->second)) {
+                    ++it;
+                } else {
+                    it = cmo::g_controlWindows.erase(it);
+                }
+            }
             remaining = cmo::g_controlWindows.size();
         }
         if (remaining == 0 && cmo::g_activeSessions.load() == 0 &&
@@ -19325,15 +19443,19 @@ void Wh_ModUninit() {
         UnhookWindowsHookEx(hook);
     }
     cmo::ReleaseOverlayResources();
-    // Best effort: the UI cleanup may have raced an open session and failed to
-    // unregister the class; all windows are gone by now.
+    // Best effort: the per-thread cleanup may have raced an open session and
+    // failed to unregister the classes; all windows are gone by now.
     UnregisterClassW(cmo::kMenuWindowClass, cmo::ModModuleHandle());
+    UnregisterClassW(cmo::kControlWindowClass, cmo::ModModuleHandle());
 
-    cmo::g_contentCaches.Clear();
-    cmo::g_layoutCache.InvalidateAll();
+    // Fully release the resource-owning globals; CMO_NO_DESTROY keeps their
+    // destructors from running at process exit.
+    cmo::g_menuWindowPool.reset();
+    cmo::g_layoutCache.reset();
+    cmo::g_contentCaches.reset();
+    cmo::g_iconCache.reset();
     cmo::g_renderDevice.Shutdown();
     cmo::RestoreMenuDelay();
-    cmo::g_iconCache.Clear();
 
     const std::wstring cachePath = cmo::CacheFilePath();
     if (!cachePath.empty()) {

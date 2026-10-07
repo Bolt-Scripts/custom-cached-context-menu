@@ -201,7 +201,7 @@ int main() {
     CHECK(!queue.Take(fresh));
 
     queue.Push(capture);
-    queue.Clear();
+    queue.ReleaseOwnedBy(GetCurrentThreadId());
     CHECK(!queue.Take(fresh));
 
     std::vector<std::wstring> onePath{L"a.txt"};
@@ -1075,13 +1075,13 @@ int main() {
         }
         cmo::MenuItem iconItem{};
         iconItem.iconPixels = pixels;
-        HBITMAP bitmap = cmo::g_iconCache.GetBitmap(iconItem, 16);
+        HBITMAP bitmap = cmo::g_iconCache->GetBitmap(iconItem, 16);
         CHECK(bitmap != nullptr);
         if (bitmap) {
             BITMAP bitmapInfo = {};
             CHECK(GetObjectW(bitmap, sizeof(bitmapInfo), &bitmapInfo) != 0);
             CHECK(bitmapInfo.bmWidth == 16 && bitmapInfo.bmHeight == 16);
-            CHECK(cmo::g_iconCache.GetBitmap(iconItem, 16) == bitmap);
+            CHECK(cmo::g_iconCache->GetBitmap(iconItem, 16) == bitmap);
         }
     }
 
@@ -1211,7 +1211,7 @@ int main() {
     {
         cmo::MenuItem glyphItem{};
         glyphItem.iconRef = L"@glyph:E8C6";
-        HBITMAP glyph = cmo::g_iconCache.GetBitmap(glyphItem, 16);
+        HBITMAP glyph = cmo::g_iconCache->GetBitmap(glyphItem, 16);
         (void)glyph;
     }
 
@@ -1260,7 +1260,7 @@ int main() {
 
         cmo::MenuItem keyedItem{};
         keyedItem.iconPixels = keyedPixels;
-        HBITMAP keyedBitmap = cmo::g_iconCache.GetBitmap(keyedItem, 16);
+        HBITMAP keyedBitmap = cmo::g_iconCache->GetBitmap(keyedItem, 16);
         CHECK(keyedBitmap != nullptr);
         if (keyedBitmap) {
             BITMAPINFO readInfo = {};
@@ -2942,11 +2942,11 @@ int main() {
         CHECK(!(a == c));
 
         auto panel = std::make_shared<cmo::LayoutPanel>();
-        cmo::g_layoutCache.SetMaxEntries(4);
-        cmo::g_layoutCache.Put(a, panel);
-        CHECK(cmo::g_layoutCache.Find(a) != nullptr);
-        cmo::g_layoutCache.InvalidateDevice();
-        CHECK(cmo::g_layoutCache.Find(a) == nullptr);
+        cmo::g_layoutCache->SetMaxEntries(4);
+        cmo::g_layoutCache->Put(a, panel);
+        CHECK(cmo::g_layoutCache->Find(a) != nullptr);
+        cmo::g_layoutCache->InvalidateDevice();
+        CHECK(cmo::g_layoutCache->Find(a) == nullptr);
     }
 
     // v2 review fixes: inline comments, %dir%, submenu match gating, split.

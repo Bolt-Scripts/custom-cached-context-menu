@@ -3,7 +3,7 @@
 *.dmp
 
 # Test build output
-tests/logic_test.exe
+tests/*.exe
 cmo-test-storage/
 
 # Agent session artifacts (not part of the published mod)

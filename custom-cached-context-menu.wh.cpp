@@ -238,6 +238,20 @@ MIT
 // ===========================================================================
 namespace cmo {
 
+// The mod's own module handle. ModModuleHandle() returns Explorer's,
+// while the window classes and hook procedures live in the mod DLL.
+HMODULE ModModuleHandle() {
+    static HMODULE module = [] {
+        HMODULE result = nullptr;
+        GetModuleHandleExW(
+            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            reinterpret_cast<LPCWSTR>(&ModModuleHandle), &result);
+        return result;
+    }();
+    return module;
+}
+
 struct Settings {
     bool enableShiftBypass = true;
     std::wstring theme = L"Custom (menu.ini)";
@@ -327,16 +341,7 @@ void LoadSettings() {
     Wh_FreeStringSetting(hotkey);
     g_settings.themeIndex = ThemeIndexFromName(g_settings.theme);
     PCWSTR menuMode = Wh_GetStringSetting(L"menuMode");
-    if (menuMode && menuMode[0]) {
-        g_settings.menuMode =
-            (_wcsicmp(menuMode, L"classic") == 0 ||
-             wcscmp(menuMode, L"1") == 0)
-                ? 1
-                : 0;
-    } else {
-        // Legacy numeric value from before the setting became an enum.
-        g_settings.menuMode = Wh_GetIntSetting(L"menuMode");
-    }
+    g_settings.menuMode = _wcsicmp(menuMode, L"classic") == 0 ? 1 : 0;
     Wh_FreeStringSetting(menuMode);
     g_settings.showMoreOptionsItem = Wh_GetIntSetting(L"showMoreOptionsItem") != 0;
     g_settings.submenuDelayMs = Wh_GetIntSetting(L"submenuDelayMs");
@@ -583,11 +588,6 @@ void FlattenIdsInto(const std::vector<MenuItem>& items, std::vector<uint32_t>& o
     }
 }
 
-std::vector<uint32_t> FlattenIds(const MenuModel& model) {
-    std::vector<uint32_t> ids;
-    FlattenIdsInto(model.items, ids);
-    return ids;
-}
 
 const MenuItem* FindByIdIn(const std::vector<MenuItem>& items, uint32_t id) {
     for (const MenuItem& item : items) {
@@ -1091,14 +1091,6 @@ void EnsureNewTemplates() {
         }
     }
 }
-
-#ifdef CMO_TESTING
-void ResetNewTemplatesForTesting() {
-    std::lock_guard<std::mutex> lock(g_newTemplatesMutex);
-    g_newTemplates.clear();
-    g_newTemplatesReady.store(false, std::memory_order_relaxed);
-}
-#endif
 
 void BuildNewMenuChildren(std::vector<MenuItem>& children, uint32_t& nextId) {
     // Never build templates on the open path: the warm-up thread prebuilds
@@ -2273,7 +2265,7 @@ std::wstring CanonicalizeConfig(const std::wstring& text, int toVersion);
 std::wstring GenerateDefaultConfigText() {
     std::wstring text = CanonicalizeConfig(L"", kConfigSchemaVersion);
     const std::wstring examples =
-        L"\n; --- Examples (see docs/CONFIG.md) ---\n"
+        L"\n; --- Examples: https://github.com/Bolt-Scripts/custom-cached-context-menu ---\n"
         L"; [rules]                             ; predicates: label / verb / ext / thirdParty / rule\n"
         L"; hide = label:\"Cast to Device\"       ; drop matching items\n"
         L"; keep = label:Share                  ; protect from the built-in grouping\n"
@@ -2838,18 +2830,6 @@ int ReadSchemaVersion(const std::wstring& text) {
     return 0;
 }
 
-size_t CountSubstring(const std::wstring& text, const std::wstring& needle) {
-    if (needle.empty()) {
-        return 0;
-    }
-    size_t count = 0;
-    size_t pos = 0;
-    while ((pos = text.find(needle, pos)) != std::wstring::npos) {
-        ++count;
-        pos += needle.size();
-    }
-    return count;
-}
 
 std::wstring FormatFontSize(float size) {
     wchar_t buffer[32] = {};
@@ -4295,9 +4275,9 @@ public:
         return config_ ? config_->revision : 0;
     }
 
-    bool ApplyTextForTesting(const std::wstring& text) {
-        return ApplyText(text);
-    }
+#ifdef CMO_TESTING
+    bool ApplyTextForTesting(const std::wstring& text);
+#endif
 
 private:
     void ApplyAndMigrate(const std::wstring& path, const std::wstring& text) {
@@ -5379,25 +5359,6 @@ SettingsTarget ResolveSettingsTarget(int themeIndex, SettingsTargetKind kind) {
     return target;
 }
 
-// Reset restores inheritance: remove the key when something can be inherited
-// (theme preset, light/dark base, derived unset defaults), else write the
-// schema default.
-ConfigOverride ResetOverrideForTarget(const SettingsTarget& target,
-                                      const ConfigSchemaEntry& entry) {
-    ConfigOverride change;
-    change.section = target.section;
-    change.key = entry.key;
-    const bool inherits = target.kind == SettingsTargetKind::ThemeFile ||
-                          target.kind == SettingsTargetKind::MenuIniLight ||
-                          target.kind == SettingsTargetKind::MenuIniDark ||
-                          entry.unset;
-    if (inherits) {
-        change.remove = true;
-        return change;
-    }
-    change.value = NormalizeAppearanceValue(entry, entry.defaultValue);
-    return change;
-}
 
 // Typed numeric field: optional '-', digits only; clamps into [min, max].
 bool ParseIntField(const std::wstring& text, int minValue, int maxValue,
@@ -6332,11 +6293,6 @@ void SettingsWriteFinished(SettingsWriteState& state, bool ok, uint64_t nowMs,
     state.deadlineMs = nowMs + static_cast<uint64_t>(retryMs);
 }
 
-void SettingsRequestFlush(SettingsWriteState& state) {
-    if (state.pending) {
-        state.deadlineMs = 0;
-    }
-}
 
 // One override per dirty key in the target section; unset values remove the
 // key so the target's inheritance (theme preset, light/dark base, derived
@@ -7287,7 +7243,9 @@ class ModeController {
 public:
     MenuMode Current() const { return mode_; }
 
-    void SetMode(MenuMode mode) { mode_ = mode; }
+#ifdef CMO_TESTING
+    void SetMode(MenuMode mode);
+#endif
 
     void RecordSuccess() { consecutiveFailures_ = 0; }
 
@@ -7513,7 +7471,7 @@ public:
                            2 * margin_;
         hwnd_ = CreateWindowExW(MenuWindowExStyle(), kMenuWindowClass, L"",
                                 MenuWindowStyle(), 0, 0, width, height, owner, nullptr,
-                                GetModuleHandleW(nullptr), this);
+                                ModModuleHandle(), this);
         if (!hwnd_) {
             return false;
         }
@@ -7620,13 +7578,13 @@ private:
         wc.cbSize = sizeof(wc);
         wc.style = CS_HREDRAW | CS_VREDRAW;
         wc.lpfnWndProc = &MenuWindow::WindowProc;
-        wc.hInstance = GetModuleHandleW(nullptr);
+        wc.hInstance = ModModuleHandle();
         wc.hCursor = LoadCursorW(nullptr, MAKEINTRESOURCEW(32512));
         wc.lpszClassName = kMenuWindowClass;
         if (!RegisterClassExW(&wc)) {
             // A class left behind by a previous load would keep pointing at
             // the old window procedure; reclaim it instead of using it.
-            UnregisterClassW(kMenuWindowClass, GetModuleHandleW(nullptr));
+            UnregisterClassW(kMenuWindowClass, ModModuleHandle());
             if (!RegisterClassExW(&wc)) {
                 return false;
             }
@@ -10102,37 +10060,6 @@ bool FindMenuItemById(const std::vector<MenuItem>& items, uint32_t id,
     return false;
 }
 
-bool BuildMenuItemForInvocation(const MenuModel& model,
-                                const InvocationDescriptor& descriptor,
-                                MenuItem& out) {
-    if (FindMenuItemById(model.items, descriptor.id, out)) {
-        out.id = descriptor.id;
-        out.action = descriptor.action;
-        out.customCommandIndex = descriptor.customCommandIndex;
-        out.verbOffset = descriptor.verbOffset;
-        if (descriptor.hasOffset) {
-            out.flags |= kModelHasOffset;
-        }
-        return true;
-    }
-
-    MenuItem item{};
-    item.id = descriptor.id;
-    item.kind = ItemKind::Command;
-    item.action = descriptor.action;
-    item.viewAction = descriptor.viewAction;
-    item.verbOffset = descriptor.verbOffset;
-    item.sortIndex = descriptor.sortIndex;
-    item.customCommandIndex = descriptor.customCommandIndex;
-    item.newIndex = descriptor.newIndex;
-    item.canonicalVerb = descriptor.canonicalVerb;
-    item.targetPath = descriptor.targetPath;
-    if (descriptor.hasOffset) {
-        item.flags |= kModelHasOffset;
-    }
-    out = std::move(item);
-    return true;
-}
 
 struct MenuSession {
     CustomMenuResult result;
@@ -12216,7 +12143,7 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
     root->Show();
     if (!g_menuMouseHook.load()) {
         HHOOK hook = SetWindowsHookExW(WH_MOUSE_LL, MenuMouseHookProc,
-                                       GetModuleHandleW(nullptr), 0);
+                                       ModModuleHandle(), 0);
         g_menuMouseHook.store(hook);
         session.ownsMouseHook = hook != nullptr;
         if (!hook && g_settings.debugLogging) {
@@ -12279,7 +12206,6 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
         KillTimer(root->Handle(), kMenuSubmenuTimerId);
         session.submenuTimerActive = false;
     }
-    KillTimer(root->Handle(), kMenuOverlayTimerId);
     KillTimer(root->Handle(), kMenuOverlayTimerId);
     const AnimationSpec closing = ResolveAnimationSpec(appearance, false);
     RunSessionAnimation(session, closing, false);
@@ -12722,18 +12648,18 @@ private:
         WNDCLASSEXW wc = {};
         wc.cbSize = sizeof(wc);
         wc.lpfnWndProc = &HotkeyWindowProc;
-        wc.hInstance = GetModuleHandleW(nullptr);
+        wc.hInstance = ModModuleHandle();
         wc.lpszClassName = kHotkeyWindowClass;
         if (!RegisterClassExW(&wc)) {
             // Reclaim a class left behind by a previous load.
-            UnregisterClassW(kHotkeyWindowClass, GetModuleHandleW(nullptr));
+            UnregisterClassW(kHotkeyWindowClass, ModModuleHandle());
             if (!RegisterClassExW(&wc)) {
                 return;
             }
         }
         HWND window = CreateWindowExW(0, kHotkeyWindowClass, L"", 0, 0, 0, 0, 0,
                                       HWND_MESSAGE, nullptr,
-                                      GetModuleHandleW(nullptr), nullptr);
+                                      ModModuleHandle(), nullptr);
         if (window) {
             window_.store(window);
         }
@@ -12747,7 +12673,7 @@ private:
         if (window) {
             DestroyWindow(window);
         }
-        UnregisterClassW(kHotkeyWindowClass, GetModuleHandleW(nullptr));
+        UnregisterClassW(kHotkeyWindowClass, ModModuleHandle());
     }
 
     std::mutex mutex_;
@@ -12788,8 +12714,8 @@ LRESULT CALLBACK ControlWindowProc(HWND hwnd, UINT msg, WPARAM wParam,
                 g_controlWindows.erase(it);
             }
         }
-        UnregisterClassW(kMenuWindowClass, GetModuleHandleW(nullptr));
-        UnregisterClassW(kControlWindowClass, GetModuleHandleW(nullptr));
+        UnregisterClassW(kMenuWindowClass, ModModuleHandle());
+        UnregisterClassW(kControlWindowClass, ModModuleHandle());
         return 0;
     }
     return DefWindowProcW(hwnd, msg, wParam, lParam);
@@ -12814,11 +12740,11 @@ bool EnsureControlWindow() {
             WNDCLASSEXW wc = {};
             wc.cbSize = sizeof(wc);
             wc.lpfnWndProc = &ControlWindowProc;
-            wc.hInstance = GetModuleHandleW(nullptr);
+            wc.hInstance = ModModuleHandle();
             wc.lpszClassName = kControlWindowClass;
             if (!RegisterClassExW(&wc)) {
                 // Reclaim a class left behind by a previous load.
-                UnregisterClassW(kControlWindowClass, GetModuleHandleW(nullptr));
+                UnregisterClassW(kControlWindowClass, ModModuleHandle());
                 if (!RegisterClassExW(&wc)) {
                     if (g_settings.debugLogging) {
                         Wh_Log(L"Failed to register the control window class");
@@ -12831,7 +12757,7 @@ bool EnsureControlWindow() {
     }
 
     HWND control = CreateWindowExW(0, kControlWindowClass, L"", 0, 0, 0, 0, 0,
-                                   HWND_MESSAGE, nullptr, GetModuleHandleW(nullptr),
+                                   HWND_MESSAGE, nullptr, ModModuleHandle(),
                                    nullptr);
     if (!control) {
         if (g_settings.debugLogging) {
@@ -13149,9 +13075,6 @@ MenuModel BuildCoreModel(Scope scope, const std::vector<std::wstring>& paths, Sh
     return model;
 }
 
-MenuModel BuildCoreFileModel(const std::vector<std::wstring>& paths, Shape shape) {
-    return BuildCoreModel(Scope::Files, paths, shape);
-}
 
 // Merges cached extension items into a freshly built core model: core items
 // keep their order, native invocation descriptors are adopted for matching
@@ -14626,11 +14549,6 @@ std::vector<ShellLabelIcon> BuildShellLabelIcons(
 std::wstring MatchShellLabelIcon(const std::vector<ShellLabelIcon>& icons,
                                  const std::wstring& label);
 
-// Compatibility wrapper; the open path uses the prebuilt list directly.
-std::wstring ResolveRegistryIconByLabel(const ContextSignature& signature,
-                                        const std::wstring& label) {
-    return MatchShellLabelIcon(BuildShellLabelIcons(signature), label);
-}
 
 std::wstring MatchShellLabelIcon(const std::vector<ShellLabelIcon>& icons,
                                  const std::wstring& label) {
@@ -14738,16 +14656,6 @@ void ReadVersionStrings(const std::wstring& path,
     }
 }
 
-bool VersionInfoMatchesLabel(const std::wstring& path, const std::wstring& label) {
-    std::vector<std::wstring> strings;
-    ReadVersionStrings(path, strings);
-    for (const std::wstring& value : strings) {
-        if (LabelMatchesWords(label, value)) {
-            return true;
-        }
-    }
-    return false;
-}
 
 // Last resort: find a ContextMenuHandlers key that matches the item label
 // (by key name, handler DLL name, or DLL version info) and extract icon 0
@@ -14826,14 +14734,6 @@ bool LabelMatchesRegisteredHandler(const ContextSignature& signature,
                                     dllOut);
 }
 
-std::wstring ResolveHandlerDllIconByLabel(const ContextSignature& signature,
-                                          const std::wstring& label) {
-    std::wstring dll;
-    if (LabelMatchesRegisteredHandler(signature, label, &dll)) {
-        return dll + L",0";
-    }
-    return L"";
-}
 
 bool MatchesRegisteredHandler(const std::vector<RegisteredHandlerInfo>& handlers,
                               const std::wstring& label, std::wstring* dllOut) {
@@ -15851,9 +15751,6 @@ bool InvokeCustomCommand(const CustomCommand& command,
 void FillInvokeCommandInfo(const MenuItem& item, const InvocationContext& ctx,
                            std::string& ansiStorage, CMINVOKECOMMANDINFOEX& info);
 
-CMINVOKECOMMANDINFOEX BuildInvokeCommandInfo(const MenuItem& item,
-                                             const InvocationContext& ctx);
-
 // Maps a view action to its documented folder view mode.
 FOLDERVIEWMODE FolderViewModeFor(ViewAction action) {
     switch (action) {
@@ -16581,13 +16478,6 @@ void FillInvokeCommandInfo(const MenuItem& item, const InvocationContext& ctx,
     }
 }
 
-CMINVOKECOMMANDINFOEX BuildInvokeCommandInfo(const MenuItem& item,
-                                             const InvocationContext& ctx) {
-    static thread_local std::string ansiStorage;
-    CMINVOKECOMMANDINFOEX info = {};
-    FillInvokeCommandInfo(item, ctx, ansiStorage, info);
-    return info;
-}
 
 // Runs the real population once per open on the live object, retaining the
 // populated menu for discovery and the native fallback. Idempotent.
@@ -18137,7 +18027,9 @@ public:
         }
     }
 
-    bool IsPaused() const { return paused_.load(); }
+#ifdef CMO_TESTING
+    bool IsPaused() const;
+#endif
 
 private:
     static DWORD WINAPI ThreadProc(LPVOID param) {
@@ -18186,19 +18078,6 @@ private:
                     break;
                 }
                 pos = comma + 1;
-            }
-        } else {
-            // Legacy array value from before the setting became a CSV string.
-            for (int i = 0;; ++i) {
-                PCWSTR value = Wh_GetStringSetting(L"warmupExtensions[%d]", i);
-                const bool empty = !value || !value[0];
-                if (!empty) {
-                    configured.emplace_back(value);
-                }
-                Wh_FreeStringSetting(value);
-                if (empty) {
-                    break;
-                }
             }
         }
         Wh_FreeStringSetting(warmupList);
@@ -18403,15 +18282,10 @@ struct SourceStamp {
     uint64_t dllStamp = 0;
 };
 
-bool StampMatches(const SourceStamp& cached, const SourceStamp& current) {
-    return cached.registryStamp == current.registryStamp &&
-           cached.dllStamp == current.dllStamp;
-}
 
 class Invalidation {
 public:
-    void Start(HWND notifyWnd = nullptr) {
-        (void)notifyWnd;
+    void Start() {
         std::lock_guard<std::mutex> lock(lifecycleMutex_);
         if (thread_ || g_unloading.load()) {
             return;
@@ -18660,7 +18534,7 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
     Shape shape = paths.size() > 1 ? Shape::Multi : Shape::Single;
 
     // The navigation pane has no resolvable selection path; its model comes
-    // from the captured shell menu instead (see the v2.1 spec, section 6.4).
+    // from the captured shell menu instead.
     const bool capturedMenuContext = kind == ShellViewKind::NavPane;
 
     if (!capturedMenuContext &&
@@ -19120,7 +18994,8 @@ void InstallWin11Suppression() {
         return;
     }
 
-    HMODULE shcore = LoadLibraryW(L"shcore.dll");
+    // shcore.dll is a KnownDLL and is already loaded.
+    HMODULE shcore = GetModuleHandleW(L"shcore.dll");
     if (shcore) {
         auto queryService =
             (IUnknown_QueryService_t)GetProcAddress(shcore, "IUnknown_QueryService");
@@ -19135,7 +19010,8 @@ void InstallWin11Suppression() {
         Wh_Log(L"Failed to load shcore.dll");
     }
 
-    HMODULE explorerFrame = LoadLibraryW(L"explorerframe.dll");
+    HMODULE explorerFrame =
+        LoadLibraryExW(L"explorerframe.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
     if (explorerFrame) {
         WindhawkUtils::SYMBOL_HOOK explorerFrameDllHooks[] = {
             {
@@ -19287,7 +19163,7 @@ void Wh_ModUninit() {
     cmo::ReleaseOverlayResources();
     // Best effort: the UI cleanup may have raced an open session and failed to
     // unregister the class; all windows are gone by now.
-    UnregisterClassW(cmo::kMenuWindowClass, GetModuleHandleW(nullptr));
+    UnregisterClassW(cmo::kMenuWindowClass, cmo::ModModuleHandle());
 
     cmo::g_contentCaches.Clear();
     cmo::g_layoutCache.InvalidateAll();
@@ -19322,3 +19198,10 @@ void Wh_ModSettingsChanged() {
         }
     }
 }
+
+#ifdef CMO_TESTING
+// Test-only helpers for the repository's test suite (tests/logic_test.cpp).
+// Windhawk compiles without CMO_TESTING, so this include is never processed
+// and none of the test hooks are part of the submitted mod.
+#include "tests/test_hooks.inc"
+#endif

@@ -17852,7 +17852,8 @@ int WarmupJitterMs(uint32_t seed) {
 class Warmup {
 public:
     void Start() {
-        if (thread_) {
+        std::lock_guard<std::mutex> lock(lifecycleMutex_);
+        if (thread_ || g_unloading.load()) {
             return;
         }
         stopEvent_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
@@ -17877,6 +17878,7 @@ public:
     }
 
     void Stop() {
+        std::lock_guard<std::mutex> lock(lifecycleMutex_);
         if (stopEvent_) {
             SetEvent(stopEvent_);
         }
@@ -17886,32 +17888,26 @@ public:
         }
         paused_.store(false);
 
-        bool exited = true;
+        // The worker must be joined before the module can unload; there is no
+        // safe give-up path while its code is still on the stack.
         if (thread_) {
-            exited = WaitForSingleObject(thread_, 30000) == WAIT_OBJECT_0;
-            if (exited) {
-                CloseHandle(thread_);
-                thread_ = nullptr;
-            } else {
-                // A handler is wedged in the worker. Leaking the handles is
-                // safer than closing them under a running thread.
-                Wh_Log(L"Warm-up thread did not exit; leaking its handles");
-            }
+            WaitForSingleObject(thread_, INFINITE);
+            CloseHandle(thread_);
+            thread_ = nullptr;
         }
-        if (exited) {
-            if (stopEvent_) {
-                CloseHandle(stopEvent_);
-                stopEvent_ = nullptr;
-            }
-            if (resumeEvent_) {
-                CloseHandle(resumeEvent_);
-                resumeEvent_ = nullptr;
-            }
+        if (stopEvent_) {
+            CloseHandle(stopEvent_);
+            stopEvent_ = nullptr;
+        }
+        if (resumeEvent_) {
+            CloseHandle(resumeEvent_);
+            resumeEvent_ = nullptr;
         }
     }
 
     // Pauses warm-up between contexts while a menu is open.
     void SetMenuOpen(bool open) {
+        std::lock_guard<std::mutex> lock(lifecycleMutex_);
         paused_.store(open);
         if (resumeEvent_) {
             if (open) {
@@ -18014,8 +18010,11 @@ private:
         // registry invalidation).
         RebuildSendToChildren();
 
+        // The worker never pumps messages, so it must use the MTA; an STA
+        // without a message loop is exactly the thread that gets stuck in
+        // third-party shell code.
         const bool comInitialized =
-            SUCCEEDED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED));
+            SUCCEEDED(CoInitializeEx(nullptr, COINIT_MULTITHREADED));
 
         int warmed = 0;
         int skipped = 0;
@@ -18164,6 +18163,7 @@ private:
         menu->Release();
     }
 
+    std::mutex lifecycleMutex_;
     HANDLE thread_ = nullptr;
     HANDLE stopEvent_ = nullptr;
     HANDLE resumeEvent_ = nullptr;
@@ -18193,7 +18193,8 @@ class Invalidation {
 public:
     void Start(HWND notifyWnd = nullptr) {
         (void)notifyWnd;
-        if (thread_) {
+        std::lock_guard<std::mutex> lock(lifecycleMutex_);
+        if (thread_ || g_unloading.load()) {
             return;
         }
         stopEvent_ = CreateEventW(nullptr, TRUE, FALSE, nullptr);
@@ -18228,30 +18229,24 @@ public:
     }
 
     void Stop() {
+        std::lock_guard<std::mutex> lock(lifecycleMutex_);
         if (stopEvent_) {
             SetEvent(stopEvent_);
         }
-        bool exited = true;
+        // The worker must be joined before the module can unload; there is no
+        // safe give-up path while its code is still on the stack.
         if (thread_) {
-            exited = WaitForSingleObject(thread_, 5000) == WAIT_OBJECT_0;
-            if (exited) {
-                CloseHandle(thread_);
-                thread_ = nullptr;
-            } else {
-                // Leaking the handles is safer than closing them under a
-                // thread that is still running mod code.
-                Wh_Log(L"Invalidation thread did not exit; leaking its handles");
-            }
+            WaitForSingleObject(thread_, INFINITE);
+            CloseHandle(thread_);
+            thread_ = nullptr;
         }
-        if (exited) {
-            if (stopEvent_) {
-                CloseHandle(stopEvent_);
-                stopEvent_ = nullptr;
-            }
-            if (checkEvent_) {
-                CloseHandle(checkEvent_);
-                checkEvent_ = nullptr;
-            }
+        if (stopEvent_) {
+            CloseHandle(stopEvent_);
+            stopEvent_ = nullptr;
+        }
+        if (checkEvent_) {
+            CloseHandle(checkEvent_);
+            checkEvent_ = nullptr;
         }
     }
 
@@ -18327,8 +18322,11 @@ private:
         g_cache.Clear();
         InvalidateSendToChildren();
         // The warm-up thread rebuilds the SendTo entries and pre-built models.
-        g_warmup.Stop();
-        g_warmup.Start();
+        // Never restart it once the mod is unloading.
+        if (!g_unloading.load()) {
+            g_warmup.Stop();
+            g_warmup.Start();
+        }
         Wh_Log(L"%s; cache invalidated", reason);
     }
 
@@ -18364,8 +18362,10 @@ private:
                 nextRevalidationTick_ = now + 3600000;
                 if (g_cache.RevalidateStamps()) {
                     Wh_Log(L"Handler modules changed; cache invalidated");
-                    g_warmup.Stop();
-                    g_warmup.Start();
+                    if (!g_unloading.load()) {
+                        g_warmup.Stop();
+                        g_warmup.Start();
+                    }
                 }
             }
 
@@ -18373,6 +18373,7 @@ private:
         }
     }
 
+    std::mutex lifecycleMutex_;
     HANDLE thread_ = nullptr;
     HANDLE stopEvent_ = nullptr;
     HANDLE checkEvent_ = nullptr;
@@ -18991,9 +18992,9 @@ void Wh_ModUninit() {
     cmo::g_unloading.store(true);
 
     // Workers use the caches and the render device; stop them before anything
-    // is released.
-    cmo::g_warmup.Stop();
+    // is released. The invalidation thread first: it can restart warm-up.
     cmo::g_invalidation.Stop();
+    cmo::g_warmup.Stop();
 
     // Captures parked on UI threads hold context menu objects; release them
     // while the module is still loaded.

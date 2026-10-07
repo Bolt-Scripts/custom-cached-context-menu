@@ -26,7 +26,7 @@ untouched native menu, including extended verbs.
 ## Install
 
 1. Install [Windhawk](https://windhawk.net/).
-2. Create a new mod and paste `mod.wh.cpp`, or install a published build from
+2. Create a new mod and paste `custom-cached-context-menu.wh.cpp`, or install a published build from
    the Windhawk mod collection once available.
 3. Compile and enable the mod for `explorer.exe`.
 

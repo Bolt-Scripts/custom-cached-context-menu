@@ -1,6 +1,6 @@
 #define CMO_TESTING 1
 #include "wh_api_stub.h"
-#include "../mod.wh.cpp"
+#include "../custom-cached-context-menu.wh.cpp"
 #include <functional>
 
 static int g_failures = 0;
@@ -112,7 +112,7 @@ int main() {
     // The Windhawk metadata blocks must stay balanced: an unclosed readme
     // block makes the app show "Mod details are missing".
     {
-        FILE* file = fopen("mod.wh.cpp", "rb");
+        FILE* file = fopen("custom-cached-context-menu.wh.cpp", "rb");
         CHECK(file != nullptr);
         if (file) {
             std::string source;

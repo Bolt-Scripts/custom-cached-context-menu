@@ -23,7 +23,7 @@ re-reads only when the file's size or last-write time changed. Nothing runs
 while menus are closed. After a successful parse, a file older than
 `kConfigSchemaVersion` is rewritten with `CanonicalizeConfig`.
 
-Key symbols (all in `mod.wh.cpp`, namespace `cmo`):
+Key symbols (all in `custom-cached-context-menu.wh.cpp`, namespace `cmo`):
 
 - `ConfigSchemaEntry kAppearanceSchema[]` — the single source of truth for flat
   settings.

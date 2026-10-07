@@ -271,7 +271,54 @@ struct Settings {
     std::vector<std::wstring> advancedSubmenuExclude;
 };
 
-inline Settings g_settings;
+// Settings are published as immutable snapshots: LoadSettings runs on the
+// engine thread while UI and warm-up threads read, and swapping a snapshot
+// avoids torn reads of the strings and vectors. The operator-> temporary
+// keeps the snapshot alive for the whole expression.
+class SettingsRef {
+public:
+    explicit SettingsRef(std::shared_ptr<const Settings> snapshot)
+        : snapshot_(std::move(snapshot)) {}
+
+    const Settings* operator->() const { return snapshot_.get(); }
+
+private:
+    std::shared_ptr<const Settings> snapshot_;
+};
+
+class SettingsPublisher {
+public:
+    SettingsPublisher() { Publish(Settings{}); }
+
+    SettingsRef operator->() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return SettingsRef(current_);
+    }
+
+    void Publish(Settings next) {
+        auto snapshot = std::make_shared<const Settings>(std::move(next));
+        std::lock_guard<std::mutex> lock(mutex_);
+        current_ = std::move(snapshot);
+    }
+
+private:
+    mutable std::mutex mutex_;
+    std::shared_ptr<const Settings> current_;
+};
+
+#ifdef CMO_TESTING
+// The test build reads and writes the settings directly; Publish keeps the
+// same call sites working.
+struct TestSettings : Settings {
+    const Settings* operator->() const { return this; }
+    Settings* operator->() { return this; }
+    void Publish(Settings next) { static_cast<Settings&>(*this) = std::move(next); }
+};
+
+inline TestSettings g_settings;
+#else
+inline SettingsPublisher g_settings;
+#endif
 
 // Set in Wh_ModInit; only the UI thread may touch the render device/caches.
 
@@ -332,42 +379,47 @@ std::vector<std::wstring> ParseAdvancedItems(const std::wstring& text) {
 }
 
 void LoadSettings() {
-    g_settings.enableShiftBypass = Wh_GetIntSetting(L"enableShiftBypass") != 0;
-    PCWSTR theme = Wh_GetStringSetting(L"theme");
-    g_settings.theme = (theme && theme[0]) ? theme : L"Custom (menu.ini)";
-    Wh_FreeStringSetting(theme);
-    PCWSTR hotkey = Wh_GetStringSetting(L"settingsHotkey");
-    g_settings.settingsHotkey = hotkey ? hotkey : L"";
-    Wh_FreeStringSetting(hotkey);
-    g_settings.themeIndex = ThemeIndexFromName(g_settings.theme);
-    PCWSTR menuMode = Wh_GetStringSetting(L"menuMode");
-    g_settings.menuMode = _wcsicmp(menuMode, L"classic") == 0 ? 1 : 0;
-    Wh_FreeStringSetting(menuMode);
-    g_settings.showMoreOptionsItem = Wh_GetIntSetting(L"showMoreOptionsItem") != 0;
-    g_settings.submenuDelayMs = Wh_GetIntSetting(L"submenuDelayMs");
-    g_settings.warmupDelaySeconds = Wh_GetIntSetting(L"warmupDelaySeconds");
-    g_settings.clearCache = Wh_GetIntSetting(L"clearCache") != 0;
-    g_settings.debugLogging = Wh_GetIntSetting(L"debugLogging") != 0;
-    g_settings.instantMenuFade = Wh_GetIntSetting(L"instantMenuFade") != 0;
-    g_settings.advancedSubmenuWindows =
+    Settings next;
+    next.enableShiftBypass = Wh_GetIntSetting(L"enableShiftBypass") != 0;
+
+    WindhawkUtils::StringSetting theme =
+        WindhawkUtils::StringSetting::make(L"theme");
+    next.theme = theme.get()[0] ? theme.get() : L"Custom (menu.ini)";
+
+    WindhawkUtils::StringSetting hotkey =
+        WindhawkUtils::StringSetting::make(L"settingsHotkey");
+    next.settingsHotkey = hotkey.get();
+    next.themeIndex = ThemeIndexFromName(next.theme);
+
+    WindhawkUtils::StringSetting menuMode =
+        WindhawkUtils::StringSetting::make(L"menuMode");
+    next.menuMode = _wcsicmp(menuMode.get(), L"classic") == 0 ? 1 : 0;
+
+    next.showMoreOptionsItem = Wh_GetIntSetting(L"showMoreOptionsItem") != 0;
+    next.submenuDelayMs = Wh_GetIntSetting(L"submenuDelayMs");
+    next.warmupDelaySeconds = Wh_GetIntSetting(L"warmupDelaySeconds");
+    next.clearCache = Wh_GetIntSetting(L"clearCache") != 0;
+    next.debugLogging = Wh_GetIntSetting(L"debugLogging") != 0;
+    next.instantMenuFade = Wh_GetIntSetting(L"instantMenuFade") != 0;
+    next.advancedSubmenuWindows =
         Wh_GetIntSetting(L"advancedSubmenuWindows") != 0;
-    g_settings.advancedSubmenuThirdParty =
+    next.advancedSubmenuThirdParty =
         Wh_GetIntSetting(L"advancedSubmenuThirdParty") != 0;
 
-    PCWSTR advancedLabel = Wh_GetStringSetting(L"advancedSubmenuLabel");
-    g_settings.advancedSubmenuLabel =
-        (advancedLabel && advancedLabel[0]) ? advancedLabel : L"More options";
-    Wh_FreeStringSetting(advancedLabel);
+    WindhawkUtils::StringSetting advancedLabel =
+        WindhawkUtils::StringSetting::make(L"advancedSubmenuLabel");
+    next.advancedSubmenuLabel =
+        advancedLabel.get()[0] ? advancedLabel.get() : L"More options";
 
-    PCWSTR advancedItems = Wh_GetStringSetting(L"advancedSubmenuItems");
-    g_settings.advancedSubmenuItems =
-        ParseAdvancedItems(advancedItems ? advancedItems : L"");
-    Wh_FreeStringSetting(advancedItems);
+    WindhawkUtils::StringSetting advancedItems =
+        WindhawkUtils::StringSetting::make(L"advancedSubmenuItems");
+    next.advancedSubmenuItems = ParseAdvancedItems(advancedItems.get());
 
-    PCWSTR advancedExclude = Wh_GetStringSetting(L"advancedSubmenuExclude");
-    g_settings.advancedSubmenuExclude =
-        ParseAdvancedItems(advancedExclude ? advancedExclude : L"");
-    Wh_FreeStringSetting(advancedExclude);
+    WindhawkUtils::StringSetting advancedExclude =
+        WindhawkUtils::StringSetting::make(L"advancedSubmenuExclude");
+    next.advancedSubmenuExclude = ParseAdvancedItems(advancedExclude.get());
+
+    g_settings.Publish(std::move(next));
 }
 
 }  // namespace cmo
@@ -934,7 +986,7 @@ std::vector<NewTemplate> EnumerateShellNewTemplates() {
 
 // Debug: logs where ShellNew data for the standard types actually lives.
 void LogShellNewProbe(const wchar_t* ext) {
-    if (!g_settings.debugLogging) {
+    if (!g_settings->debugLogging) {
         return;
     }
     for (const ShellNewRoot& entry : kShellNewRoots) {
@@ -986,7 +1038,7 @@ void EnsureNewTemplates() {
         return;
     }
 
-    if (g_settings.debugLogging) {
+    if (g_settings->debugLogging) {
         for (const wchar_t* probe : {L".txt", L".bmp", L".rtf", L".pptx"}) {
             LogShellNewProbe(probe);
         }
@@ -1084,7 +1136,7 @@ void EnsureNewTemplates() {
     g_newTemplates = std::move(built);
     g_newTemplatesReady.store(true, std::memory_order_release);
 
-    if (g_settings.debugLogging) {
+    if (g_settings->debugLogging) {
         for (const NewTemplate& tmpl : g_newTemplates) {
             Wh_Log(L"New template: ext='%s' name='%s' kind=%d", tmpl.extension.c_str(),
                    tmpl.displayName.c_str(), static_cast<int>(tmpl.kind));
@@ -1226,7 +1278,7 @@ bool CreateNewItemInFolder(const NewTemplate& tmpl, const std::wstring& director
 // Logs any unlabeled item with its full descriptor so the extension behavior
 // can be identified from a single run.
 void DumpSuspiciousItems(const std::vector<MenuItem>& items, int depth) {
-    if (!g_settings.debugLogging) {
+    if (!g_settings->debugLogging) {
         return;
     }
     for (const MenuItem& item : items) {
@@ -4474,7 +4526,7 @@ void ReorganizeAdvancedItems(std::vector<MenuItem>& items,
             kept.push_back(std::move(item));
         }
     }
-    if (g_settings.debugLogging) {
+    if (g_settings->debugLogging) {
         for (const MenuItem& item : advanced) {
             Wh_Log(L"More options: moved '%s' (verb '%s')", item.label.c_str(),
                    item.canonicalVerb.c_str());
@@ -5161,7 +5213,7 @@ class ThemeStore {
 public:
     void EnsureLoaded() {
         std::lock_guard<std::mutex> lock(mutex_);
-        const int index = g_settings.themeIndex;
+        const int index = g_settings->themeIndex;
         if (index <= 0) {
             ClearLocked();
             return;
@@ -11329,7 +11381,7 @@ void RunSessionAnimation(MenuSession& session, const AnimationSpec& spec,
     if (!spec.animate || spec.durationMs <= 0) {
         return;
     }
-    if (g_settings.debugLogging) {
+    if (g_settings->debugLogging) {
         Wh_Log(L"Menu animation: opening=%d effects=%08X duration=%d frame=%d "
                L"easing=%d",
                opening ? 1 : 0, spec.effects, spec.durationMs, spec.frameMs,
@@ -11663,7 +11715,7 @@ LRESULT CALLBACK MenuMouseHookProc(int code, WPARAM wParam, LPARAM lParam) {
         const std::vector<RECT> rects = SessionPanelRects(session);
         if (SessionLevelAtPoint(rects, info->pt) < 0) {
             session->done = true;
-            if (g_settings.debugLogging) {
+            if (g_settings->debugLogging) {
                 Wh_Log(L"Outside click closes the session (hook)");
             }
             // Wake the modal loop first so the session tears down immediately.
@@ -11684,7 +11736,7 @@ LRESULT CALLBACK MenuMouseHookProc(int code, WPARAM wParam, LPARAM lParam) {
                     ScreenToClient(target, &client);
                     PostMessageW(target, WM_RBUTTONDOWN, MK_RBUTTON,
                                  MAKELPARAM(client.x, client.y));
-                    if (g_settings.debugLogging) {
+                    if (g_settings->debugLogging) {
                         Wh_Log(L"Replaying the right-click down for %p", target);
                     }
                     return 1;
@@ -12211,7 +12263,7 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
         settings->panel = std::const_pointer_cast<LayoutPanel>(panel);
         settings->inputs.working = settings->working;
     }
-    session.submenuDelayMs = g_settings.submenuDelayMs;
+    session.submenuDelayMs = g_settings->submenuDelayMs;
     if (session.submenuDelayMs < 0) {
         DWORD systemDelay = 400;
         session.submenuDelayMs =
@@ -12240,7 +12292,7 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
     g_activeSessions.fetch_add(1);
     g_menuSession = &session;
     g_menuWindowMessageHook = &CustomMenuWindowProc;
-    if (g_settings.debugLogging) {
+    if (g_settings->debugLogging) {
         Wh_Log(L"Custom menu session start (margin=%d dpi=%u)", margin, key.dpi);
     }
 
@@ -12267,7 +12319,7 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
                                        ModModuleHandle(), 0);
         g_menuMouseHook.store(hook);
         session.ownsMouseHook = hook != nullptr;
-        if (!hook && g_settings.debugLogging) {
+        if (!hook && g_settings->debugLogging) {
             Wh_Log(L"Failed to install the menu mouse hook");
         }
     }
@@ -12362,7 +12414,7 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
         info.nShow = SW_SHOWNORMAL;
         ShellExecuteExW(&info);
     }
-    if (g_settings.debugLogging) {
+    if (g_settings->debugLogging) {
         Wh_Log(L"Custom menu session end (chosen=%d)",
                session.result.chosenItemId.has_value() ? 1 : 0);
     }
@@ -12576,16 +12628,16 @@ void SettingsApplyReset(MenuSession& session, const std::wstring& key) {
 }
 
 void OpenSettingsMenu(HWND owner, POINT pt) {
-    if (g_unloading.load() || g_settings.menuMode != 0 || g_menuSession) {
+    if (g_unloading.load() || g_settings->menuMode != 0 || g_menuSession) {
         return;
     }
     if (!g_renderDevice.IsReady() && !g_renderDevice.Initialize()) {
         return;
     }
     SettingsSessionContext settings;
-    settings.themeIndex = g_settings.themeIndex;
+    settings.themeIndex = g_settings->themeIndex;
     settings.themeActive = settings.themeIndex > 0;
-    settings.themeName = g_settings.theme;
+    settings.themeName = g_settings->theme;
     settings.darkSystemTheme = IsDarkThemeActive();
     std::wstring iniText;
     ReadConfigFile(ConfigFilePath(), iniText);
@@ -12613,16 +12665,16 @@ void OpenSettingsMenu(HWND owner, POINT pt) {
         settings.working.animationOpen | settings.working.animationClose;
     settings.inputs.statusText = L"Saved";
     settings.inputs.windhawkHints = {
-        {L"Theme", g_settings.theme},
-        {L"Menu mode", g_settings.menuMode == 0 ? L"Custom" : L"Classic"},
+        {L"Theme", g_settings->theme},
+        {L"Menu mode", g_settings->menuMode == 0 ? L"Custom" : L"Classic"},
         {L"Show classic menu item",
-         g_settings.showMoreOptionsItem ? L"on" : L"off"},
+         g_settings->showMoreOptionsItem ? L"on" : L"off"},
         {L"Submenu delay",
-         std::to_wstring(g_settings.submenuDelayMs) + L" ms"},
-        {L"Shift bypass", g_settings.enableShiftBypass ? L"on" : L"off"},
-        {L"Debug logging", g_settings.debugLogging ? L"on" : L"off"},
+         std::to_wstring(g_settings->submenuDelayMs) + L" ms"},
+        {L"Shift bypass", g_settings->enableShiftBypass ? L"on" : L"off"},
+        {L"Debug logging", g_settings->debugLogging ? L"on" : L"off"},
         {L"Warmup delay",
-         std::to_wstring(g_settings.warmupDelaySeconds) + L" s"},
+         std::to_wstring(g_settings->warmupDelaySeconds) + L" s"},
     };
     settings.model = BuildSettingsTree(settings.inputs);
 
@@ -12634,7 +12686,7 @@ void OpenSettingsMenu(HWND owner, POINT pt) {
     settings.dpi = key.dpi;
     const CustomMenuResult result =
         ShowCustomMenu(model, key, owner, pt, &settings);
-    if (result.busy && g_settings.debugLogging) {
+    if (result.busy && g_settings->debugLogging) {
         Wh_Log(L"Settings menu not shown; another menu is open");
     }
 }
@@ -12680,13 +12732,13 @@ void ApplySettingsHotkey(HWND window) {
     }
     UnregisterHotKey(window, kSettingsHotkeyId);
     HotkeySpec spec;
-    if (g_settings.menuMode != 0 ||
-        !ParseHotkey(g_settings.settingsHotkey, spec)) {
+    if (g_settings->menuMode != 0 ||
+        !ParseHotkey(g_settings->settingsHotkey, spec)) {
         return;
     }
     if (!RegisterHotKey(window, kSettingsHotkeyId, spec.modifiers,
                         spec.virtualKey) &&
-        g_settings.debugLogging) {
+        g_settings->debugLogging) {
         Wh_Log(L"Failed to register the settings hotkey");
     }
 }
@@ -12747,14 +12799,14 @@ public:
 private:
     static bool Configured() {
         HotkeySpec spec;
-        return g_settings.menuMode == 0 &&
-               ParseHotkey(g_settings.settingsHotkey, spec);
+        return g_settings->menuMode == 0 &&
+               ParseHotkey(g_settings->settingsHotkey, spec);
     }
 
     void StartLocked() {
         thread_ = CreateThread(nullptr, 0, &HotkeyHost::ThreadProc, this, 0,
                                &threadId_);
-        if (!thread_ && g_settings.debugLogging) {
+        if (!thread_ && g_settings->debugLogging) {
             Wh_Log(L"Failed to start the hotkey thread");
         }
     }
@@ -12866,7 +12918,7 @@ bool EnsureControlWindow() {
                 // Reclaim a class left behind by a previous load.
                 UnregisterClassW(kControlWindowClass, ModModuleHandle());
                 if (!RegisterClassExW(&wc)) {
-                    if (g_settings.debugLogging) {
+                    if (g_settings->debugLogging) {
                         Wh_Log(L"Failed to register the control window class");
                     }
                     return false;
@@ -12880,7 +12932,7 @@ bool EnsureControlWindow() {
                                    HWND_MESSAGE, nullptr, ModModuleHandle(),
                                    nullptr);
     if (!control) {
-        if (g_settings.debugLogging) {
+        if (g_settings->debugLogging) {
             Wh_Log(L"Failed to create the control window");
         }
         return false;
@@ -14374,7 +14426,7 @@ HRESULT STDMETHODCALLTYPE QueryContextMenu_Hook(IContextMenu* pThis, HMENU hmenu
                                                 UINT indexMenu, UINT idCmdFirst,
                                                 UINT idCmdLast, UINT uFlags) {
     if (!ShouldDeferContextMenu(uFlags)) {
-        if (g_settings.debugLogging) Wh_Log(L"QueryContextMenu pass-through: flags=%08X", uFlags);
+        if (g_settings->debugLogging) Wh_Log(L"QueryContextMenu pass-through: flags=%08X", uFlags);
         return QueryContextMenu_Original(pThis, hmenu, indexMenu, idCmdFirst, idCmdLast,
                                          uFlags);
     }
@@ -14392,7 +14444,7 @@ HRESULT STDMETHODCALLTYPE QueryContextMenu_Hook(IContextMenu* pThis, HMENU hmenu
     }
     g_pending->Push(capture);
 
-    if (g_settings.debugLogging) Wh_Log(L"QueryContextMenu deferred: this=%p idFirst=%u flags=%08X", pThis,
+    if (g_settings->debugLogging) Wh_Log(L"QueryContextMenu deferred: this=%p idFirst=%u flags=%08X", pThis,
            idCmdFirst, uFlags);
 
     // Report an empty menu; the caller shows it and our TrackPopupMenu* hook
@@ -14920,7 +14972,7 @@ void LogHandlerCandidates(const ContextSignature& signature,
             RegCloseKey(key);
 
             if (!names.empty()) {
-                if (g_settings.debugLogging) Wh_Log(L"Handler candidates for '%s' (%s): %s", label.c_str(),
+                if (g_settings->debugLogging) Wh_Log(L"Handler candidates for '%s' (%s): %s", label.c_str(),
                        base.c_str(), names.c_str());
             }
         }
@@ -14961,9 +15013,9 @@ void ApplyRegistryIconsRecursive(
         }
         if (!icon.empty()) {
             item.iconRef = icon;
-            if (g_settings.debugLogging) Wh_Log(L"Registry icon for '%s' (verb '%s'): %s", item.label.c_str(),
+            if (g_settings->debugLogging) Wh_Log(L"Registry icon for '%s' (verb '%s'): %s", item.label.c_str(),
                    item.canonicalVerb.c_str(), icon.c_str());
-        } else if (g_settings.debugLogging) {
+        } else if (g_settings->debugLogging) {
             LogHandlerCandidates(signature, item.label);
             Wh_Log(L"No registry icon for '%s' (verb '%s')", item.label.c_str(),
                    item.canonicalVerb.c_str());
@@ -15011,7 +15063,7 @@ void BuildItemsFromHMenu(HMENU menu, UINT idCmdFirst, IContextMenu* context,
         }
 
         if (info.hbmpItem && IsSentinelMenuBitmap(info.hbmpItem)) {
-            if (g_settings.debugLogging) Wh_Log(L"Sentinel menu bitmap %lld for '%s'",
+            if (g_settings->debugLogging) Wh_Log(L"Sentinel menu bitmap %lld for '%s'",
                    static_cast<long long>(reinterpret_cast<INT_PTR>(info.hbmpItem)),
                    item.label.c_str());
         }
@@ -15109,7 +15161,7 @@ void InitializeMenuRecursive(PendingCapture& capture, HMENU menu, UINT position)
 // Run with Debug logging after the menu closes, when dynamic submenus have
 // been populated.
 void DumpMenuTree(HMENU menu, UINT idCmdFirst, int depth) {
-    if (!g_settings.debugLogging || !menu) {
+    if (!g_settings->debugLogging || !menu) {
         return;
     }
     const int count = GetMenuItemCount(menu);
@@ -15311,9 +15363,9 @@ void CaptureOwnerDrawIcons(PendingCapture& capture, std::vector<MenuItem>& items
         std::vector<uint8_t> pixels;
         if (CaptureOwnerDrawIcon(capture, item, pixels)) {
             item.iconPixels = std::move(pixels);
-            if (g_settings.debugLogging) Wh_Log(L"Owner-draw icon captured for '%s'", item.label.c_str());
+            if (g_settings->debugLogging) Wh_Log(L"Owner-draw icon captured for '%s'", item.label.c_str());
         } else {
-            if (g_settings.debugLogging) Wh_Log(L"Owner-draw draw not handled for '%s' (verb '%s')",
+            if (g_settings->debugLogging) Wh_Log(L"Owner-draw draw not handled for '%s' (verb '%s')",
                    item.label.c_str(), item.canonicalVerb.c_str());
         }
     }
@@ -15351,9 +15403,9 @@ void DiscoverIntoCache(PendingCapture& capture, const ContextSignature& signatur
     model.sourceStamp = capture.sourceStamp;
     capture.discoveryDone = true;
 
-    if (g_settings.debugLogging) Wh_Log(L"Discovered %zu menu items in %llu ms", model.items.size(),
+    if (g_settings->debugLogging) Wh_Log(L"Discovered %zu menu items in %llu ms", model.items.size(),
            static_cast<unsigned long long>(GetTickCount64() - start));
-    if (g_settings.debugLogging) {
+    if (g_settings->debugLogging) {
         DumpModelItems(model.items, 0);
     }
     // Warm the render-ready layout for the custom menu while we are already
@@ -16474,7 +16526,7 @@ bool InvokePaste(const InvocationContext& ctx) {
         }
     }
     operation->Release();
-    if (g_settings.debugLogging) {
+    if (g_settings->debugLogging) {
         Wh_Log(L"Paste: %zu item(s) -> %s (move=%d, ok=%d)", sources.size(),
                ctx.directory.c_str(), (dropEffect & DROPEFFECT_MOVE) ? 1 : 0,
                ok ? 1 : 0);
@@ -16519,7 +16571,7 @@ bool InvokePasteShortcut(const InvocationContext& ctx) {
         }
         link->Release();
     }
-    if (g_settings.debugLogging) {
+    if (g_settings->debugLogging) {
         Wh_Log(L"Paste shortcut: %zu item(s) -> %s (ok=%d)", sources.size(),
                ctx.directory.c_str(), ok ? 1 : 0);
     }
@@ -16540,7 +16592,7 @@ bool InvokeOpenWith(const InvocationContext& ctx) {
     info.pcszClass = nullptr;
     info.oaifInFlags = OAIF_ALLOW_REGISTRATION | OAIF_EXEC;
     const bool ok = SUCCEEDED(SHOpenWithDialog(ctx.owner, &info));
-    if (g_settings.debugLogging) {
+    if (g_settings->debugLogging) {
         Wh_Log(L"Open with: %zu file(s), ok=%d", ctx.paths.size(), ok ? 1 : 0);
     }
     return ok;
@@ -16634,7 +16686,7 @@ bool EnsureContextPopulated(PendingCapture& capture) {
     capture.obj->QueryInterface(IID_IContextMenu3, (void**)&capture.contextMenu3);
     capture.obj->QueryInterface(IID_IContextMenu2, (void**)&capture.contextMenu2);
 
-    if (g_settings.debugLogging) Wh_Log(L"Population: %llu ms, %d items",
+    if (g_settings->debugLogging) Wh_Log(L"Population: %llu ms, %d items",
            static_cast<unsigned long long>(GetTickCount64() - start),
            GetMenuItemCount(menu));
     return true;
@@ -16677,7 +16729,7 @@ InvokeResult InvokeExtensionItem(const MenuItem& item, const InvocationContext& 
         InvokeContextItem(ctx.liveContext, item, ctx)) {
         return InvokeResult::Handled;
     }
-    if (g_settings.debugLogging) {
+    if (g_settings->debugLogging) {
         Wh_Log(L"Extension '%s': no live match (verb '%s'); using the native "
                L"menu",
                item.label.c_str(), item.canonicalVerb.c_str());
@@ -16918,7 +16970,7 @@ InvokeResult InvokeItem(const MenuItem& item, const InvocationContext& ctx,
                 InvokeContextItem(ctx.liveContext, item, ctx)) {
                 return InvokeResult::Handled;
             }
-            if (g_settings.debugLogging) {
+            if (g_settings->debugLogging) {
                 Wh_Log(L"Invoke '%s': no live match (verb '%s'); using the "
                        L"native menu",
                        item.label.c_str(), item.canonicalVerb.c_str());
@@ -16959,7 +17011,7 @@ DWORD g_menuDelayOriginal = 400;
 class MenuDelaySuppressor {
 public:
     MenuDelaySuppressor() {
-        if (g_settings.submenuDelayMs < 0) {
+        if (g_settings->submenuDelayMs < 0) {
             return;
         }
         std::lock_guard<std::mutex> lock(g_menuDelayMutex);
@@ -16972,11 +17024,11 @@ public:
         if (!SystemParametersInfoW(SPI_GETMENUSHOWDELAY, 0, &current, 0)) {
             return;
         }
-        if (current <= static_cast<DWORD>(g_settings.submenuDelayMs)) {
+        if (current <= static_cast<DWORD>(g_settings->submenuDelayMs)) {
             return;
         }
         if (!SystemParametersInfoW(SPI_SETMENUSHOWDELAY,
-                                   static_cast<UINT>(g_settings.submenuDelayMs),
+                                   static_cast<UINT>(g_settings->submenuDelayMs),
                                    nullptr, 0)) {
             return;
         }
@@ -17745,7 +17797,7 @@ public:
 
         const UINT flags = TPM_RETURNCMD | TPM_NONOTIFY | TPM_LEFTALIGN |
                            TPM_TOPALIGN |
-                           (g_settings.instantMenuFade ? TPM_NOANIMATION : 0);
+                           (g_settings->instantMenuFade ? TPM_NOANIMATION : 0);
         MenuDelaySuppressor delaySuppressor;
         int command = TrackPopupMenuEx_Original(menu, flags, pt.x, pt.y, owner, nullptr);
         DestroyMenu(menu);
@@ -17955,7 +18007,7 @@ std::optional<uint32_t> ShowNativeReplay(PendingCapture& capture, HWND owner, PO
 
     const UINT flags = TPM_RETURNCMD | TPM_NONOTIFY | TPM_LEFTALIGN |
                        TPM_TOPALIGN |
-                       (g_settings.instantMenuFade ? TPM_NOANIMATION : 0);
+                       (g_settings->instantMenuFade ? TPM_NOANIMATION : 0);
     int command = TrackPopupMenuEx_Original(capture.populatedMenu, flags, pt.x, pt.y, owner,
                                             nullptr);
     if (command == 0 || !capture.obj) {
@@ -17982,13 +18034,13 @@ std::optional<uint32_t> ShowNativeReplay(PendingCapture& capture, HWND owner, PO
 class Perf {
 public:
     void MarkOpenPathStart() {
-        if (g_settings.debugLogging) {
+        if (g_settings->debugLogging) {
             startTick_ = GetTickCount64();
         }
     }
 
     uint64_t OpenPathElapsedMs() {
-        if (!g_settings.debugLogging || startTick_ == 0) {
+        if (!g_settings->debugLogging || startTick_ == 0) {
             return 0;
         }
         return GetTickCount64() - startTick_;
@@ -18166,7 +18218,7 @@ private:
         EnsureNewTemplates();
 
         const int delaySeconds =
-            g_settings.warmupDelaySeconds > 0 ? g_settings.warmupDelaySeconds : 0;
+            g_settings->warmupDelaySeconds > 0 ? g_settings->warmupDelaySeconds : 0;
         if (WaitForSingleObject(stopEvent_, static_cast<DWORD>(delaySeconds) * 1000) ==
             WAIT_OBJECT_0) {
             LogEarlyStop();
@@ -18184,9 +18236,10 @@ private:
         }
 
         std::vector<std::wstring> configured;
-        PCWSTR warmupList = Wh_GetStringSetting(L"warmupExtensions");
-        if (warmupList && warmupList[0]) {
-            const std::wstring text = warmupList;
+        WindhawkUtils::StringSetting warmupList =
+            WindhawkUtils::StringSetting::make(L"warmupExtensions");
+        const std::wstring text = warmupList.get();
+        if (!text.empty()) {
             size_t pos = 0;
             while (pos <= text.size()) {
                 const size_t comma = text.find(L',', pos);
@@ -18203,7 +18256,6 @@ private:
                 pos = comma + 1;
             }
         }
-        Wh_FreeStringSetting(warmupList);
         const std::vector<std::wstring> types = BuildWarmupTypes(configured);
 
         wchar_t storagePath[MAX_PATH] = {};
@@ -18264,7 +18316,7 @@ private:
         if (completed && warmed > 0) {
             g_cache.Save(CacheFilePath());
         }
-        if (g_settings.debugLogging) {
+        if (g_settings->debugLogging) {
             if (completed) {
                 Wh_Log(L"Warm-up finished (%d warmed, %d already cached)", warmed,
                        skipped);
@@ -18281,7 +18333,7 @@ private:
     }
 
     static void LogEarlyStop() {
-        if (g_settings.debugLogging) {
+        if (g_settings->debugLogging) {
             Wh_Log(L"Warm-up stopped early (0 warmed)");
         }
     }
@@ -18358,7 +18410,7 @@ private:
                   const ContextSignature& signature) {
         IContextMenu* menu = CreateContextMenuForPath(path, background);
         if (!menu) {
-            if (g_settings.debugLogging) {
+            if (g_settings->debugLogging) {
                 Wh_Log(L"Warm-up: no context menu for %s", path.c_str());
             }
             return;
@@ -18662,7 +18714,7 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
 
     if (!capturedMenuContext &&
         !IsFilesystemContext(info.folderIsFilesystem, info.allItemsAreFilesystem)) {
-        if (g_settings.debugLogging) Wh_Log(L"Non-filesystem namespace: using the native menu");
+        if (g_settings->debugLogging) Wh_Log(L"Non-filesystem namespace: using the native menu");
         ShowNativeReplay(capture, owner, pt);
         g_warmup.SetMenuOpen(false);
         return true;
@@ -18703,7 +18755,7 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
             }
             if (cached) {
                 model = *cached;
-                if (g_settings.debugLogging) {
+                if (g_settings->debugLogging) {
                     Wh_Log(L"NavPane: cache hit key=%s (%zu items)",
                            typeKey.c_str(), model.items.size());
                 }
@@ -18712,7 +18764,7 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
                 // initialize it, exactly like the normal discovery path;
                 // otherwise dynamic labels and submenus are empty and get
                 // pruned.
-                if (g_settings.debugLogging) {
+                if (g_settings->debugLogging) {
                     Wh_Log(L"NavPane: capture idFirst=%u obj=%p flags=%08X",
                            capture.idCmdFirst, capture.obj, capture.flags);
                 }
@@ -18725,7 +18777,7 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
                     model = BuildModelFromHMenu(capture.populatedMenu,
                                                 capture.idCmdFirst, signature,
                                                 capture.obj);
-                    if (g_settings.debugLogging) {
+                    if (g_settings->debugLogging) {
                         Wh_Log(L"NavPane: captured %zu items (key=%s)",
                                model.items.size(), typeKey.c_str());
                         DumpModelItems(model.items, 0);
@@ -18734,14 +18786,14 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
                     if (navKeyed && !model.items.empty()) {
                         g_cache.Put(model);  // copy for the next open
                     }
-                } else if (g_settings.debugLogging) {
+                } else if (g_settings->debugLogging) {
                     Wh_Log(L"NavPane: population failed");
                 }
             }
         } else {
             cached = g_cache.Find(signature);
             needsDiscovery = !cached || (cached->flags & kModelWarmup);
-            if (g_settings.debugLogging) Wh_Log(L"Cache %s: scope=%d key=%s shape=%d paths=%zu",
+            if (g_settings->debugLogging) Wh_Log(L"Cache %s: scope=%d key=%s shape=%d paths=%zu",
                    cached ? (needsDiscovery ? L"warm" : L"hit") : L"miss",
                    static_cast<int>(scope), typeKey.c_str(),
                    static_cast<int>(shape), paths.size());
@@ -18752,7 +18804,7 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
             // same first-open cost. Warm entries are shown provisionally and
             // refreshed after the menu closes.
             if (!cached && !capture.discoveryDone) {
-                if (g_settings.debugLogging) Wh_Log(L"Populating before showing the menu");
+                if (g_settings->debugLogging) Wh_Log(L"Populating before showing the menu");
                 DiscoverIntoCache(capture, signature);
                 cached = g_cache.Find(signature);
                 needsDiscovery = !cached || (cached->flags & kModelWarmup);
@@ -18763,7 +18815,7 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
                                               *cached)
                         : BuildCoreModel(scope, paths, shape);
         }
-        if (!g_settings.showMoreOptionsItem) {
+        if (!g_settings->showMoreOptionsItem) {
             std::erase_if(model.items, [](const MenuItem& item) {
                 return item.action == ActionKind::Fallback;
             });
@@ -18800,31 +18852,31 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
         PruneMenuItems(model.items);
 
         if (ShouldShowNativeReplay(model.flags)) {
-            if (g_settings.debugLogging) Wh_Log(L"Owner-draw context: using the native menu");
+            if (g_settings->debugLogging) Wh_Log(L"Owner-draw context: using the native menu");
             ShowNativeReplay(capture, owner, pt);
             break;
         }
 
-        if (capturedMenuContext && g_settings.debugLogging) {
+        if (capturedMenuContext && g_settings->debugLogging) {
             Wh_Log(L"NavPane: %zu items after prune", model.items.size());
         }
         if (!hasMoveRules) {
             AdvancedGroupingOptions grouping;
-            grouping.moveWindows = g_settings.advancedSubmenuWindows;
-            grouping.moveThirdParty = g_settings.advancedSubmenuThirdParty;
-            grouping.label = g_settings.advancedSubmenuLabel;
-            grouping.windowsItems = g_settings.advancedSubmenuItems;
-            grouping.exclude = g_settings.advancedSubmenuExclude;
+            grouping.moveWindows = g_settings->advancedSubmenuWindows;
+            grouping.moveThirdParty = g_settings->advancedSubmenuThirdParty;
+            grouping.label = g_settings->advancedSubmenuLabel;
+            grouping.windowsItems = g_settings->advancedSubmenuItems;
+            grouping.exclude = g_settings->advancedSubmenuExclude;
             grouping.rules = rules ? rules.get() : nullptr;
             grouping.ctx = itemCtx;
             ReorganizeAdvancedItems(model.items, grouping);
         }
 
-        if (g_settings.menuMode == 0) {
+        if (g_settings->menuMode == 0) {
             std::vector<MenuItem>* container = &model.items;
             for (MenuItem& item : model.items) {
                 if (item.kind == ItemKind::Submenu &&
-                    item.label == g_settings.advancedSubmenuLabel) {
+                    item.label == g_settings->advancedSubmenuLabel) {
                     container = &item.children;
                     break;
                 }
@@ -18838,14 +18890,14 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
         if (scope == Scope::Background || scope == Scope::Desktop) {
             ApplyViewStateChecks(model.items, owner, kind);
         }
-        if (g_settings.debugLogging) Wh_Log(L"Menu prep: %llu ms",
+        if (g_settings->debugLogging) Wh_Log(L"Menu prep: %llu ms",
                static_cast<unsigned long long>(g_perf.OpenPathElapsedMs()));
 
         bool creationFailed = false;
         std::optional<uint32_t> chosen;
         bool customShown = false;
         const MenuMode mode = ResolveMenuMode(
-            g_settings.menuMode, g_modeController.ConsecutiveFailures());
+            g_settings->menuMode, g_modeController.ConsecutiveFailures());
         if (mode == MenuMode::Custom && !g_unloading.load()) {
             if (!haveControlWindow) {
                 // Without the control window the UI thread cannot be asked to
@@ -18867,7 +18919,7 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
                     // Another Explorer UI thread owns the renderer; show the
                     // real native menu rather than racing its device, windows
                     // and session state.
-                    if (g_settings.debugLogging) {
+                    if (g_settings->debugLogging) {
                         Wh_Log(L"Custom menu busy; using the native menu");
                     }
                     ShowNativeReplay(capture, owner, pt);
@@ -18931,7 +18983,7 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
                     result = InvokeItem(*item, ctx, capture);
                 }
 
-                if (g_settings.debugLogging) Wh_Log(L"Invoke '%s' -> %d", item->label.c_str(),
+                if (g_settings->debugLogging) Wh_Log(L"Invoke '%s' -> %d", item->label.c_str(),
                        static_cast<int>(result));
 
                 if (capturedMenuContext && typeKey != L"*") {
@@ -18968,10 +19020,10 @@ BOOL WINAPI TrackPopupMenuEx_Hook(HMENU hMenu, UINT uFlags, int x, int y, HWND h
         g_pending->TakeForMenu(hMenu, pending, kind == ShellViewKind::NavPane);
     const bool shiftHeld = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
     const MenuPath path =
-        DecidePath(shiftHeld, kind, hasPending, g_settings.enableShiftBypass);
+        DecidePath(shiftHeld, kind, hasPending, g_settings->enableShiftBypass);
 
     if (path == MenuPath::Ours && hasPending) {
-        if (g_settings.debugLogging) Wh_Log(L"Replacing context menu: kind=%d", static_cast<int>(kind));
+        if (g_settings->debugLogging) Wh_Log(L"Replacing context menu: kind=%d", static_cast<int>(kind));
         pending.owner = hWnd;
         ShowReplacementMenu(pending, kind, hWnd, POINT{x, y});
         ReleaseCapture(pending);
@@ -18979,7 +19031,7 @@ BOOL WINAPI TrackPopupMenuEx_Hook(HMENU hMenu, UINT uFlags, int x, int y, HWND h
     }
 
     if (path == MenuPath::NativeBypass && hasPending) {
-        if (g_settings.debugLogging) Wh_Log(L"Shift bypass: showing the native menu");
+        if (g_settings->debugLogging) Wh_Log(L"Shift bypass: showing the native menu");
         // The hook frame stays on this thread's stack while the native menu
         // runs, so unload must wait for it.
         UiBusyScope uiBusy;
@@ -18990,7 +19042,7 @@ BOOL WINAPI TrackPopupMenuEx_Hook(HMENU hMenu, UINT uFlags, int x, int y, HWND h
     }
 
     if (hasPending) {
-        if (g_settings.debugLogging) Wh_Log(L"Passing through: kind=%d", static_cast<int>(kind));
+        if (g_settings->debugLogging) Wh_Log(L"Passing through: kind=%d", static_cast<int>(kind));
         ReplayInto(pending.obj, hMenu, pending.indexMenu, pending.idCmdFirst,
                    pending.idCmdLast, pending.flags);
         ReleaseCapture(pending);
@@ -19011,10 +19063,10 @@ BOOL WINAPI TrackPopupMenu_Hook(HMENU hMenu, UINT uFlags, int x, int y, int nRes
         g_pending->TakeForMenu(hMenu, pending, kind == ShellViewKind::NavPane);
     const bool shiftHeld = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
     const MenuPath path =
-        DecidePath(shiftHeld, kind, hasPending, g_settings.enableShiftBypass);
+        DecidePath(shiftHeld, kind, hasPending, g_settings->enableShiftBypass);
 
     if (path == MenuPath::Ours && hasPending) {
-        if (g_settings.debugLogging) Wh_Log(L"Replacing context menu: kind=%d", static_cast<int>(kind));
+        if (g_settings->debugLogging) Wh_Log(L"Replacing context menu: kind=%d", static_cast<int>(kind));
         pending.owner = hWnd;
         ShowReplacementMenu(pending, kind, hWnd, POINT{x, y});
         ReleaseCapture(pending);
@@ -19022,7 +19074,7 @@ BOOL WINAPI TrackPopupMenu_Hook(HMENU hMenu, UINT uFlags, int x, int y, int nRes
     }
 
     if (path == MenuPath::NativeBypass && hasPending) {
-        if (g_settings.debugLogging) Wh_Log(L"Shift bypass: showing the native menu");
+        if (g_settings->debugLogging) Wh_Log(L"Shift bypass: showing the native menu");
         // The hook frame stays on this thread's stack while the native menu
         // runs, so unload must wait for it.
         UiBusyScope uiBusy;
@@ -19033,7 +19085,7 @@ BOOL WINAPI TrackPopupMenu_Hook(HMENU hMenu, UINT uFlags, int x, int y, int nRes
     }
 
     if (hasPending) {
-        if (g_settings.debugLogging) Wh_Log(L"Passing through: kind=%d", static_cast<int>(kind));
+        if (g_settings->debugLogging) Wh_Log(L"Passing through: kind=%d", static_cast<int>(kind));
         ReplayInto(pending.obj, hMenu, pending.indexMenu, pending.idCmdFirst,
                    pending.idCmdLast, pending.flags);
         ReleaseCapture(pending);
@@ -19091,7 +19143,7 @@ HRESULT WINAPI IUnknown_QueryService_Hook(IUnknown* punk, REFGUID guidService,
          IsEqualGUID(riid, kContextMenuPresenterIid24H2))) {
         // Suppressed unconditionally so Shift+right-click reaches our bypass
         // and shows the classic native menu, matching stock Windows 11.
-        if (g_settings.debugLogging) Wh_Log(L"Blocking modern context menu presenter");
+        if (g_settings->debugLogging) Wh_Log(L"Blocking modern context menu presenter");
         if (ppvOut) {
             *ppvOut = nullptr;
         }
@@ -19108,7 +19160,7 @@ bool WINAPI ShouldShowMiniMenu_Hook(void* pThis, void* param) {
     (void)param;
     // Suppressed unconditionally so the classic path (and our replacement)
     // always handles desktop menus; Shift bypass is handled by the popup hooks.
-    if (g_settings.debugLogging) Wh_Log(L"Blocking modern desktop mini menu");
+    if (g_settings->debugLogging) Wh_Log(L"Blocking modern desktop mini menu");
     return false;
 }
 
@@ -19188,13 +19240,13 @@ BOOL Wh_ModInit() {
 
     cmo::LoadSettings();
     cmo::g_themeStore.EnsureLoaded();
-    cmo::g_lastAppliedTheme = cmo::g_settings.themeIndex;
+    cmo::g_lastAppliedTheme = cmo::g_settings->themeIndex;
     cmo::g_iconCache.PreloadCoreIcons(GetSystemMetrics(SM_CXSMICON));
     cmo::g_hotkeyHost.Start();
 
     const std::wstring cachePath = cmo::CacheFilePath();
     if (!cachePath.empty()) {
-        if (cmo::g_settings.clearCache) {
+        if (cmo::g_settings->clearCache) {
             DeleteFileW(cachePath.c_str());
         } else if (cmo::g_cache.Load(cachePath)) {
             Wh_Log(L"Loaded menu cache");
@@ -19308,12 +19360,12 @@ void Wh_ModSettingsChanged() {
     cmo::LoadSettings();
     cmo::g_hotkeyHost.SettingsChanged();
 
-    if (cmo::g_settings.themeIndex != cmo::g_lastAppliedTheme) {
-        cmo::g_themeStore.ApplySelectedTheme(cmo::g_settings.themeIndex);
+    if (cmo::g_settings->themeIndex != cmo::g_lastAppliedTheme) {
+        cmo::g_themeStore.ApplySelectedTheme(cmo::g_settings->themeIndex);
         cmo::g_configStore.RefreshIfChanged();
     }
 
-    if (cmo::g_settings.clearCache) {
+    if (cmo::g_settings->clearCache) {
         cmo::g_cache.Clear();
         const std::wstring cachePath = cmo::CacheFilePath();
         if (!cachePath.empty()) {

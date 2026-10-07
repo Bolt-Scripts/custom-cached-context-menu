@@ -7725,9 +7725,12 @@ struct UiBusyScope {
     UiBusyScope(const UiBusyScope&) = delete;
     UiBusyScope& operator=(const UiBusyScope&) = delete;
 };
-// Hidden message-only window created on the UI thread; Wh_ModUninit uses it
-// to run the window teardown on the thread that owns the windows.
-inline std::atomic<HWND> g_controlWindow{nullptr};
+// Hidden message-only windows, one per UI thread that shows a menu.
+// Wh_ModUninit posts a teardown request to each and waits for all of them:
+// DestroyWindow cannot destroy another thread's window, and a window left
+// behind would keep a class procedure that points into the unloaded DLL.
+inline std::mutex g_controlWindowsMutex;
+inline std::unordered_map<DWORD, HWND> g_controlWindows;
 
 class MenuWindowPool {
 public:
@@ -7767,14 +7770,6 @@ public:
         free_.push_back(window);
     }
 
-    void DestroyAll() {
-        for (auto& window : all_) {
-            window->Destroy();
-        }
-        all_.clear();
-        free_.clear();
-    }
-
     // Destroys idle windows only. Windows checked out by a live session stay
     // valid; that session's teardown destroys them (see Release).
     void DestroyFreeWindows() {
@@ -7787,6 +7782,15 @@ public:
                 ++i;
             }
         }
+    }
+
+    // Destroys every window; only safe when no session is using the pool.
+    void DestroyAll() {
+        for (auto& window : all_) {
+            window->Destroy();
+        }
+        all_.clear();
+        free_.clear();
     }
 
     size_t Size() const { return all_.size(); }
@@ -12604,23 +12608,155 @@ constexpr int kSettingsHotkeyId = 0x5E77;
 // (Re-)registers the optional global settings hotkey on the control window.
 // Only one explorer process can own a given combination; failures are logged
 // and the menu row remains the primary entry point.
-void UpdateSettingsHotkey() {
-    HWND control = g_controlWindow.load();
-    if (!control || !IsWindow(control)) {
+// The optional global hotkey lives on its own message-only window and thread,
+// so it works before any menu has been shown and RegisterHotKey /
+// UnregisterHotKey always run on the thread that owns the window.
+constexpr wchar_t kHotkeyWindowClass[] = L"ContextMenuOverhaulV2Hotkey";
+constexpr UINT kHotkeyReregisterMessage = WM_APP + 39;
+
+// Prefer an Explorer window of this process as the owner; a foreground window
+// from another process would attach the two input queues.
+HWND SettingsMenuOwner() {
+    HWND foreground = GetForegroundWindow();
+    DWORD processId = 0;
+    if (foreground) {
+        GetWindowThreadProcessId(foreground, &processId);
+    }
+    if (foreground && processId == GetCurrentProcessId()) {
+        return foreground;
+    }
+    return GetShellWindow();
+}
+
+void ApplySettingsHotkey(HWND window) {
+    if (!window || !IsWindow(window)) {
         return;
     }
-    UnregisterHotKey(control, kSettingsHotkeyId);
+    UnregisterHotKey(window, kSettingsHotkeyId);
     HotkeySpec spec;
     if (g_settings.menuMode != 0 ||
         !ParseHotkey(g_settings.settingsHotkey, spec)) {
         return;
     }
-    if (!RegisterHotKey(control, kSettingsHotkeyId, spec.modifiers,
+    if (!RegisterHotKey(window, kSettingsHotkeyId, spec.modifiers,
                         spec.virtualKey) &&
         g_settings.debugLogging) {
         Wh_Log(L"Failed to register the settings hotkey");
     }
 }
+
+LRESULT CALLBACK HotkeyWindowProc(HWND hwnd, UINT msg, WPARAM wParam,
+                                  LPARAM lParam) {
+    if (msg == WM_HOTKEY && wParam == kSettingsHotkeyId) {
+        POINT pt = {};
+        GetCursorPos(&pt);
+        OpenSettingsMenu(SettingsMenuOwner(), pt);
+        return 0;
+    }
+    if (msg == kHotkeyReregisterMessage) {
+        ApplySettingsHotkey(hwnd);
+        return 0;
+    }
+    return DefWindowProcW(hwnd, msg, wParam, lParam);
+}
+
+class HotkeyHost {
+public:
+    void Start() {
+        if (!Configured()) {
+            return;
+        }
+        std::lock_guard<std::mutex> lock(mutex_);
+        StartLocked();
+    }
+
+    // Applies the current settings; starts the thread if a hotkey was just
+    // configured.
+    void SettingsChanged() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!thread_) {
+            if (!Configured()) {
+                return;
+            }
+            StartLocked();
+        }
+        const HWND window = window_.load();
+        if (window) {
+            PostMessageW(window, kHotkeyReregisterMessage, 0, 0);
+        }
+    }
+
+    void Stop() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!thread_) {
+            return;
+        }
+        PostThreadMessageW(threadId_, WM_QUIT, 0, 0);
+        WaitForSingleObject(thread_, INFINITE);
+        CloseHandle(thread_);
+        thread_ = nullptr;
+        window_.store(nullptr);
+    }
+
+private:
+    static bool Configured() {
+        HotkeySpec spec;
+        return g_settings.menuMode == 0 &&
+               ParseHotkey(g_settings.settingsHotkey, spec);
+    }
+
+    void StartLocked() {
+        thread_ = CreateThread(nullptr, 0, &HotkeyHost::ThreadProc, this, 0,
+                               &threadId_);
+        if (!thread_ && g_settings.debugLogging) {
+            Wh_Log(L"Failed to start the hotkey thread");
+        }
+    }
+
+    static DWORD WINAPI ThreadProc(LPVOID param) {
+        static_cast<HotkeyHost*>(param)->Run();
+        return 0;
+    }
+
+    void Run() {
+        WNDCLASSEXW wc = {};
+        wc.cbSize = sizeof(wc);
+        wc.lpfnWndProc = &HotkeyWindowProc;
+        wc.hInstance = GetModuleHandleW(nullptr);
+        wc.lpszClassName = kHotkeyWindowClass;
+        if (!RegisterClassExW(&wc)) {
+            // Reclaim a class left behind by a previous load.
+            UnregisterClassW(kHotkeyWindowClass, GetModuleHandleW(nullptr));
+            if (!RegisterClassExW(&wc)) {
+                return;
+            }
+        }
+        HWND window = CreateWindowExW(0, kHotkeyWindowClass, L"", 0, 0, 0, 0, 0,
+                                      HWND_MESSAGE, nullptr,
+                                      GetModuleHandleW(nullptr), nullptr);
+        if (window) {
+            window_.store(window);
+        }
+        ApplySettingsHotkey(window);
+
+        MSG msg = {};
+        while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+        if (window) {
+            DestroyWindow(window);
+        }
+        UnregisterClassW(kHotkeyWindowClass, GetModuleHandleW(nullptr));
+    }
+
+    std::mutex mutex_;
+    HANDLE thread_ = nullptr;
+    DWORD threadId_ = 0;
+    std::atomic<HWND> window_{nullptr};
+};
+
+inline HotkeyHost g_hotkeyHost;
 
 // Defined after OwnerSubclass; removes every window subclass this DLL
 // installed so comctl32 cannot call into unloaded code.
@@ -12628,12 +12764,6 @@ void RemoveOwnerSubclasses();
 
 LRESULT CALLBACK ControlWindowProc(HWND hwnd, UINT msg, WPARAM wParam,
                                    LPARAM lParam) {
-    if (msg == WM_HOTKEY && wParam == kSettingsHotkeyId) {
-        POINT pt = {};
-        GetCursorPos(&pt);
-        OpenSettingsMenu(GetForegroundWindow(), pt);
-        return 0;
-    }
     if (msg == kControlUninitMessage) {
         g_unloading.store(true);
         if (g_menuSession) {
@@ -12650,10 +12780,13 @@ LRESULT CALLBACK ControlWindowProc(HWND hwnd, UINT msg, WPARAM wParam,
             UnhookWindowsHookEx(hook);
         }
         g_menuWindowPool.DestroyFreeWindows();
-        ReleaseOverlayResources();
         DestroyWindow(hwnd);
-        if (g_controlWindow.load() == hwnd) {
-            g_controlWindow.store(nullptr);
+        {
+            std::lock_guard<std::mutex> lock(g_controlWindowsMutex);
+            const auto it = g_controlWindows.find(GetCurrentThreadId());
+            if (it != g_controlWindows.end() && it->second == hwnd) {
+                g_controlWindows.erase(it);
+            }
         }
         UnregisterClassW(kMenuWindowClass, GetModuleHandleW(nullptr));
         UnregisterClassW(kControlWindowClass, GetModuleHandleW(nullptr));
@@ -12664,40 +12797,53 @@ LRESULT CALLBACK ControlWindowProc(HWND hwnd, UINT msg, WPARAM wParam,
 
 // Must be called on the UI thread (the TrackPopupMenu hook thread).
 bool EnsureControlWindow() {
-    HWND existing = g_controlWindow.load();
-    if (existing && IsWindow(existing)) {
-        return true;
-    }
-    static bool registered = false;
-    if (!registered) {
-        WNDCLASSEXW wc = {};
-        wc.cbSize = sizeof(wc);
-        wc.lpfnWndProc = &ControlWindowProc;
-        wc.hInstance = GetModuleHandleW(nullptr);
-        wc.lpszClassName = kControlWindowClass;
-        if (!RegisterClassExW(&wc)) {
-            // Reclaim a class left behind by a previous load.
-            UnregisterClassW(kControlWindowClass, GetModuleHandleW(nullptr));
-            if (!RegisterClassExW(&wc)) {
-                if (g_settings.debugLogging) {
-                    Wh_Log(L"Failed to register the control window class");
-                }
-                return false;
-            }
+    const DWORD threadId = GetCurrentThreadId();
+    {
+        std::lock_guard<std::mutex> lock(g_controlWindowsMutex);
+        const auto it = g_controlWindows.find(threadId);
+        if (it != g_controlWindows.end() && IsWindow(it->second)) {
+            return true;
         }
-        registered = true;
     }
+
+    static std::mutex registerMutex;
+    static bool registered = false;
+    {
+        std::lock_guard<std::mutex> lock(registerMutex);
+        if (!registered) {
+            WNDCLASSEXW wc = {};
+            wc.cbSize = sizeof(wc);
+            wc.lpfnWndProc = &ControlWindowProc;
+            wc.hInstance = GetModuleHandleW(nullptr);
+            wc.lpszClassName = kControlWindowClass;
+            if (!RegisterClassExW(&wc)) {
+                // Reclaim a class left behind by a previous load.
+                UnregisterClassW(kControlWindowClass, GetModuleHandleW(nullptr));
+                if (!RegisterClassExW(&wc)) {
+                    if (g_settings.debugLogging) {
+                        Wh_Log(L"Failed to register the control window class");
+                    }
+                    return false;
+                }
+            }
+            registered = true;
+        }
+    }
+
     HWND control = CreateWindowExW(0, kControlWindowClass, L"", 0, 0, 0, 0, 0,
                                    HWND_MESSAGE, nullptr, GetModuleHandleW(nullptr),
                                    nullptr);
-    g_controlWindow.store(control);
-    if (!control && g_settings.debugLogging) {
-        Wh_Log(L"Failed to create the control window");
+    if (!control) {
+        if (g_settings.debugLogging) {
+            Wh_Log(L"Failed to create the control window");
+        }
+        return false;
     }
-    if (control) {
-        UpdateSettingsHotkey();
+    {
+        std::lock_guard<std::mutex> lock(g_controlWindowsMutex);
+        g_controlWindows[threadId] = control;
     }
-    return control != nullptr;
+    return true;
 }
 
 void PrebuildLayoutsForWarmup(const std::vector<MenuModel>& models, uint32_t dpi,
@@ -18502,6 +18648,12 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
     g_perf.MarkOpenPathStart();
     // Handler changes are checked while menus are used, not on a timer.
     g_invalidation.RequestCheck();
+    // Register this thread for unload teardown before any menu can block it,
+    // so Wh_ModUninit can end the menu and destroy the windows on this thread.
+    const bool haveControlWindow = EnsureControlWindow();
+    if (!haveControlWindow) {
+        Wh_Log(L"Control window unavailable; native menus only");
+    }
 
     SelectionInfo info = GetSelection(owner, kind);
     std::vector<std::wstring>& paths = info.paths;
@@ -18698,7 +18850,7 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
         const MenuMode mode = ResolveMenuMode(
             g_settings.menuMode, g_modeController.ConsecutiveFailures());
         if (mode == MenuMode::Custom && !g_unloading.load()) {
-            if (!EnsureControlWindow()) {
+            if (!haveControlWindow) {
                 // Without the control window the UI thread cannot be asked to
                 // tear the windows down before unload; stay native instead of
                 // risking windows that outlive the DLL.
@@ -18834,6 +18986,7 @@ BOOL WINAPI TrackPopupMenuEx_Hook(HMENU hMenu, UINT uFlags, int x, int y, HWND h
         // The hook frame stays on this thread's stack while the native menu
         // runs, so unload must wait for it.
         UiBusyScope uiBusy;
+        EnsureControlWindow();
         ShowNativeReplay(pending, hWnd, POINT{x, y});
         ReleaseCapture(pending);
         return 0;
@@ -18847,6 +19000,7 @@ BOOL WINAPI TrackPopupMenuEx_Hook(HMENU hMenu, UINT uFlags, int x, int y, HWND h
     }
     {
         UiBusyScope uiBusy;
+        EnsureControlWindow();
         return TrackPopupMenuEx_Original(hMenu, uFlags, x, y, hWnd, lptpm);
     }
 }
@@ -18875,6 +19029,7 @@ BOOL WINAPI TrackPopupMenu_Hook(HMENU hMenu, UINT uFlags, int x, int y, int nRes
         // The hook frame stays on this thread's stack while the native menu
         // runs, so unload must wait for it.
         UiBusyScope uiBusy;
+        EnsureControlWindow();
         ShowNativeReplay(pending, hWnd, POINT{x, y});
         ReleaseCapture(pending);
         return 0;
@@ -18888,6 +19043,7 @@ BOOL WINAPI TrackPopupMenu_Hook(HMENU hMenu, UINT uFlags, int x, int y, int nRes
     }
     {
         UiBusyScope uiBusy;
+        EnsureControlWindow();
         return TrackPopupMenu_Original(hMenu, uFlags, x, y, nReserved, hWnd, prcRect);
     }
 }
@@ -19035,6 +19191,7 @@ BOOL Wh_ModInit() {
     cmo::g_themeStore.EnsureLoaded();
     cmo::g_lastAppliedTheme = cmo::g_settings.themeIndex;
     cmo::g_iconCache.PreloadCoreIcons(GetSystemMetrics(SM_CXSMICON));
+    cmo::g_hotkeyHost.Start();
 
     const std::wstring cachePath = cmo::CacheFilePath();
     if (!cachePath.empty()) {
@@ -19087,43 +19244,47 @@ void Wh_ModUninit() {
     // while the module is still loaded.
     cmo::g_pending->Clear();
 
+    // The hotkey thread may be running a settings session; join it before the
+    // per-thread teardown below.
+    cmo::g_hotkeyHost.Stop();
+
     // Destroy the windows (and unregister the classes) on the UI thread that
     // owns them. DestroyWindow from this thread cannot destroy another
     // thread's windows, and the survivors would keep window procedures that
     // point into the unloaded DLL.
-    bool uiCleaned = true;
-    HWND control = cmo::g_controlWindow.load();
-    if (control) {
-        DWORD_PTR cleanupResult = 0;
-        uiCleaned = SendMessageTimeoutW(control, cmo::kControlUninitMessage, 0, 0,
-                                        SMTO_ABORTIFHUNG | SMTO_BLOCK, 5000,
-                                        &cleanupResult) != 0;
-        if (!uiCleaned) {
-            Wh_Log(L"UI-thread cleanup did not complete");
+    // Ask every UI thread that has a control window to tear down its windows
+    // and end any menu, then wait until they are all gone and no menu work
+    // remains on any stack. There is no safe give-up path: unloading with mod
+    // frames still on a stack crashes on return.
+    std::vector<HWND> controls;
+    {
+        std::lock_guard<std::mutex> lock(cmo::g_controlWindowsMutex);
+        for (const auto& pair : cmo::g_controlWindows) {
+            controls.push_back(pair.second);
         }
     }
-
-    // An open menu session runs on the UI thread; wait for it to observe the
-    // unload flag and finish its own teardown. Menu preparation, native replay
-    // and native menus also hold a busy scope. Waiting is the only safe option:
-    // unloading with mod frames still on the UI thread stack crashes on return.
-    const ULONGLONG deadline = GetTickCount64() + 30000;
-    while ((cmo::g_activeSessions.load() > 0 || cmo::g_uiBusy.load() > 0) &&
-           GetTickCount64() < deadline) {
+    for (HWND control : controls) {
+        PostMessageW(control, cmo::kControlUninitMessage, 0, 0);
+    }
+    for (;;) {
+        size_t remaining = 0;
+        {
+            std::lock_guard<std::mutex> lock(cmo::g_controlWindowsMutex);
+            remaining = cmo::g_controlWindows.size();
+        }
+        if (remaining == 0 && cmo::g_activeSessions.load() == 0 &&
+            cmo::g_uiBusy.load() == 0) {
+            break;
+        }
         Sleep(10);
     }
-    if (cmo::g_activeSessions.load() > 0 || cmo::g_uiBusy.load() > 0) {
-        Wh_Log(L"UI-thread work did not finish before unload");
-    }
 
-    // Safety net in case the UI-thread cleanup never ran.
+    // Safety net in case a control window could not be created.
     HHOOK hook = cmo::g_menuMouseHook.exchange(nullptr);
     if (hook) {
         UnhookWindowsHookEx(hook);
     }
-    if (uiCleaned) {
-        cmo::g_menuWindowPool.DestroyAll();
-    }
+    cmo::ReleaseOverlayResources();
     // Best effort: the UI cleanup may have raced an open session and failed to
     // unregister the class; all windows are gone by now.
     UnregisterClassW(cmo::kMenuWindowClass, GetModuleHandleW(nullptr));
@@ -19146,7 +19307,7 @@ void Wh_ModSettingsChanged() {
     }
     Wh_Log(L"Custom Cached Context Menu settings changed");
     cmo::LoadSettings();
-    cmo::UpdateSettingsHotkey();
+    cmo::g_hotkeyHost.SettingsChanged();
 
     if (cmo::g_settings.themeIndex != cmo::g_lastAppliedTheme) {
         cmo::g_themeStore.ApplySelectedTheme(cmo::g_settings.themeIndex);

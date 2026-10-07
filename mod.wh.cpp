@@ -52,7 +52,7 @@ and discovers extension items in the background, so repeated opens are instant.
 |---|---|---|
 | Shift bypass | on | Hold Shift while right-clicking for the native menu. |
 | Menu mode | 0 (custom) | 0 = self-rendered menu (automatic fallback to the classic menu after repeated failures); 1 = classic owner-drawn menu. |
-| Theme | Custom (menu.ini) | Loads the appearance from `<mod storage>\\themes\\<name>.ini` (created from the bundled preset on first use). `menu.ini` is never modified by theme selection. |
+| Theme | Custom (menu.ini) | Loads the appearance from `<mod storage>\themes\<name>.ini` (created from the bundled preset on first use). `menu.ini` is never modified by theme selection. |
 | Show classic menu item | on | Adds a "Show classic menu" entry at the bottom of the menu. |
 | Warm-up extensions | common list | File types pre-built at Explorer startup. |
 | Warm-up delay | 5 s | Delay before background warm-up starts. |
@@ -75,7 +75,7 @@ the range and meaning of every key next to it. Invalid values never stop the
 file from loading: they are clamped or fall back to defaults, logged as
 `menu.ini:<line>: warning: <message>`, and the corrected file is rewritten.
 
-Themes are complete `[appearance]` blocks under `themes\\<name>.ini`; they never
+Themes are complete `[appearance]` blocks under `themes\<name>.ini`; they never
 inherit from `menu.ini`, so a theme is always self-contained. Edit one directly,
 or use the in-menu settings browser.
 

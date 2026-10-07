@@ -98,9 +98,6 @@ MIT
 
 // ==WindhawkModSettings==
 /*
-- enableShiftBypass: true
-  $name: Shift bypass
-  $description: Hold Shift while right-clicking to show the untouched native menu.
 - theme: "Custom (menu.ini)"
   $name: Theme
   $description: Loads the appearance from <storage>\themes\<name>.ini (created from the bundled preset on first use). menu.ini is never modified.
@@ -122,48 +119,54 @@ MIT
   - Tokyo Night: Blue night palette with violet accents
   - AMOLED Black: True black, no blur or shadow
   - High Contrast: White on black, thick border
-- settingsHotkey: ""
-  $name: Settings hotkey
-  $description: Optional global hotkey that opens the appearance settings menu (for example Ctrl+Alt+M). Empty disables it.
-- menuMode: 0
+- menuMode: "custom"
   $name: Menu mode
-  $description: 0 shows the custom-rendered menu (falls back automatically on repeated failures); 1 keeps the classic owner-drawn menu.
+  $description: Custom draws the self-rendered menu and falls back to the classic menu after repeated failures. Classic always uses the owner-drawn menu.
+  $options:
+  - custom: Custom (recommended)
+  - classic: Classic owner-drawn
+- enableShiftBypass: true
+  $name: Shift bypass
+  $description: Hold Shift while right-clicking to show the untouched native menu.
+- instantMenuFade: true
+  $name: Instant menu open
+  $description: Temporarily disables system menu animation (fade and slide) while this mod's menu opens, so it appears instantly. Session-only; the previous setting is restored immediately.
 - showMoreOptionsItem: true
   $name: Show classic menu item
   $description: Add a "Show classic menu" entry at the bottom of the replacement menu.
 - submenuDelayMs: 150
   $name: Submenu open delay
   $description: Milliseconds before a hovered submenu opens while the replacement menu is shown. 0 opens instantly; -1 keeps the Windows setting.
-- warmupExtensions: [".txt", ".pdf", ".zip", ".rar", ".7z", ".jpg", ".png", ".mp4", ".mp3", ".docx", ".xlsx", ".exe", ".lnk"]
-  $name: Warm-up extensions
-  $description: File types whose menus are pre-built at Explorer startup.
-- warmupDelaySeconds: 5
-  $name: Warm-up delay
-  $description: Seconds to wait after Explorer starts before warming the cache.
-- clearCache: false
-  $name: Clear cache
-  $description: Turn on to delete the cached menu models; they rebuild on next use.
-- debugLogging: false
-  $name: Debug logging
-  $description: Log timing and diagnostics for troubleshooting.
-- instantMenuFade: true
-  $name: Instant menu open
-  $description: Temporarily disables system menu animation (fade and slide) while this mod's menu opens, so it appears instantly. Session-only; the previous setting is restored immediately.
 - advancedSubmenuWindows: true
   $name: Move Windows extras
   $description: Move the configured Windows extras into the More options submenu.
 - advancedSubmenuThirdParty: true
   $name: Move third-party handlers
   $description: Move third-party shell extension entries into the More options submenu.
+- advancedSubmenuItems: "Share, Add to Favorites, Cast to Device, Give access to, Restore previous versions, Pin to Start, Pin to Quick access, Open in Terminal"
+  $name: Windows items to move
+  $description: Comma-separated labels or verbs of Windows items to move into the submenu.
 - advancedSubmenuExclude: ""
   $name: Keep in the main menu
   $description: Comma-separated third-party labels or verbs that stay in the main menu instead of moving into the submenu.
 - advancedSubmenuLabel: More options
   $name: More options submenu label
   $description: Label of the submenu that collects extra items.
-- advancedSubmenuItems: "Share, Add to Favorites, Cast to Device, Give access to, Restore previous versions, Pin to Start, Pin to Quick access, Open in Terminal"
-  $name: Windows items to move
-  $description: Comma-separated labels or verbs of Windows items to move into the submenu.
+- settingsHotkey: ""
+  $name: Settings hotkey
+  $description: Optional global hotkey that opens the appearance settings menu (for example Ctrl+Alt+M). Empty disables it.
+- debugLogging: false
+  $name: Debug logging
+  $description: Log timing and diagnostics for troubleshooting.
+- clearCache: false
+  $name: Clear cache
+  $description: Turn on to delete the cached menu models; they rebuild on next use.
+- warmupExtensions: [".txt", ".pdf", ".zip", ".rar", ".7z", ".jpg", ".png", ".mp4", ".mp3", ".docx", ".xlsx", ".exe", ".lnk"]
+  $name: Warm-up extensions
+  $description: File types whose menus are pre-built at Explorer startup.
+- warmupDelaySeconds: 5
+  $name: Warm-up delay
+  $description: Seconds to wait after Explorer starts before warming the cache.
 */
 // ==/WindhawkModSettings==
 
@@ -304,7 +307,18 @@ void LoadSettings() {
     g_settings.settingsHotkey = hotkey ? hotkey : L"";
     Wh_FreeStringSetting(hotkey);
     g_settings.themeIndex = ThemeIndexFromName(g_settings.theme);
-    g_settings.menuMode = Wh_GetIntSetting(L"menuMode");
+    PCWSTR menuMode = Wh_GetStringSetting(L"menuMode");
+    if (menuMode && menuMode[0]) {
+        g_settings.menuMode =
+            (_wcsicmp(menuMode, L"classic") == 0 ||
+             wcscmp(menuMode, L"1") == 0)
+                ? 1
+                : 0;
+    } else {
+        // Legacy numeric value from before the setting became an enum.
+        g_settings.menuMode = Wh_GetIntSetting(L"menuMode");
+    }
+    Wh_FreeStringSetting(menuMode);
     g_settings.showMoreOptionsItem = Wh_GetIntSetting(L"showMoreOptionsItem") != 0;
     g_settings.submenuDelayMs = Wh_GetIntSetting(L"submenuDelayMs");
     g_settings.warmupDelaySeconds = Wh_GetIntSetting(L"warmupDelaySeconds");

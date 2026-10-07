@@ -9122,10 +9122,29 @@ void DrawOverlay(ID2D1DeviceContext* dc, const LayoutPanel& panel,
         std::sqrt((rect.right - rect.left) * (rect.right - rect.left) +
                   (rect.bottom - rect.top) * (rect.bottom - rect.top));
 
-    if (panelGeometry) {
+    // The clip must follow the panel's rounding. DrawPanel only builds the
+    // geometry for per-corner radii, so the plain cornerRadius case builds one
+    // here; otherwise the overlay spills past the rounded corners.
+    ID2D1PathGeometry* maskGeometry = panelGeometry;
+    if (!maskGeometry &&
+        (appearance.hasCornerRadii || appearance.cornerRadius > 0)) {
+        CornerRadii radii;
+        if (appearance.hasCornerRadii) {
+            radii = appearance.cornerRadii;
+        } else {
+            radii.topLeft = radii.topRight = radii.bottomRight =
+                radii.bottomLeft = appearance.cornerRadius;
+        }
+        maskGeometry = BuildPanelGeometry(g_renderDevice.D2DFactory(),
+                                          static_cast<float>(panel.size.cx),
+                                          static_cast<float>(panel.size.cy),
+                                          radii);
+    }
+
+    if (maskGeometry) {
         D2D1_LAYER_PARAMETERS1 layer = {};
         layer.contentBounds = D2D1::InfiniteRect();
-        layer.geometricMask = panelGeometry;
+        layer.geometricMask = maskGeometry;
         layer.maskAntialiasMode = D2D1_ANTIALIAS_MODE_PER_PRIMITIVE;
         layer.maskTransform = D2D1::IdentityMatrix();
         layer.opacity = 1.0f;
@@ -9319,10 +9338,13 @@ void DrawOverlay(ID2D1DeviceContext* dc, const LayoutPanel& panel,
         }
     }
 
-    if (panelGeometry) {
+    if (maskGeometry) {
         dc->PopLayer();
     } else {
         dc->PopAxisAlignedClip();
+    }
+    if (maskGeometry && maskGeometry != panelGeometry) {
+        maskGeometry->Release();
     }
 }
 

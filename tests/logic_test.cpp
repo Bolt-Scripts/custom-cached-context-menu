@@ -109,6 +109,34 @@ public:
 };
 
 int main() {
+    // The Windhawk metadata blocks must stay balanced: an unclosed readme
+    // block makes the app show "Mod details are missing".
+    {
+        FILE* file = fopen("mod.wh.cpp", "rb");
+        CHECK(file != nullptr);
+        if (file) {
+            std::string source;
+            char buffer[4096];
+            size_t read = 0;
+            while ((read = fread(buffer, 1, sizeof(buffer), file)) > 0) {
+                source.append(buffer, read);
+            }
+            fclose(file);
+            const char* markers[] = {
+                "// ==WindhawkMod==",         "// ==/WindhawkMod==",
+                "// ==WindhawkModReadme==",   "// ==/WindhawkModReadme==",
+                "// ==WindhawkModSettings==", "// ==/WindhawkModSettings=="};
+            for (const char* marker : markers) {
+                size_t count = 0;
+                for (size_t pos = source.find(marker); pos != std::string::npos;
+                     pos = source.find(marker, pos + 1)) {
+                    ++count;
+                }
+                CHECK_EQ(count, static_cast<size_t>(1));
+            }
+        }
+    }
+
     CHECK_EQ(cmo::MakeExtensionKey(L"file.txt"), std::wstring(L".txt"));
     CHECK_EQ(cmo::MakeExtensionKey(L"FILE.TXT"), std::wstring(L".txt"));
     CHECK_EQ(cmo::MakeExtensionKey(L"archive.tar.gz"), std::wstring(L".gz"));

@@ -94,6 +94,7 @@ or use the in-menu settings browser.
 
 MIT
 */
+// ==/WindhawkModReadme==
 
 // ==WindhawkModSettings==
 /*

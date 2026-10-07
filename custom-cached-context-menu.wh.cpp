@@ -10065,6 +10065,7 @@ struct CustomMenuResult {
     std::optional<uint32_t> chosenItemId;
     bool handled = false;
     bool failed = false;
+    bool busy = false;  // another thread owns the custom renderer
 };
 
 bool FindMenuItemById(const std::vector<MenuItem>& items, uint32_t id,
@@ -10153,6 +10154,12 @@ struct MenuSession {
 };
 
 inline MenuSession* g_menuSession = nullptr;
+
+// One custom menu at a time, process-wide: Explorer runs folder windows on
+// separate UI threads, and the render device, window pool, overlay resources
+// and session state are shared and not thread-safe. A second custom menu falls
+// back to the native menu instead of racing them.
+std::atomic<bool> g_customMenuBusy{false};
 
 void OnDeviceLost();
 
@@ -12060,6 +12067,14 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
         return result;
     }
 
+    if (g_customMenuBusy.exchange(true)) {
+        result.busy = true;
+        return result;
+    }
+    struct BusyGuard {
+        ~BusyGuard() { g_customMenuBusy.store(false); }
+    } busyGuard;
+
     if (!g_renderDevice.IsReady() && !g_renderDevice.Initialize()) {
         result.failed = true;
         return result;
@@ -12545,7 +12560,11 @@ void OpenSettingsMenu(HWND owner, POINT pt) {
     key.dpi = owner ? DpiForWindow(owner) : 96;
     key.darkTheme = settings.darkSystemTheme;
     settings.dpi = key.dpi;
-    ShowCustomMenu(model, key, owner, pt, &settings);
+    const CustomMenuResult result =
+        ShowCustomMenu(model, key, owner, pt, &settings);
+    if (result.busy && g_settings.debugLogging) {
+        Wh_Log(L"Settings menu not shown; another menu is open");
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -16742,13 +16761,24 @@ inline TrackPopupMenu_t TrackPopupMenu_Original = nullptr;
 // 400 ms) while the replacement menu is open; the previous value is restored
 // on scope exit. The delay is never lengthened, and a configured value of -1
 // leaves the system setting alone.
-std::atomic<bool> g_menuDelaySuppressed{false};
-std::atomic<DWORD> g_menuDelayOriginal{400};
+// Several Explorer UI threads can show native fallback menus at the same
+// time; the system MenuShowDelay is a single global value, so the first menu
+// saves the original and the last one restores it.
+std::mutex g_menuDelayMutex;
+int g_menuDelayUsers = 0;
+bool g_menuDelayActive = false;
+DWORD g_menuDelayOriginal = 400;
 
 class MenuDelaySuppressor {
 public:
     MenuDelaySuppressor() {
         if (g_settings.submenuDelayMs < 0) {
+            return;
+        }
+        std::lock_guard<std::mutex> lock(g_menuDelayMutex);
+        if (g_menuDelayActive) {
+            ++g_menuDelayUsers;
+            active_ = true;
             return;
         }
         DWORD current = 0;
@@ -16758,23 +16788,27 @@ public:
         if (current <= static_cast<DWORD>(g_settings.submenuDelayMs)) {
             return;
         }
-        g_menuDelayOriginal.store(current);
-        if (SystemParametersInfoW(SPI_SETMENUSHOWDELAY,
-                                  static_cast<UINT>(g_settings.submenuDelayMs),
-                                  nullptr, 0)) {
-            active_ = true;
-            g_menuDelaySuppressed.store(true);
+        if (!SystemParametersInfoW(SPI_SETMENUSHOWDELAY,
+                                   static_cast<UINT>(g_settings.submenuDelayMs),
+                                   nullptr, 0)) {
+            return;
         }
+        g_menuDelayActive = true;
+        g_menuDelayOriginal = current;
+        ++g_menuDelayUsers;
+        active_ = true;
     }
 
     ~MenuDelaySuppressor() {
         if (!active_) {
             return;
         }
-        SystemParametersInfoW(SPI_SETMENUSHOWDELAY,
-                              static_cast<UINT>(g_menuDelayOriginal.load()), nullptr,
-                              0);
-        g_menuDelaySuppressed.store(false);
+        std::lock_guard<std::mutex> lock(g_menuDelayMutex);
+        if (--g_menuDelayUsers == 0 && g_menuDelayActive) {
+            SystemParametersInfoW(SPI_SETMENUSHOWDELAY, g_menuDelayOriginal, nullptr,
+                                  0);
+            g_menuDelayActive = false;
+        }
     }
 
 private:
@@ -16783,10 +16817,11 @@ private:
 
 // Defensive restore in case a suppressor was active when the mod unloaded.
 void RestoreMenuDelay() {
-    if (g_menuDelaySuppressed.exchange(false)) {
-        SystemParametersInfoW(SPI_SETMENUSHOWDELAY,
-                              static_cast<UINT>(g_menuDelayOriginal.load()), nullptr,
-                              0);
+    std::lock_guard<std::mutex> lock(g_menuDelayMutex);
+    if (g_menuDelayActive) {
+        SystemParametersInfoW(SPI_SETMENUSHOWDELAY, g_menuDelayOriginal, nullptr, 0);
+        g_menuDelayActive = false;
+        g_menuDelayUsers = 0;
     }
 }
 
@@ -16861,12 +16896,14 @@ public:
     // bitmap is composited over the menu background so classic (alpha-less)
     // menu drawing shows it correctly.
     HBITMAP GetBitmap(const MenuItem& item, int sizePx) {
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
         return GetBitmapFor(item.iconRef, item.iconPixels, sizePx);
     }
 
     // Custom-renderer entry point: no MenuItem required.
     HBITMAP GetBitmapFor(const std::wstring& iconRef,
                          const std::vector<uint8_t>& iconPixels, int sizePx) {
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
         if (!iconPixels.empty()) {
             return BitmapFromPixels(iconPixels, sizePx);
         }
@@ -16879,6 +16916,7 @@ public:
     // Custom-renderer entry point: true-alpha bitmap (no compositing).
     HBITMAP GetAlphaBitmapFor(const std::wstring& iconRef,
                               const std::vector<uint8_t>& iconPixels, int sizePx) {
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
         if (!iconPixels.empty()) {
             const std::wstring key =
                 L"a#px#" + std::to_wstring(HashBytes(iconPixels)) + L"#" +
@@ -16962,11 +17000,15 @@ public:
     }
 
     // The owner window whose theme determines the menu background color.
-    void SetThemeOwner(HWND owner) { themeOwner_ = owner; }
+    void SetThemeOwner(HWND owner) {
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
+        themeOwner_ = owner;
+    }
 
     // Pre-renders the core action glyphs, so the open path only attaches
     // already-cached bitmaps.
     void PreloadCoreIcons(int sizePx) {
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
         static const wchar_t* kGlyphRefs[] = {
             L"@glyph:E8C6", L"@glyph:E8C8", L"@glyph:E8AC", L"@glyph:E74D",
             L"@glyph:E713", L"@glyph:E8E5", L"@glyph:E72C", L"@glyph:E77F",
@@ -16977,6 +17019,7 @@ public:
     }
 
     void Clear() {
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
         for (auto& pair : bitmaps_) {
             if (pair.second) {
                 DeleteObject(pair.second);
@@ -16992,6 +17035,8 @@ public:
     }
 
 private:
+    mutable std::recursive_mutex mutex_;
+
     HBITMAP BitmapFromRef(const std::wstring& ref, int sizePx) {
         const std::wstring key = ref + L"#" + std::to_wstring(sizePx);
         auto it = bitmaps_.find(key);
@@ -17585,7 +17630,7 @@ constexpr UINT_PTR kOwnerSubclassId = 0xC0DE;
 
 // Windows the native replay has subclassed. UI-thread only; the unload
 // cleanup removes them so a subclass proc can never outlive the DLL.
-inline std::vector<HWND> g_subclassOwners;
+inline thread_local std::vector<HWND> g_subclassOwners;
 
 class OwnerSubclass {
 public:
@@ -18625,15 +18670,7 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
         const MenuMode mode = ResolveMenuMode(
             g_settings.menuMode, g_modeController.ConsecutiveFailures());
         if (mode == MenuMode::Custom && !g_unloading.load()) {
-            if (g_menuSession != nullptr && !g_menuSession->done) {
-                // A live session owns input; never clobber it. A session that
-                // is already closing may be superseded by this new menu.
-                if (g_settings.debugLogging) {
-                    Wh_Log(L"Refusing a second custom menu session");
-                }
-                g_modeController.RecordSuccess();
-                customShown = true;
-            } else if (!EnsureControlWindow()) {
+            if (!EnsureControlWindow()) {
                 // Without the control window the UI thread cannot be asked to
                 // tear the windows down before unload; stay native instead of
                 // risking windows that outlive the DLL.
@@ -18649,6 +18686,17 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
 
                 const CustomMenuResult custom =
                     ShowCustomMenu(model, layoutKey, owner, pt);
+                if (custom.busy) {
+                    // Another Explorer UI thread owns the renderer; show the
+                    // real native menu rather than racing its device, windows
+                    // and session state.
+                    if (g_settings.debugLogging) {
+                        Wh_Log(L"Custom menu busy; using the native menu");
+                    }
+                    ShowNativeReplay(capture, owner, pt);
+                    g_warmup.SetMenuOpen(false);
+                    return true;
+                }
                 if (custom.failed) {
                     Wh_Log(L"Custom menu failed; using the HMENU path");
                     g_modeController.RecordFailure();

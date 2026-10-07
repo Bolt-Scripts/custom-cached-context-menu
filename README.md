@@ -397,6 +397,9 @@ output. It records cache hit/miss, menu preparation time, population and
 discovery durations, the chosen item and invocation result, fallback reasons,
 and which items the More options submenu moved or kept (with their verbs).
 
+Report issues at
+<https://github.com/Bolt-Scripts/custom-cached-context-menu/issues>.
+
 ## Development
 
 - Configuration guide: `docs/CONFIG.md`

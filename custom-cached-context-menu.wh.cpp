@@ -96,6 +96,11 @@ or use the in-menu settings browser.
 - Nav-pane menus are cached per tree node for the session and refresh after
   use, so the first open of each node pays the shell's population cost.
 
+## Feedback
+
+Source code, issues, and the full configuration guide:
+<https://github.com/Bolt-Scripts/custom-cached-context-menu>
+
 ## License
 
 MIT

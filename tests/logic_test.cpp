@@ -4145,6 +4145,30 @@ int main() {
                  std::wstring(L"@effect:overlay:none"));
         CHECK((overlayRow->children[0].flags & cmo::kModelChecked) != 0);
 
+        // Adaptive shadow: unchanged on light backdrops, faded and tinted on
+        // dark ones so it cannot read as a black halo.
+        {
+            int opacity = 0;
+            uint32_t color = 0;
+            cmo::AdaptShadowToBackdrop(0xFFF0F0F0u, 120, 0xFF000000u, opacity,
+                                       color);
+            CHECK_EQ(opacity, 120);
+            CHECK_EQ(color, 0xFF000000u);
+
+            cmo::AdaptShadowToBackdrop(0xFF101010u, 120, 0xFF000000u, opacity,
+                                       color);
+            CHECK(opacity < 60);
+            CHECK(opacity > 0);
+            CHECK_EQ(color & 0xFF000000u, 0xFF000000u);
+            CHECK(((color >> 16) & 0xFF) > 0);  // tinted toward the backdrop
+
+            cmo::Appearance shadowAppearance;
+            shadowAppearance.shadowAdaptive = true;
+            CHECK(cmo::AppearanceBoolValue(shadowAppearance, L"shadowAdaptive"));
+            shadowAppearance.shadowAdaptive = false;
+            CHECK(!cmo::AppearanceBoolValue(shadowAppearance, L"shadowAdaptive"));
+        }
+
         // Overlay frame interval clamps to a usable range.
         {
             cmo::Appearance timing;

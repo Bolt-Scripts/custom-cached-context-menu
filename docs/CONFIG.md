@@ -129,6 +129,7 @@ rewritten.
 | cornerRadii | int list | `2, 4, 6, 8` | tl,tr,br,bl; overrides cornerradius |
 | shadowOpacity | int | `120` | 0–255 |
 | shadowColor | color | `#FF000000` | shadow tint; its alpha multiplies shadowOpacity |
+| shadowAdaptive | bool | `true` | fade and tint the shadow toward dark backdrops instead of a black halo |
 | shadowBlur | int | `12` | 0–64 px softness (blur radius) |
 | marker | enum | `dot` | dot, check, bar, none |
 | markerColor | color | `#FFFFFFFF` | defaults to textcolor |

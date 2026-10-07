@@ -161,9 +161,9 @@ MIT
 - clearCache: false
   $name: Clear cache
   $description: Turn on to delete the cached menu models; they rebuild on next use.
-- warmupExtensions: [".txt", ".pdf", ".zip", ".rar", ".7z", ".jpg", ".png", ".mp4", ".mp3", ".docx", ".xlsx", ".exe", ".lnk"]
+- warmupExtensions: ".txt, .pdf, .zip, .rar, .7z, .jpg, .png, .mp4, .mp3, .docx, .xlsx, .exe, .lnk"
   $name: Warm-up extensions
-  $description: File types whose menus are pre-built at Explorer startup.
+  $description: Comma-separated file types whose menus are pre-built at Explorer startup.
 - warmupDelaySeconds: 5
   $name: Warm-up delay
   $description: Seconds to wait after Explorer starts before warming the cache.
@@ -17120,17 +17120,39 @@ private:
         }
 
         std::vector<std::wstring> configured;
-        for (int i = 0;; ++i) {
-            PCWSTR value = Wh_GetStringSetting(L"warmupExtensions[%d]", i);
-            const bool empty = !value || !value[0];
-            if (!empty) {
-                configured.emplace_back(value);
+        PCWSTR warmupList = Wh_GetStringSetting(L"warmupExtensions");
+        if (warmupList && warmupList[0]) {
+            const std::wstring text = warmupList;
+            size_t pos = 0;
+            while (pos <= text.size()) {
+                const size_t comma = text.find(L',', pos);
+                const std::wstring item = TrimWhitespace(
+                    comma == std::wstring::npos
+                        ? text.substr(pos)
+                        : text.substr(pos, comma - pos));
+                if (!item.empty()) {
+                    configured.push_back(item);
+                }
+                if (comma == std::wstring::npos) {
+                    break;
+                }
+                pos = comma + 1;
             }
-            Wh_FreeStringSetting(value);
-            if (empty) {
-                break;
+        } else {
+            // Legacy array value from before the setting became a CSV string.
+            for (int i = 0;; ++i) {
+                PCWSTR value = Wh_GetStringSetting(L"warmupExtensions[%d]", i);
+                const bool empty = !value || !value[0];
+                if (!empty) {
+                    configured.emplace_back(value);
+                }
+                Wh_FreeStringSetting(value);
+                if (empty) {
+                    break;
+                }
             }
         }
+        Wh_FreeStringSetting(warmupList);
         const std::vector<std::wstring> types = BuildWarmupTypes(configured);
 
         wchar_t storagePath[MAX_PATH] = {};

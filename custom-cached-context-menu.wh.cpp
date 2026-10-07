@@ -13947,6 +13947,7 @@ struct PendingCapture {
     UINT flags = 0;
     HWND owner = nullptr;
     ULONGLONG tick = 0;
+    DWORD ownerThread = 0;
     bool used = false;
 
     // Populated once per open; reused for discovery and the native fallback.
@@ -13985,10 +13986,12 @@ void ReleaseCapture(PendingCapture& capture) {
 class PendingQueue {
 public:
     void Push(PendingCapture capture) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        capture.ownerThread = GetCurrentThreadId();
         if (capture.tick == 0) {
             capture.tick = GetTickCount64();
         }
-        ExpireOlderThan(GetTickCount64(), 60000);
+        ExpireOlderThanLocked(GetTickCount64(), 60000);
         if (captures_.size() >= kMaxCaptures) {
             ReleaseCapture(captures_.front());
             captures_.erase(captures_.begin());
@@ -13996,41 +13999,99 @@ public:
         captures_.push_back(capture);
     }
 
-    // Takes the capture whose deferred menu is the one being shown (the nav
-    // pane defers two menus per click); falls back to the newest capture and
-    // releases the rest.
-    bool TakeForMenu(HMENU menu, PendingCapture& out) {
-        if (captures_.empty()) {
-            return false;
-        }
-        size_t index = captures_.size() - 1;
+    // Takes the capture whose deferred menu is the one being shown. A capture
+    // is only ever handed back to the thread that parked it. The navigation
+    // pane can defer more than one menu per click, so for it a recent
+    // same-thread capture is accepted even when the handle differs; stale or
+    // unrelated captures are released instead of being replayed into a menu
+    // they do not belong to.
+    bool TakeForMenu(HMENU menu, PendingCapture& out, bool navFallback = false) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        const DWORD self = GetCurrentThreadId();
+        const ULONGLONG now = GetTickCount64();
+
+        size_t index = kNoIndex;
         for (size_t i = 0; i < captures_.size(); ++i) {
-            if (captures_[i].menu == menu) {
+            if (captures_[i].ownerThread == self && captures_[i].menu == menu) {
                 index = i;
                 break;
             }
         }
-        out = captures_[index];
-        captures_.erase(captures_.begin() + static_cast<std::ptrdiff_t>(index));
-        ClearAll();
-        return true;
-    }
-
-    // Takes the newest capture. Returns false when nothing is pending.
-    bool Take(PendingCapture& out) {
-        if (captures_.empty()) {
+        if (index == kNoIndex && navFallback) {
+            for (size_t i = captures_.size(); i-- > 0;) {
+                if (captures_[i].ownerThread == self &&
+                    now - captures_[i].tick <= kNavFallbackFreshMs) {
+                    index = i;
+                    break;
+                }
+            }
+        }
+        if (index == kNoIndex) {
+            ReleaseOwnedLocked(self);
             return false;
         }
-        out = captures_.back();
-        captures_.pop_back();
-        ClearAll();
+        out = captures_[index];
+        captures_.erase(captures_.begin() + static_cast<std::ptrdiff_t>(index));
+        ReleaseOwnedLocked(self);
         return true;
     }
 
-    void Clear() { ClearAll(); }
+    // Takes the newest capture owned by the calling thread. Returns false when
+    // nothing is pending for it.
+    bool Take(PendingCapture& out) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        const DWORD self = GetCurrentThreadId();
+        for (size_t i = captures_.size(); i-- > 0;) {
+            if (captures_[i].ownerThread == self) {
+                out = captures_[i];
+                captures_.erase(captures_.begin() + static_cast<std::ptrdiff_t>(i));
+                ReleaseOwnedLocked(self);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Releases every capture, from any thread. Only used at unload, where the
+    // queue must not outlive the module.
+    void Clear() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (PendingCapture& capture : captures_) {
+            ReleaseCapture(capture);
+        }
+        captures_.clear();
+    }
 
     // Drops captures older than maxAgeMs; no caller holds them at that point.
     void ExpireOlderThan(ULONGLONG now, ULONGLONG maxAgeMs) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        ExpireOlderThanLocked(now, maxAgeMs);
+    }
+
+    bool HasPending() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return !captures_.empty();
+    }
+
+private:
+    static constexpr size_t kMaxCaptures = 4;
+    static constexpr size_t kNoIndex = static_cast<size_t>(-1);
+    static constexpr ULONGLONG kNavFallbackFreshMs = 1000;
+
+    // Releases only the calling thread's captures; another thread's captures
+    // are still waiting for their own menu.
+    void ReleaseOwnedLocked(DWORD ownerThread) {
+        for (size_t i = 0; i < captures_.size();) {
+            if (captures_[i].ownerThread == ownerThread) {
+                ReleaseCapture(captures_[i]);
+                captures_.erase(captures_.begin() + static_cast<std::ptrdiff_t>(i));
+            } else {
+                ++i;
+            }
+        }
+    }
+
+    void ExpireOlderThanLocked(ULONGLONG now, ULONGLONG maxAgeMs) {
         for (size_t i = 0; i < captures_.size();) {
             if (now - captures_[i].tick > maxAgeMs) {
                 ReleaseCapture(captures_[i]);
@@ -14041,22 +14102,14 @@ public:
         }
     }
 
-    bool HasPending() const { return !captures_.empty(); }
-
-private:
-    static constexpr size_t kMaxCaptures = 4;
-
-    void ClearAll() {
-        for (PendingCapture& capture : captures_) {
-            ReleaseCapture(capture);
-        }
-        captures_.clear();
-    }
-
+    mutable std::mutex mutex_;
     std::vector<PendingCapture> captures_;
 };
 
-inline thread_local PendingQueue g_pending;
+// Not thread_local: unload must release captures parked on any thread, and a
+// thread_local destructor would run after the module is unmapped. Only the
+// thread that parked a capture can take it back out.
+CMO_NO_DESTROY inline std::optional<PendingQueue> g_pending{std::in_place};
 
 // Undocumented shell32 bit set for every menu that is actually shown as a
 // popup. Desktop menus (icons and background) pass the same flags as Explorer
@@ -14099,7 +14152,7 @@ HRESULT STDMETHODCALLTYPE QueryContextMenu_Hook(IContextMenu* pThis, HMENU hmenu
     if (pThis) {
         pThis->AddRef();
     }
-    g_pending.Push(capture);
+    g_pending->Push(capture);
 
     if (g_settings.debugLogging) Wh_Log(L"QueryContextMenu deferred: this=%p idFirst=%u flags=%08X", pThis,
            idCmdFirst, uFlags);
@@ -14116,20 +14169,6 @@ void ReplayInto(IContextMenu* obj, HMENU hMenu, UINT indexMenu, UINT idCmdFirst,
         return;
     }
     QueryContextMenu_Original(obj, hMenu, indexMenu, idCmdFirst, idCmdLast, flags);
-}
-
-// Takes the pending capture (if any), replays the real population into the
-// caller's menu, and releases the captured object.
-bool ConsumePendingAndReplay(HWND owner, HMENU hMenu) {
-    PendingCapture capture{};
-    if (!g_pending.Take(capture)) {
-        return false;
-    }
-    ReplayInto(capture.obj, hMenu, capture.indexMenu, capture.idCmdFirst,
-               capture.idCmdLast, capture.flags);
-    ReleaseCapture(capture);
-    if (g_settings.debugLogging) Wh_Log(L"Replayed native population for owner=%p", owner);
-    return true;
 }
 
 uint32_t MapMenuState(UINT state) {
@@ -18697,9 +18736,10 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
 BOOL WINAPI TrackPopupMenuEx_Hook(HMENU hMenu, UINT uFlags, int x, int y, HWND hWnd,
                                   LPTPMPARAMS lptpm) {
     ShellViewKind kind = ClassifyOwner(hWnd);
-    g_pending.ExpireOlderThan(GetTickCount64(), 60000);
+    g_pending->ExpireOlderThan(GetTickCount64(), 60000);
     PendingCapture pending{};
-    const bool hasPending = g_pending.TakeForMenu(hMenu, pending);
+    const bool hasPending =
+        g_pending->TakeForMenu(hMenu, pending, kind == ShellViewKind::NavPane);
     const bool shiftHeld = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
     const MenuPath path =
         DecidePath(shiftHeld, kind, hasPending, g_settings.enableShiftBypass);
@@ -18731,9 +18771,10 @@ BOOL WINAPI TrackPopupMenuEx_Hook(HMENU hMenu, UINT uFlags, int x, int y, HWND h
 BOOL WINAPI TrackPopupMenu_Hook(HMENU hMenu, UINT uFlags, int x, int y, int nReserved,
                                 HWND hWnd, const RECT* prcRect) {
     ShellViewKind kind = ClassifyOwner(hWnd);
-    g_pending.ExpireOlderThan(GetTickCount64(), 60000);
+    g_pending->ExpireOlderThan(GetTickCount64(), 60000);
     PendingCapture pending{};
-    const bool hasPending = g_pending.TakeForMenu(hMenu, pending);
+    const bool hasPending =
+        g_pending->TakeForMenu(hMenu, pending, kind == ShellViewKind::NavPane);
     const bool shiftHeld = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
     const MenuPath path =
         DecidePath(shiftHeld, kind, hasPending, g_settings.enableShiftBypass);
@@ -18953,6 +18994,10 @@ void Wh_ModUninit() {
     // is released.
     cmo::g_warmup.Stop();
     cmo::g_invalidation.Stop();
+
+    // Captures parked on UI threads hold context menu objects; release them
+    // while the module is still loaded.
+    cmo::g_pending->Clear();
 
     // Destroy the windows (and unregister the classes) on the UI thread that
     // owns them. DestroyWindow from this thread cannot destroy another

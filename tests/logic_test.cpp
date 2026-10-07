@@ -4046,6 +4046,24 @@ int main() {
         CHECK(taken.idCmdFirst == 21);
         CHECK(!queue.HasPending());
 
+        // A mismatch is released rather than replayed into another menu. The
+        // navigation pane may accept a recent same-thread capture instead.
+        first.menu = reinterpret_cast<HMENU>(3);
+        first.tick = GetTickCount64();
+        queue.Push(first);
+        CHECK(!queue.TakeForMenu(reinterpret_cast<HMENU>(4), taken));
+        CHECK(!queue.HasPending());
+
+        queue.Push(first);
+        CHECK(queue.TakeForMenu(reinterpret_cast<HMENU>(4), taken, true));
+        CHECK(taken.idCmdFirst == 21);
+        CHECK(!queue.HasPending());
+
+        first.tick = GetTickCount64() - 5000;
+        queue.Push(first);
+        CHECK(!queue.TakeForMenu(reinterpret_cast<HMENU>(4), taken, true));
+        CHECK(!queue.HasPending());
+
         cmo::MenuItem submenu{};
         submenu.kind = cmo::ItemKind::Submenu;
         submenu.action = cmo::ActionKind::Submenu;

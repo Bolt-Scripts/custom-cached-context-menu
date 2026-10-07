@@ -9061,16 +9061,16 @@ bool EnsureOverlayResources(ID2D1DeviceContext* dc) {
         g_overlayResources.Release();
         return false;
     }
-    // 1x8 scanline profile: a two-pixel core with a one-pixel feather on each
+    // 1x4 scanline profile: a one-pixel core with a feathered edge on each
     // side. The soft edges let the lines scroll subpixel-smoothly under linear
-    // interpolation; a hard two-pixel-period pattern can only toggle.
-    const uint32_t scanlinePixels[8] = {
-        0x80000000u, 0x80000000u, 0x40000000u, 0x00000000u,
-        0x00000000u, 0x00000000u, 0x00000000u, 0x40000000u};
+    // interpolation; a hard two-pixel-period pattern can only toggle. This is
+    // one notch finer than the previous profile at the default size.
+    const uint32_t scanlinePixels[4] = {0x80000000u, 0x40000000u, 0x00000000u,
+                                        0x40000000u};
     const D2D1_BITMAP_PROPERTIES props = {
         {DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED}, 96.0f,
         96.0f};
-    if (FAILED(dc->CreateBitmap(D2D1::SizeU(1, 8), scanlinePixels, 4, props,
+    if (FAILED(dc->CreateBitmap(D2D1::SizeU(1, 4), scanlinePixels, 4, props,
                                 &g_overlayResources.scanlineBitmap)) ||
         !g_overlayResources.scanlineBitmap) {
         g_overlayResources.Release();
@@ -9097,6 +9097,12 @@ bool EnsureOverlayResources(ID2D1DeviceContext* dc) {
 float OverlaySizeFactor(const Appearance& appearance) {
     return static_cast<float>(std::clamp(appearance.overlaySize, 25, 400)) /
            100.0f;
+}
+
+// Scanlines get a finer ladder: the base profile is small and the scale can
+// drop to half size, one step below what the other effects allow.
+float ScanlineScale(const Appearance& appearance) {
+    return std::clamp(OverlaySizeFactor(appearance), 0.5f, 4.0f);
 }
 
 void DrawOverlay(ID2D1DeviceContext* dc, const LayoutPanel& panel,
@@ -9293,13 +9299,13 @@ void DrawOverlay(ID2D1DeviceContext* dc, const LayoutPanel& panel,
     if ((appearance.overlay & kOverlayScanlines) != 0 &&
         EnsureOverlayResources(dc) && g_overlayResources.scanlineBrush) {
         // A slow, even drift: 10 px/s at normal speed, scrolling in subpixel
-        // steps. The size factor scales both line thickness and spacing.
-        const int lineScale = std::max(
-            1, static_cast<int>(std::lround(OverlaySizeFactor(appearance))));
-        const float period = 8.0f * static_cast<float>(lineScale);
+        // steps. The size factor scales both line thickness and spacing, down
+        // to half size.
+        const float lineScale = ScanlineScale(appearance);
+        const float period = 4.0f * lineScale;
         const float offset = std::fmod(t * 10.0f, period);
         g_overlayResources.scanlineBrush->SetTransform(
-            D2D1::Matrix3x2F::Scale(1.0f, static_cast<float>(lineScale)) *
+            D2D1::Matrix3x2F::Scale(1.0f, lineScale) *
             D2D1::Matrix3x2F::Translation(0.0f, offset));
         g_overlayResources.scanlineBrush->SetOpacity(intensity);
         dc->FillRectangle(rect, g_overlayResources.scanlineBrush);

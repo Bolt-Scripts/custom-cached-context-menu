@@ -4155,6 +4155,13 @@ int main() {
             CHECK_EQ(cmo::OverlaySizeFactor(sized), 4.0f);
             sized.overlaySize = 200;
             CHECK_EQ(cmo::OverlaySizeFactor(sized), 2.0f);
+            // Scanlines allow a half-size step below the old minimum.
+            sized.overlaySize = 100;
+            CHECK_EQ(cmo::ScanlineScale(sized), 1.0f);
+            sized.overlaySize = 25;
+            CHECK_EQ(cmo::ScanlineScale(sized), 0.5f);
+            sized.overlaySize = 400;
+            CHECK_EQ(cmo::ScanlineScale(sized), 4.0f);
         }
 
         // Adaptive shadow: unchanged on light backdrops, faded and tinted on

@@ -16,7 +16,7 @@
 # Custom Cached Context Menu
 
 Replaces the Windows Explorer context menu with a self-rendered menu that opens
-instantly and can be customized down to the pixel.
+instantly and can be customized extensively with fun effects.
 
 ![The bundled themes](https://raw.githubusercontent.com/Bolt-Scripts/custom-cached-context-menu/master/assets/theme-collage.png)
 
@@ -45,8 +45,6 @@ and discovers extension items in the background, so repeated opens are instant.
   `overlayAnimate` keeps them moving while the menu stays open (off by
   default); otherwise they animate only during the open/close. The Terminal
   Green and Amber CRT themes ship with scanlines.
-- **Adaptive shadow** — the drop shadow fades on dark backgrounds instead of
-  reading as a black halo; colored theme glows keep their exact hue.
 - **Settings menu** — in the advanced ("More options") submenu, or via the
   optional global hotkey. Appearance is edited live (sliders with typed values,
   a color picker, a font-face field with installed-font validation, instant

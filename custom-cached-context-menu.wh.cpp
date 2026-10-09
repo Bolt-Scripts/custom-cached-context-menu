@@ -4991,7 +4991,7 @@ markerColor = 255, 255, 0, 255
 cornerRadius = 0
 shadow = false
 blur = false
-font = Segoe UI, 10
+font = Segoe UI, 11
 animationOpen = none
 animationClose = none
 )INI"},};

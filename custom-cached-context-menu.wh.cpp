@@ -9512,7 +9512,7 @@ void DrawOverlay(ID2D1DeviceContext* dc, const LayoutPanel& panel,
 void DrawPanel(ID2D1DeviceContext* dc, const LayoutPanel& panel,
                const MenuInputState& state, const LayoutMetrics& metrics,
                const Appearance& appearance, const BackdropBitmap* backdrop,
-               int margin = 0,
+               int margin = 0, const RECT* shadowClipRect = nullptr,
                const AnimationFrame& frame = AnimationFrame{},
                POINT anchor = POINT{0, 0}, float overlayTime = 0.0f) {
     if (!dc) {
@@ -9591,6 +9591,58 @@ void DrawPanel(ID2D1DeviceContext* dc, const LayoutPanel& panel,
                 static_cast<float>(-spread - blur + metrics.shadowOffsetX);
             const float top =
                 static_cast<float>(-spread - blur + metrics.shadowOffsetY);
+            if (shadowClipRect && shadowClipRect->right > shadowClipRect->left &&
+                shadowClipRect->bottom > shadowClipRect->top && shadowW > 0 &&
+                shadowH > 0) {
+                // Zero only the part of the shadow that overlaps the parent
+                // menu's own bounds, so it never spills onto the parent while
+                // the rest of the shadow (including below and above the parent)
+                // still renders normally. A small feather keeps the transition
+                // at the parent's edges from showing as a hard line.
+                constexpr float kFeather = 3.0f;
+                const float scaleX = maskW / static_cast<float>(shadowW);
+                const float scaleY = maskH / static_cast<float>(shadowH);
+                for (int y = 0; y < shadowH; ++y) {
+                    const float py =
+                        top + (static_cast<float>(y) + 0.5f) * scaleY;
+                    const float dy = std::max(
+                        std::max(static_cast<float>(shadowClipRect->top) - py,
+                                 py - static_cast<float>(shadowClipRect->bottom)),
+                        0.0f);
+                    if (dy >= kFeather) {
+                        continue;
+                    }
+                    uint32_t* row =
+                        &shadowPixels[static_cast<size_t>(y) * shadowW];
+                    for (int x = 0; x < shadowW; ++x) {
+                        const float px =
+                            left + (static_cast<float>(x) + 0.5f) * scaleX;
+                        const float dx = std::max(
+                            std::max(static_cast<float>(shadowClipRect->left) - px,
+                                     px - static_cast<float>(shadowClipRect->right)),
+                            0.0f);
+                        const float distance = std::max(dx, dy);
+                        if (distance >= kFeather) {
+                            continue;
+                        }
+                        uint32_t pixel = row[x];
+                        if (distance <= 0.0f) {
+                            row[x] = 0;
+                            continue;
+                        }
+                        const float coverage = distance / kFeather;
+                        const uint32_t a = static_cast<uint32_t>(
+                            static_cast<float>((pixel >> 24) & 0xFF) * coverage);
+                        const uint32_t r = static_cast<uint32_t>(
+                            static_cast<float>((pixel >> 16) & 0xFF) * coverage);
+                        const uint32_t g = static_cast<uint32_t>(
+                            static_cast<float>((pixel >> 8) & 0xFF) * coverage);
+                        const uint32_t b = static_cast<uint32_t>(
+                            static_cast<float>(pixel & 0xFF) * coverage);
+                        row[x] = (a << 24) | (r << 16) | (g << 8) | b;
+                    }
+                }
+            }
             ID2D1Bitmap* bitmap = nullptr;
             const D2D1_SIZE_U size = {static_cast<UINT32>(shadowW),
                                       static_cast<UINT32>(shadowH)};
@@ -10177,6 +10229,9 @@ struct MenuSession {
     std::vector<uint8_t> windowAnimating;
     std::vector<MenuInputState> states;
     std::vector<BackdropBitmap> backdrops;
+    // Per level: the parent menu's panel rect in this panel's local
+    // coordinates; the shadow is zeroed only inside it.
+    std::vector<RECT> shadowClipRects;
     int active = 0;
     int maxHeight = 0;
     int margin = 0;
@@ -11216,6 +11271,7 @@ void RenderMenuWindow(MenuWindow* window, const LayoutPanel& panel,
                       const MenuInputState& state, const LayoutMetrics& metrics,
                       const Appearance& appearance,
                       const BackdropBitmap* backdrop, int margin,
+                      const RECT* shadowClipRect = nullptr,
                       const AnimationFrame& frame = AnimationFrame{},
                       POINT anchor = POINT{0, 0}, float overlayTime = 0.0f) {
     if (!window || !window->SwapChain() || !g_renderDevice.D2DDevice()) {
@@ -11246,7 +11302,7 @@ void RenderMenuWindow(MenuWindow* window, const LayoutPanel& panel,
         dc->BeginDraw();
         dc->Clear(nullptr);
         DrawPanel(dc, panel, state, metrics, appearance, backdrop, margin,
-                  frame, anchor, overlayTime);
+                  shadowClipRect, frame, anchor, overlayTime);
         const HRESULT drawResult = dc->EndDraw();
         target->Release();
         if (drawResult == static_cast<HRESULT>(D2DERR_RECREATE_TARGET)) {
@@ -11270,9 +11326,12 @@ void RenderSessionFrame(MenuSession& session, const AnimationFrame& frame) {
         if (i < session.backdrops.size() && session.backdrops[i].width > 0) {
             backdrop = &session.backdrops[i];
         }
+        const RECT* shadowClipRect =
+            i < session.shadowClipRects.size() ? &session.shadowClipRects[i]
+                                               : nullptr;
         RenderMenuWindow(window, *window->Panel(), session.states[i],
                          session.metrics, session.appearance, backdrop,
-                         session.margin, frame,
+                         session.margin, shadowClipRect, frame,
                          session.animationAnchor, session.OverlaySeconds());
     }
 }
@@ -11413,9 +11472,13 @@ void RunWindowAnimation(MenuSession& session, size_t index,
         if (t > 1.0f) {
             t = 1.0f;
         }
+        const RECT* shadowClipRect =
+            index < session.shadowClipRects.size()
+                ? &session.shadowClipRects[index]
+                : nullptr;
         RenderMenuWindow(window, *panel, session.states[index], session.metrics,
                          session.appearance, backdrop, session.margin,
-                         ComputeAnimationFrame(spec, t, true),
+                         shadowClipRect, ComputeAnimationFrame(spec, t, true),
                          anchor, session.OverlaySeconds());
         if (t >= 1.0f) {
             break;
@@ -11476,9 +11539,13 @@ void RepaintMenuWindow(MenuSession* session, int index) {
         session->backdrops[index].width > 0) {
         backdrop = &session->backdrops[index];
     }
+    const RECT* shadowClipRect =
+        index < static_cast<int>(session->shadowClipRects.size())
+            ? &session->shadowClipRects[index]
+            : nullptr;
     RenderMenuWindow(window, *window->Panel(), session->states[index],
                      session->metrics, session->appearance, backdrop,
-                     session->margin, session->animationFrame,
+                     session->margin, shadowClipRect, session->animationFrame,
                      session->animationAnchor, session->OverlaySeconds());
 }
 
@@ -11497,6 +11564,9 @@ void CloseSubmenusBelow(MenuSession* session, int index) {
             session->windowAnimating.pop_back();
         }
         session->states.pop_back();
+        if (!session->shadowClipRects.empty()) {
+            session->shadowClipRects.pop_back();
+        }
         if (session->backdrops.size() >= session->windows.size() + 1) {
             session->backdrops.pop_back();
         }
@@ -11564,6 +11634,17 @@ void OpenSubmenu(MenuSession* session, int index, int itemIndex) {
     session->windows.push_back(child);
     session->windowAnimating.push_back(0);
     session->states.push_back(MenuInputState{});
+    // Clip the submenu's shadow only where it overlaps the parent menu itself;
+    // the parent's own shadow is left untouched.
+    RECT parentWindow = {};
+    GetWindowRect(session->windows[index]->Handle(), &parentWindow);
+    const POINT childPanelPos = {childPos.x + session->margin,
+                                 childPos.y + session->margin};
+    session->shadowClipRects.push_back(
+        RECT{parentWindow.left + session->margin - childPanelPos.x,
+             parentWindow.top + session->margin - childPanelPos.y,
+             parentWindow.right - session->margin - childPanelPos.x,
+             parentWindow.bottom - session->margin - childPanelPos.y});
     session->backdrops.push_back(hasBackdrop ? std::move(backdrop)
                                              : BackdropBitmap{});
     session->active = static_cast<int>(session->windows.size()) - 1;
@@ -11593,7 +11674,7 @@ void OpenSubmenu(MenuSession* session, int index, int itemIndex) {
     RenderMenuWindow(child, childPanel, session->states.back(), session->metrics,
                      session->appearance,
                      hasBackdrop ? &session->backdrops.back() : nullptr,
-                     session->margin,
+                     session->margin, &session->shadowClipRects.back(),
                      animateChild
                          ? ComputeAnimationFrame(childSpec, 0.0f, true)
                          : AnimationFrame{},
@@ -12212,6 +12293,7 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
     session.windows.push_back(root);
     session.windowAnimating.push_back(0);
     session.states.push_back(MenuInputState{});
+    session.shadowClipRects.push_back(RECT{});
 
     BackdropBitmap backdrop;
     const RECT captureRect = {panelPos.x, panelPos.y,

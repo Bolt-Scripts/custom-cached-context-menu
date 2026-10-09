@@ -94,10 +94,10 @@ rewritten.
 | border | color | `#22FFFFFF` | border color |
 | borderWidth | int | `1` | 0–64 px (0 hides it) |
 | shadow | bool | `true` | draw the drop shadow |
-| shadowSize | int | `12` | 0–64 px spread (how far the shadow extends) |
+| shadowSize | int | `0` | 0–64 px spread (how far the shadow extends) |
 | shadowOffsetX | int | `0` | -32–32 px horizontal offset |
-| shadowOffsetY | int | `2` | -32–32 px vertical offset |
-| font | font | `Segoe UI, 9` | face, size |
+| shadowOffsetY | int | `4` | -32–32 px vertical offset |
+| font | font | `Segoe UI, 11` | face, size |
 | itemHeight | int | `28` | 1–256 px |
 | iconSize | int | `16` | 1–256 px |
 | padding | int | `6` | 0–256 px base padding |
@@ -131,7 +131,7 @@ rewritten.
 | shadowOpacity | int | `120` | 0–255 |
 | shadowColor | color | `#FF000000` | shadow tint; its alpha multiplies shadowOpacity |
 | shadowAdaptive | bool | `true` | fade and tint the shadow toward dark backdrops instead of a black halo |
-| shadowBlur | int | `12` | 0–64 px softness (blur radius) |
+| shadowBlur | int | `18` | 0–64 px softness (blur radius) |
 | marker | enum | `dot` | dot, check, bar, none |
 | markerColor | color | `#FFFFFFFF` | defaults to textcolor |
 | headerColor | color | `#66FFFFFF` | defaults to disabledtextcolor |

@@ -56,7 +56,7 @@ and discovers extension items in the background, so repeated opens are instant.
 
 | Setting | Default | Description |
 |---|---|---|
-| Shift bypass | on | Hold Shift while right-clicking for the native menu. |
+| Bypass keys | on | Hold Shift while right-clicking for the classic menu, or Ctrl for the untouched native menu. |
 | Menu mode | Custom (recommended) | Custom draws the self-rendered menu and falls back to the classic menu after repeated failures; Classic always uses the owner-drawn menu. |
 | Theme | Custom (menu.ini) | Loads the appearance from `<mod storage>\themes\<name>.ini` (created from the bundled preset on first use). `menu.ini` is never modified by theme selection. |
 | Show classic menu item | on | Adds a "Show classic menu" entry at the bottom of the menu. |
@@ -142,8 +142,8 @@ MIT
   - custom: Custom (recommended)
   - classic: Classic owner-drawn
 - enableShiftBypass: true
-  $name: Shift bypass
-  $description: Hold Shift while right-clicking to show the untouched native menu.
+  $name: Bypass keys
+  $description: Hold Shift while right-clicking for the classic menu, or Ctrl for the untouched native menu.
 - instantMenuFade: true
   $name: Instant menu open
   $description: Shows native fallback menus (classic mode, Shift bypass, fallbacks) without the system open animation, via TPM_NOANIMATION.
@@ -1336,11 +1336,11 @@ struct Appearance {
     uint32_t border = 0x22FFFFFF;
     int borderWidth = 1;
     bool shadow = true;
-    int shadowSize = 12;
+    int shadowSize = 0;
     int shadowOffsetX = 0;
-    int shadowOffsetY = 2;
+    int shadowOffsetY = 4;
     std::wstring fontFace = L"Segoe UI";
-    float fontSize = 9.0f;
+    float fontSize = 11.0f;
     int itemHeight = 28;
     int iconSize = 16;
     int padding = 6;
@@ -1938,7 +1938,7 @@ const ConfigSchemaEntry kAppearanceSchema[] = {
      L"Width of the selection marker column.", 1, false},
     {L"appearance", L"markerColor", L"Selection marker", SettingType::Color, L"#FFFFFFFF", nullptr, 0, 0,
      L"Marker color; defaults to textColor.", 1, true},
-    {L"appearance", L"font", L"Text", SettingType::Font, L"Segoe UI, 9", nullptr, 0, 0,
+    {L"appearance", L"font", L"Text", SettingType::Font, L"Segoe UI, 11", nullptr, 0, 0,
      L"Text font face and size.", 1, false},
     {L"appearance", L"fontWeight", L"Text", SettingType::Enum, L"normal", L"normal|semibold|bold", 0, 0,
      L"Text weight.", 1, false},
@@ -1948,11 +1948,11 @@ const ConfigSchemaEntry kAppearanceSchema[] = {
      L"Mnemonic handling.", 1, false},
     {L"appearance", L"shadow", L"Shadow", SettingType::Bool, L"true", nullptr, 0, 0,
      L"Draw the drop shadow.", 1, false},
-    {L"appearance", L"shadowSize", L"Shadow", SettingType::Int, L"12", nullptr, 0, 64,
+    {L"appearance", L"shadowSize", L"Shadow", SettingType::Int, L"0", nullptr, 0, 64,
      L"Shadow spread in pixels.", 1, false},
     {L"appearance", L"shadowOffsetX", L"Shadow", SettingType::Int, L"0", nullptr, -32,
      32, L"Shadow horizontal offset in pixels.", 3, false},
-    {L"appearance", L"shadowOffsetY", L"Shadow", SettingType::Int, L"2", nullptr, -32,
+    {L"appearance", L"shadowOffsetY", L"Shadow", SettingType::Int, L"4", nullptr, -32,
      32, L"Shadow vertical offset in pixels.", 3, false},
     {L"appearance", L"shadowOpacity", L"Shadow", SettingType::Int, L"120", nullptr, 0, 255,
      L"Shadow alpha (0-255).", 1, false},
@@ -1962,7 +1962,7 @@ const ConfigSchemaEntry kAppearanceSchema[] = {
      8, false},
     {L"appearance", L"shadowColor", L"Shadow", SettingType::Color, L"#FF000000", nullptr, 0, 0,
      L"Shadow color; its alpha multiplies shadowOpacity.", 5, false},
-    {L"appearance", L"shadowBlur", L"Shadow", SettingType::Int, L"12", nullptr, 0, 64,
+    {L"appearance", L"shadowBlur", L"Shadow", SettingType::Int, L"18", nullptr, 0, 64,
      L"Shadow blur radius in pixels.", 1, false},
     {L"appearance", L"blur", L"Effects", SettingType::Bool, L"true", nullptr, 0, 0,
      L"Blur the screen behind the menu.", 1, false},
@@ -12661,7 +12661,7 @@ void OpenSettingsMenu(HWND owner, POINT pt, bool activate = false) {
          g_settings->showMoreOptionsItem ? L"on" : L"off"},
         {L"Submenu delay",
          std::to_wstring(g_settings->submenuDelayMs) + L" ms"},
-        {L"Shift bypass", g_settings->enableShiftBypass ? L"on" : L"off"},
+        {L"Bypass keys", g_settings->enableShiftBypass ? L"on" : L"off"},
         {L"Debug logging", g_settings->debugLogging ? L"on" : L"off"},
         {L"Warmup delay",
          std::to_wstring(g_settings->warmupDelaySeconds) + L" s"},
@@ -14457,11 +14457,21 @@ void ReleasePendingCapturesForCurrentThread() {
 // queries and submenu builds do not.
 constexpr UINT kCmfPopupMenu = 0x00020000;
 
+// Ctrl bypasses the mod entirely (when bypass keys are enabled) so the
+// untouched native menu can show; Shift shows the classic menu instead.
+bool BypassKeyHeld() {
+    return g_settings->enableShiftBypass &&
+           (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
+}
+
 // Only main popup menus are deferred. CMF_DEFAULTONLY is the default-verb
 // resolution used by double-click/open; CMF_NOVERBS builds submenus such as
 // Send to; CMF_VERBSONLY builds verb-only menus. Those never show a popup we
 // could replace and must reach the shell untouched.
 bool ShouldDeferContextMenu(UINT flags) {
+    if (BypassKeyHeld()) {
+        return false;
+    }
     if (flags & (CMF_DEFAULTONLY | CMF_NOVERBS | CMF_VERBSONLY)) {
         return false;
     }
@@ -19170,8 +19180,12 @@ HRESULT WINAPI IUnknown_QueryService_Hook(IUnknown* punk, REFGUID guidService,
     if (IsEqualGUID(guidService, kContextMenuPresenterService) &&
         (IsEqualGUID(riid, kContextMenuPresenterIid) ||
          IsEqualGUID(riid, kContextMenuPresenterIid24H2))) {
-        // Suppressed unconditionally so Shift+right-click reaches our bypass
-        // and shows the classic native menu, matching stock Windows 11.
+        if (BypassKeyHeld()) {
+            // Ctrl: let the untouched modern menu through.
+            return IUnknown_QueryService_Original(punk, guidService, riid, ppvOut);
+        }
+        // Suppressed otherwise so Shift+right-click reaches our bypass and
+        // shows the classic native menu, matching stock Windows 11.
         if (g_settings->debugLogging) Wh_Log(L"Blocking modern context menu presenter");
         if (ppvOut) {
             *ppvOut = nullptr;
@@ -19185,10 +19199,14 @@ using ShouldShowMiniMenu_t = bool(WINAPI*)(void*, void*);
 inline ShouldShowMiniMenu_t ShouldShowMiniMenu_Original = nullptr;
 
 bool WINAPI ShouldShowMiniMenu_Hook(void* pThis, void* param) {
-    (void)pThis;
-    (void)param;
-    // Suppressed unconditionally so the classic path (and our replacement)
-    // always handles desktop menus; Shift bypass is handled by the popup hooks.
+    if (BypassKeyHeld()) {
+        // Ctrl: let the untouched mini menu through.
+        return ShouldShowMiniMenu_Original
+                   ? ShouldShowMiniMenu_Original(pThis, param)
+                   : true;
+    }
+    // Suppressed otherwise so the classic path (and our replacement) always
+    // handles desktop menus; Shift bypass is handled by the popup hooks.
     if (g_settings->debugLogging) Wh_Log(L"Blocking modern desktop mini menu");
     return false;
 }

@@ -22,8 +22,9 @@ from the interactive path:
 4. Common contexts are pre-built in the background shortly after Explorer
    starts.
 
-Hold **Shift** while right-clicking (or use **Show classic menu**) to get the
-untouched native menu, including extended verbs.
+Hold **Shift** while right-clicking for the classic menu (including extended
+verbs), or **Ctrl** for the untouched native menu. **Show classic menu** does
+the same from the menu itself.
 
 ## Features
 
@@ -64,7 +65,7 @@ untouched native menu, including extended verbs.
 |---|---|---|
 | Theme | Custom (menu.ini) | Appearance source: `menu.ini`, or a theme file under `<mod storage>\themes\<name>.ini` created from the bundled preset on first use. |
 | Menu mode | Custom (recommended) | Custom draws the self-rendered menu and falls back to the classic menu after repeated failures; Classic always uses the owner-drawn menu. |
-| Shift bypass | on | Hold Shift while right-clicking to show the untouched native menu. |
+| Bypass keys | on | Hold Shift while right-clicking for the classic menu, or Ctrl for the untouched native menu. |
 | Instant menu open | on | Native fallback menus (classic mode, Shift bypass, fallbacks) are shown without the system open animation, via `TPM_NOANIMATION`. |
 | Show classic menu item | on | Adds a "Show classic menu" entry at the bottom of the replacement menu. |
 | Submenu open delay | 150 ms | Hover delay before a submenu opens; 0 = instant, -1 = keep the Windows setting. |

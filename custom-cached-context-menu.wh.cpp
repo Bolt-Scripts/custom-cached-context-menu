@@ -5,7 +5,7 @@
 // @version         1.0.0
 // @include         explorer.exe
 // @architecture    x86-64
-// @compilerOptions -lole32 -lshlwapi -luuid -lcomctl32 -ladvapi32 -lgdi32 -luxtheme -lversion -ld3d11 -ld2d1 -ldwrite -ldcomp -ldxgi
+// @compilerOptions -lole32 -lshlwapi -luuid -lcomctl32 -ladvapi32 -lgdi32 -luxtheme -lversion -ld3d11 -ld2d1 -ldwrite -ldcomp
 // @license         MIT
 // @author          BOLT
 // @github          https://github.com/Bolt-Scripts
@@ -17,6 +17,8 @@
 
 Replaces the Windows Explorer context menu with a self-rendered menu that opens
 instantly and can be customized down to the pixel.
+
+![The bundled themes](https://raw.githubusercontent.com/Bolt-Scripts/custom-cached-context-menu/master/assets/theme-collage.png)
 
 The native menu is slow because every registered shell extension is loaded
 synchronously before it can be shown. This mod shows a cached menu right away
@@ -553,7 +555,6 @@ enum ModelFlags : uint32_t {
     kModelRadio = 1u << 2,
     kModelDisabled = 1u << 3,
     kModelOwnerDraw = 1u << 4,
-    kModelSeparator = 1u << 5,
     kModelExtension = 1u << 6,
     kModelHasOffset = 1u << 7,
     kModelWarmup = 1u << 8,
@@ -7197,11 +7198,10 @@ public:
     }
 
     void InvalidateDevice() { Clear(); }
-    void InvalidateAll() { Clear(); }
 
-    void SetMaxEntries(size_t maxEntries) {
-        maxEntries_ = maxEntries == 0 ? 1 : maxEntries;
-    }
+#ifdef CMO_TESTING
+    void SetMaxEntries(size_t maxEntries);
+#endif
 
     size_t Size() const {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -7241,7 +7241,6 @@ public:
         maxEntries_ = maxEntries == 0 ? 1 : maxEntries;
     }
 
-    size_t MaxEntries() const { return maxEntries_; }
     size_t Size() const { return map_.size(); }
 
     T* Find(const std::wstring& key) {
@@ -7525,9 +7524,6 @@ class MenuWindow {
 public:
     ~MenuWindow() { Destroy(); }
 
-    DWORD OwnerThread() const { return ownerThread_; }
-    void SetOwnerThread(DWORD threadId) { ownerThread_ = threadId; }
-
     bool Create(HWND owner, const LayoutPanel* panel, bool isRoot,
                 int margin = 0, bool activate = false) {
         // Pooled windows may carry a previous window/surface; release it so
@@ -7535,7 +7531,6 @@ public:
         Destroy();
 
         owner_ = owner;
-        ownerThread_ = GetCurrentThreadId();
         panel_ = panel;
         isRoot_ = isRoot;
         margin_ = margin > 0 ? margin : 0;
@@ -7736,7 +7731,6 @@ private:
 
     HWND hwnd_ = nullptr;
     HWND owner_ = nullptr;
-    DWORD ownerThread_ = 0;
     const LayoutPanel* panel_ = nullptr;
     bool isRoot_ = false;
     int margin_ = 0;
@@ -7769,69 +7763,38 @@ struct UiBusyScope {
 inline std::mutex g_controlWindowsMutex;
 inline std::unordered_map<DWORD, HWND> g_controlWindows;
 
+// Windows live for one menu session and are destroyed on the thread that owns
+// them. Create() rebuilds the HWND and surface every time, so pooling saved
+// nothing and its process-wide cap leaked a slot per Explorer thread until the
+// custom menu stopped working for the rest of the session.
 class MenuWindowPool {
 public:
     static constexpr size_t kMaxWindows = 8;
 
     MenuWindow* Acquire() {
         std::lock_guard<std::mutex> lock(mutex_);
-        // Reuse only windows created by this thread: DestroyWindow cannot
-        // destroy another thread's window, and a cross-thread window would
-        // outlive the DLL with its class procedure.
-        const DWORD self = GetCurrentThreadId();
-        for (size_t i = free_.size(); i-- > 0;) {
-            if (free_[i]->OwnerThread() == self) {
-                MenuWindow* window = free_[i];
-                free_.erase(free_.begin() + static_cast<std::ptrdiff_t>(i));
-                return window;
-            }
-        }
         if (all_.size() >= kMaxWindows) {
             return nullptr;
         }
         auto window = std::make_unique<MenuWindow>();
         MenuWindow* raw = window.get();
-        raw->SetOwnerThread(GetCurrentThreadId());
         all_.push_back(std::move(window));
         return raw;
     }
 
+    // Runs on the session (owning) thread, which may destroy its windows.
     void Release(MenuWindow* window) {
         if (!window) {
             return;
         }
+        window->Destroy();
         std::lock_guard<std::mutex> lock(mutex_);
-        if (g_unloading.load()) {
-            window->Destroy();
-            return;
-        }
-        window->Hide();
-        free_.push_back(window);
-    }
-
-    // Destroys idle windows only. Windows checked out by a live session stay
-    // valid; that session's teardown destroys them (see Release).
-    void DestroyFreeWindows() {
-        std::lock_guard<std::mutex> lock(mutex_);
-        const DWORD self = GetCurrentThreadId();
-        for (size_t i = 0; i < free_.size();) {
-            if (free_[i]->OwnerThread() == self) {
-                free_[i]->Destroy();
-                free_.erase(free_.begin() + static_cast<std::ptrdiff_t>(i));
-            } else {
-                ++i;
+        for (auto it = all_.begin(); it != all_.end(); ++it) {
+            if (it->get() == window) {
+                all_.erase(it);
+                break;
             }
         }
-    }
-
-    // Destroys every window; only safe when no session is using the pool.
-    void DestroyAll() {
-        std::lock_guard<std::mutex> lock(mutex_);
-        for (auto& window : all_) {
-            window->Destroy();
-        }
-        all_.clear();
-        free_.clear();
     }
 
     size_t Size() const {
@@ -7842,7 +7805,6 @@ public:
 private:
     mutable std::mutex mutex_;
     std::vector<std::unique_ptr<MenuWindow>> all_;
-    std::vector<MenuWindow*> free_;
 };
 
 CMO_NO_DESTROY inline std::optional<MenuWindowPool> g_menuWindowPool{std::in_place};
@@ -11421,6 +11383,11 @@ void RunSessionAnimation(MenuSession& session, const AnimationSpec& spec,
         }
         MSG msg = {};
         while (PeekMessageW(&msg, nullptr, 0, 0, PM_NOREMOVE)) {
+            if (msg.message == WM_QUIT) {
+                // Leave the quit request queued for the thread's own loop;
+                // dispatching it here would swallow it.
+                break;
+            }
             if (IsKeyboardMessage(msg.message)) {
                 // Consume keys while the menu is open, like native menus.
                 if (!PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
@@ -11499,6 +11466,11 @@ void RunWindowAnimation(MenuSession& session, size_t index,
         }
         MSG msg = {};
         while (PeekMessageW(&msg, nullptr, 0, 0, PM_NOREMOVE)) {
+            if (msg.message == WM_QUIT) {
+                // Leave the quit request queued for the thread's own loop;
+                // dispatching it here would swallow it.
+                break;
+            }
             if (IsKeyboardMessage(msg.message)) {
                 // Consume keys while the menu is open, like native menus.
                 if (!PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
@@ -12651,15 +12623,12 @@ void SettingsApplyReset(MenuSession& session, const std::wstring& key) {
 }
 
 void OpenSettingsMenu(HWND owner, POINT pt, bool activate = false) {
-    if (g_unloading.load() || g_settings->menuMode != 0 || g_menuSession) {
+    if (g_unloading.load() || g_settings->menuMode != 0) {
         return;
     }
     // The hotkey path activates the menu; remember where the user was so
     // focus can return there when the menu closes.
     HWND previousForeground = activate ? GetForegroundWindow() : nullptr;
-    if (!g_renderDevice.IsReady() && !g_renderDevice.Initialize()) {
-        return;
-    }
     SettingsSessionContext settings;
     settings.themeIndex = g_settings->themeIndex;
     settings.themeActive = settings.themeIndex > 0;
@@ -12871,7 +12840,6 @@ private:
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }
-        g_menuWindowPool->DestroyFreeWindows();
         if (window) {
             DestroyWindow(window);
         }
@@ -12910,7 +12878,6 @@ LRESULT CALLBACK ControlWindowProc(HWND hwnd, UINT msg, WPARAM wParam,
         if (hook) {
             UnhookWindowsHookEx(hook);
         }
-        g_menuWindowPool->DestroyFreeWindows();
         DestroyWindow(hwnd);
         {
             std::lock_guard<std::mutex> lock(g_controlWindowsMutex);
@@ -13756,11 +13723,9 @@ public:
         dirty_ = true;
     }
 
-    void SetMaxEntries(size_t maxEntries) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        maxEntries_ = maxEntries;
-        EvictIfNeededLocked();
-    }
+#ifdef CMO_TESTING
+    void SetMaxEntries(size_t maxEntries);
+#endif
 
     size_t Size() const {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -14291,7 +14256,6 @@ struct PendingCapture {
     std::vector<std::wstring> handlerModules;
     uint64_t sourceStamp = 0;
     bool discoveryDone = false;
-    bool reopenRequested = false;
     bool menuInitialized = false;
 };
 
@@ -14486,7 +14450,7 @@ private:
 // thread that parked it, and it is released from that thread's teardown (or
 // leaked if the thread is gone). No thread_local destructor can run after the
 // module is unmapped.
-CMO_NO_DESTROY inline std::optional<PendingQueue> g_pending{std::in_place};
+inline std::optional<PendingQueue> g_pending{std::in_place};
 
 void ReleasePendingCapturesForCurrentThread() {
     g_pending->ReleaseOwnedBy(GetCurrentThreadId());
@@ -14990,14 +14954,6 @@ bool MatchesRegisteredHandler(const std::vector<RegisteredHandlerInfo>& handlers
                               const std::wstring& label, std::wstring* dllOut);
 
 // Compatibility wrapper; the open path uses the prebuilt list directly.
-bool LabelMatchesRegisteredHandler(const ContextSignature& signature,
-                                   const std::wstring& label,
-                                   std::wstring* dllOut) {
-    return MatchesRegisteredHandler(BuildRegisteredHandlers(signature), label,
-                                    dllOut);
-}
-
-
 bool MatchesRegisteredHandler(const std::vector<RegisteredHandlerInfo>& handlers,
                               const std::wstring& label, std::wstring* dllOut) {
     if (label.empty()) {
@@ -15597,11 +15553,11 @@ bool InstallVtableHook() {
             if (SUCCEEDED(hr) && menu) {
                 void** vtable = *reinterpret_cast<void***>(menu);
                 void* queryContextMenu = vtable[3];
-                installed = Wh_SetFunctionHook(queryContextMenu,
-                                               (void*)QueryContextMenu_Hook,
-                                               (void**)&QueryContextMenu_Original);
+                installed = WindhawkUtils::SetFunctionHook(
+                    reinterpret_cast<QueryContextMenu_t>(queryContextMenu),
+                    QueryContextMenu_Hook, &QueryContextMenu_Original);
                 if (!installed) {
-                    Wh_Log(L"Wh_SetFunctionHook(QueryContextMenu) failed");
+                    Wh_Log(L"SetFunctionHook(QueryContextMenu) failed");
                 }
             } else {
                 Wh_Log(L"SHCreateDefaultContextMenu failed: %08X", hr);
@@ -17856,7 +17812,7 @@ private:
     std::unordered_map<std::wstring, HICON> icons_;
 };
 
-CMO_NO_DESTROY inline std::optional<IconCache> g_iconCache{std::in_place};
+inline std::optional<IconCache> g_iconCache{std::in_place};
 
 HBITMAP GetIconBitmapForMenu(const std::wstring& iconRef,
                              const std::vector<uint8_t>& iconPixels, int sizePx) {
@@ -17965,7 +17921,6 @@ private:
 // menu messages to the shell context object (required for dynamic submenus
 // and owner-draw items on the native menu), and optionally warms the cache
 // after a short delay while the menu is still open.
-constexpr UINT kDiscoveryTimerId = 0xC0DE;
 constexpr UINT_PTR kOwnerSubclassId = 0xC0DE;
 
 // Windows the native replay has subclassed. UI-thread only; the unload
@@ -17984,7 +17939,6 @@ public:
     }
 
     ~OwnerSubclass() {
-        StopDiscoveryTimer();
         if (subclassed_) {
             RemoveWindowSubclass(owner_, &OwnerSubclass::Proc, kOwnerSubclassId);
             for (size_t i = 0; i < g_subclassOwners.size(); ++i) {
@@ -18007,23 +17961,6 @@ public:
         g_subclassOwners.clear();
     }
 
-    // Runs discovery after the menu has been painted and is interactive. The
-    // delay must outlast menu construction (icon resolution included):
-    // population blocks the UI thread, and starting it before the first paint
-    // leaves the menu blank until the reopen.
-    void StartDiscoveryTimer(const ContextSignature& signature) {
-        discoverySignature_ = signature;
-        SetTimer(owner_, kDiscoveryTimerId, 600, nullptr);
-        timerSet_ = true;
-    }
-
-    void StopDiscoveryTimer() {
-        if (timerSet_) {
-            KillTimer(owner_, kDiscoveryTimerId);
-            timerSet_ = false;
-        }
-    }
-
 private:
     static LRESULT CALLBACK Proc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
                                  UINT_PTR idSubclass, DWORD_PTR refData) {
@@ -18033,17 +17970,6 @@ private:
 
     LRESULT Handle(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam,
                    UINT_PTR idSubclass) {
-        if (msg == WM_TIMER && wParam == kDiscoveryTimerId) {
-            StopDiscoveryTimer();
-            if (capture_ && !capture_->discoveryDone && !capture_->reopenRequested) {
-                // Close the menu before population: it blocks the UI thread
-                // and would leave visible items blank until the reopen.
-                capture_->reopenRequested = true;
-                EndMenu();
-            }
-            return 0;
-        }
-
         if (forward_ && capture_) {
             switch (msg) {
                 case WM_INITMENUPOPUP:
@@ -18076,8 +18002,6 @@ private:
     PendingCapture* capture_ = nullptr;
     bool forward_ = false;
     bool subclassed_ = false;
-    bool timerSet_ = false;
-    ContextSignature discoverySignature_{};
 };
 
 // Free-function bridge so the early unload cleanup can remove subclasses
@@ -18410,7 +18334,10 @@ private:
                 completed = false;
                 break;
             }
-            WaitForSingleObject(resumeEvent_, INFINITE);
+            // Wait for resume or stop: a menu opening concurrently may reset
+            // the resume event, and the stop signal must still wake us.
+            HANDLE waitEvents[2] = {stopEvent_, resumeEvent_};
+            WaitForMultipleObjects(2, waitEvents, FALSE, INFINITE);
             if (WaitForSingleObject(stopEvent_, 0) == WAIT_OBJECT_0) {
                 completed = false;
                 break;
@@ -18622,6 +18549,12 @@ public:
             CloseHandle(thread_);
             thread_ = nullptr;
         }
+    }
+
+    // UI threads can still call RequestCheck until the unload wait is over,
+    // so the handles are closed separately, after that wait.
+    void CloseHandles() {
+        std::lock_guard<std::mutex> lock(lifecycleMutex_);
         if (stopEvent_) {
             CloseHandle(stopEvent_);
             stopEvent_ = nullptr;
@@ -18631,8 +18564,6 @@ public:
             checkEvent_ = nullptr;
         }
     }
-
-    uint64_t Generation() const { return generation_.load(); }
 
 private:
     static DWORD WINAPI ThreadProc(LPVOID param) {
@@ -18700,7 +18631,6 @@ private:
     }
 
     void InvalidateNow(const wchar_t* reason) {
-        ++generation_;
         g_cache.Clear();
         InvalidateSendToChildren();
         // The warm-up thread rebuilds the SendTo entries and pre-built models.
@@ -18759,7 +18689,6 @@ private:
     HANDLE thread_ = nullptr;
     HANDLE stopEvent_ = nullptr;
     HANDLE checkEvent_ = nullptr;
-    std::atomic<uint64_t> generation_{0};
     uint64_t nextRevalidationTick_ = 0;
 };
 
@@ -19327,23 +19256,25 @@ bool g_populationHookDeferred = false;
 BOOL Wh_ModInit() {
     Wh_Log(L"Custom Cached Context Menu init");
 
-    if (!Wh_SetFunctionHook((void*)TrackPopupMenuEx, (void*)cmo::TrackPopupMenuEx_Hook,
-                            (void**)&cmo::TrackPopupMenuEx_Original)) {
+    if (!WindhawkUtils::SetFunctionHook(TrackPopupMenuEx,
+                                        cmo::TrackPopupMenuEx_Hook,
+                                        &cmo::TrackPopupMenuEx_Original)) {
         Wh_Log(L"Failed to hook TrackPopupMenuEx");
         return FALSE;
     }
 
-    if (!Wh_SetFunctionHook((void*)TrackPopupMenu, (void*)cmo::TrackPopupMenu_Hook,
-                            (void**)&cmo::TrackPopupMenu_Original)) {
+    if (!WindhawkUtils::SetFunctionHook(TrackPopupMenu,
+                                        cmo::TrackPopupMenu_Hook,
+                                        &cmo::TrackPopupMenu_Original)) {
         Wh_Log(L"Failed to hook TrackPopupMenu");
         return FALSE;
     }
 
     // Record bitmaps extensions attach with SetMenuItemBitmaps; the API has
     // no getter, and this is how the native menu gets their icons.
-    if (!Wh_SetFunctionHook((void*)SetMenuItemBitmaps,
-                            (void*)cmo::SetMenuItemBitmaps_Hook,
-                            (void**)&cmo::SetMenuItemBitmaps_Original)) {
+    if (!WindhawkUtils::SetFunctionHook(SetMenuItemBitmaps,
+                                        cmo::SetMenuItemBitmaps_Hook,
+                                        &cmo::SetMenuItemBitmaps_Original)) {
         Wh_Log(L"Failed to hook SetMenuItemBitmaps");
     }
 
@@ -19455,6 +19386,7 @@ void Wh_ModUninit() {
     // intentionally not released from the wrong thread); the queue's own
     // memory can go.
     cmo::g_pending.reset();
+    cmo::g_invalidation.CloseHandles();
     cmo::ReleaseOverlayResources();
     // Best effort: the per-thread cleanup may have raced an open session and
     // failed to unregister the classes; all windows are gone by now.

@@ -5,6 +5,10 @@
 
 namespace cmo {
 
+bool LabelMatchesRegisteredHandler(const ContextSignature& signature,
+                                   const std::wstring& label,
+                                   std::wstring* dllOut);
+
 // Publishes a single settings change through the production publisher.
 template <typename T>
 void SetSettingForTesting(T Settings::* member, std::type_identity_t<T> value) {
@@ -145,6 +149,22 @@ bool ConfigStore::ApplyTextForTesting(const std::wstring& text) {
 
 bool Warmup::IsPaused() const {
     return paused_.load();
+}
+
+bool LabelMatchesRegisteredHandler(const ContextSignature& signature,
+                                   const std::wstring& label,
+                                   std::wstring* dllOut) {
+    return MatchesRegisteredHandler(BuildRegisteredHandlers(signature), label,
+                                    dllOut);
+}
+
+void LayoutCache::SetMaxEntries(size_t maxEntries) {
+    maxEntries_ = maxEntries == 0 ? 1 : maxEntries;
+}
+void Cache::SetMaxEntries(size_t maxEntries) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    maxEntries_ = maxEntries;
+    EvictIfNeededLocked();
 }
 
 }  // namespace cmo

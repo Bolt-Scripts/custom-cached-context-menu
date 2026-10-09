@@ -2626,9 +2626,15 @@ int main() {
         cmo::MenuWindow* a = pool.Acquire();
         cmo::MenuWindow* b = pool.Acquire();
         CHECK(a != nullptr && b != nullptr && a != b);
+        CHECK(pool.Size() == 2);
         pool.Release(a);
-        CHECK(pool.Acquire() == a);
-        pool.DestroyAll();
+        CHECK(pool.Size() == 1);
+        cmo::MenuWindow* c = pool.Acquire();
+        CHECK(c != nullptr);
+        CHECK(pool.Size() == 2);
+        pool.Release(b);
+        pool.Release(c);
+        CHECK(pool.Size() == 0);
     }
 
     // v2 content caches: empty and clear.

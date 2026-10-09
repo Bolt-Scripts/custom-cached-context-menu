@@ -9512,7 +9512,7 @@ void DrawOverlay(ID2D1DeviceContext* dc, const LayoutPanel& panel,
 void DrawPanel(ID2D1DeviceContext* dc, const LayoutPanel& panel,
                const MenuInputState& state, const LayoutMetrics& metrics,
                const Appearance& appearance, const BackdropBitmap* backdrop,
-               int margin = 0, int shadowClipSide = 0,
+               int margin = 0,
                const AnimationFrame& frame = AnimationFrame{},
                POINT anchor = POINT{0, 0}, float overlayTime = 0.0f) {
     if (!dc) {
@@ -9591,34 +9591,6 @@ void DrawPanel(ID2D1DeviceContext* dc, const LayoutPanel& panel,
                 static_cast<float>(-spread - blur + metrics.shadowOffsetX);
             const float top =
                 static_cast<float>(-spread - blur + metrics.shadowOffsetY);
-            if ((shadowClipSide == 1 || shadowClipSide == 2) && shadowW > 0 &&
-                shadowH > 0) {
-                // Cut the bitmap at the panel edge on the parent-facing side.
-                const float panelLeftCol =
-                    (0.0f - left) * static_cast<float>(shadowW) / maskW;
-                const float panelRightCol =
-                    (static_cast<float>(panel.size.cx) - left) *
-                    static_cast<float>(shadowW) / maskW;
-                for (int y = 0; y < shadowH; ++y) {
-                    uint32_t* row =
-                        &shadowPixels[static_cast<size_t>(y) * shadowW];
-                    if (shadowClipSide == 1) {
-                        const int end = std::clamp(
-                            static_cast<int>(std::ceil(panelLeftCol)), 0,
-                            shadowW);
-                        for (int x = 0; x < end; ++x) {
-                            row[x] = 0;
-                        }
-                    } else {
-                        const int start = std::clamp(
-                            static_cast<int>(std::floor(panelRightCol)), 0,
-                            shadowW);
-                        for (int x = start; x < shadowW; ++x) {
-                            row[x] = 0;
-                        }
-                    }
-                }
-            }
             ID2D1Bitmap* bitmap = nullptr;
             const D2D1_SIZE_U size = {static_cast<UINT32>(shadowW),
                                       static_cast<UINT32>(shadowH)};
@@ -10205,9 +10177,6 @@ struct MenuSession {
     std::vector<uint8_t> windowAnimating;
     std::vector<MenuInputState> states;
     std::vector<BackdropBitmap> backdrops;
-    // Per level: 0 = draw the full shadow, 1 = clip the left side, 2 = clip the
-    // right side (submenus do not cast a shadow onto their parent menu).
-    std::vector<uint8_t> shadowClipSides;
     int active = 0;
     int maxHeight = 0;
     int margin = 0;
@@ -11247,7 +11216,6 @@ void RenderMenuWindow(MenuWindow* window, const LayoutPanel& panel,
                       const MenuInputState& state, const LayoutMetrics& metrics,
                       const Appearance& appearance,
                       const BackdropBitmap* backdrop, int margin,
-                      int shadowClipSide,
                       const AnimationFrame& frame = AnimationFrame{},
                       POINT anchor = POINT{0, 0}, float overlayTime = 0.0f) {
     if (!window || !window->SwapChain() || !g_renderDevice.D2DDevice()) {
@@ -11278,7 +11246,7 @@ void RenderMenuWindow(MenuWindow* window, const LayoutPanel& panel,
         dc->BeginDraw();
         dc->Clear(nullptr);
         DrawPanel(dc, panel, state, metrics, appearance, backdrop, margin,
-                  shadowClipSide, frame, anchor, overlayTime);
+                  frame, anchor, overlayTime);
         const HRESULT drawResult = dc->EndDraw();
         target->Release();
         if (drawResult == static_cast<HRESULT>(D2DERR_RECREATE_TARGET)) {
@@ -11302,11 +11270,9 @@ void RenderSessionFrame(MenuSession& session, const AnimationFrame& frame) {
         if (i < session.backdrops.size() && session.backdrops[i].width > 0) {
             backdrop = &session.backdrops[i];
         }
-        const int shadowClipSide =
-            i < session.shadowClipSides.size() ? session.shadowClipSides[i] : 0;
         RenderMenuWindow(window, *window->Panel(), session.states[i],
                          session.metrics, session.appearance, backdrop,
-                         session.margin, shadowClipSide, frame,
+                         session.margin, frame,
                          session.animationAnchor, session.OverlaySeconds());
     }
 }
@@ -11432,9 +11398,6 @@ void RunWindowAnimation(MenuSession& session, size_t index,
         index < session.backdrops.size() && session.backdrops[index].width > 0
             ? &session.backdrops[index]
             : nullptr;
-    const int shadowClipSide =
-        index < session.shadowClipSides.size() ? session.shadowClipSides[index]
-                                               : 0;
     if (index < session.windowAnimating.size()) {
         session.windowAnimating[index] = 1;
     }
@@ -11452,7 +11415,7 @@ void RunWindowAnimation(MenuSession& session, size_t index,
         }
         RenderMenuWindow(window, *panel, session.states[index], session.metrics,
                          session.appearance, backdrop, session.margin,
-                         shadowClipSide, ComputeAnimationFrame(spec, t, true),
+                         ComputeAnimationFrame(spec, t, true),
                          anchor, session.OverlaySeconds());
         if (t >= 1.0f) {
             break;
@@ -11513,13 +11476,9 @@ void RepaintMenuWindow(MenuSession* session, int index) {
         session->backdrops[index].width > 0) {
         backdrop = &session->backdrops[index];
     }
-    const int shadowClipSide =
-        index < static_cast<int>(session->shadowClipSides.size())
-            ? session->shadowClipSides[index]
-            : 0;
     RenderMenuWindow(window, *window->Panel(), session->states[index],
                      session->metrics, session->appearance, backdrop,
-                     session->margin, shadowClipSide, session->animationFrame,
+                     session->margin, session->animationFrame,
                      session->animationAnchor, session->OverlaySeconds());
 }
 
@@ -11538,9 +11497,6 @@ void CloseSubmenusBelow(MenuSession* session, int index) {
             session->windowAnimating.pop_back();
         }
         session->states.pop_back();
-        if (!session->shadowClipSides.empty()) {
-            session->shadowClipSides.pop_back();
-        }
         if (session->backdrops.size() >= session->windows.size() + 1) {
             session->backdrops.pop_back();
         }
@@ -11608,12 +11564,6 @@ void OpenSubmenu(MenuSession* session, int index, int itemIndex) {
     session->windows.push_back(child);
     session->windowAnimating.push_back(0);
     session->states.push_back(MenuInputState{});
-    // A submenu does not cast its shadow onto the parent menu: clip the
-    // parent-facing side so the items underneath stay readable.
-    session->shadowClipSides.push_back(childPos.x + session->margin >=
-                                               itemScreen.left
-                                           ? 1
-                                           : 2);
     session->backdrops.push_back(hasBackdrop ? std::move(backdrop)
                                              : BackdropBitmap{});
     session->active = static_cast<int>(session->windows.size()) - 1;
@@ -11643,7 +11593,7 @@ void OpenSubmenu(MenuSession* session, int index, int itemIndex) {
     RenderMenuWindow(child, childPanel, session->states.back(), session->metrics,
                      session->appearance,
                      hasBackdrop ? &session->backdrops.back() : nullptr,
-                     session->margin, session->shadowClipSides.back(),
+                     session->margin,
                      animateChild
                          ? ComputeAnimationFrame(childSpec, 0.0f, true)
                          : AnimationFrame{},
@@ -12262,7 +12212,6 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
     session.windows.push_back(root);
     session.windowAnimating.push_back(0);
     session.states.push_back(MenuInputState{});
-    session.shadowClipSides.push_back(0);
 
     BackdropBitmap backdrop;
     const RECT captureRect = {panelPos.x, panelPos.y,

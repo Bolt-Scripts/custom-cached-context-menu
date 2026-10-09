@@ -7524,8 +7524,8 @@ public:
 
     bool Create(HWND owner, const LayoutPanel* panel, bool isRoot,
                 int margin = 0, bool activate = false) {
-        // Pooled windows may carry a previous window/surface; release it so
-        // reuse never leaks an HWND, swap chain, target, or visual.
+        // Defensive: release anything from a failed earlier attempt so Create
+        // never leaks an HWND, swap chain, target, or visual.
         Destroy();
 
         owner_ = owner;
@@ -7571,12 +7571,6 @@ public:
         }
         // Never activate: the owner keeps its active look, like native menus.
         ::ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
-    }
-
-    void Hide() {
-        if (hwnd_) {
-            ::ShowWindow(hwnd_, SW_HIDE);
-        }
     }
 
     void Destroy() {
@@ -7738,8 +7732,8 @@ private:
 };
 
 // Set while Wh_ModUninit tears the mod down. New sessions are refused and
-// window-pool releases destroy their window instead of keeping it around,
-// because the DLL (and its window procedures) is about to be unloaded.
+// releases destroy their window immediately, because the DLL (and its window
+// procedures) is about to be unloaded.
 inline std::atomic<bool> g_unloading{false};
 // Custom menu sessions currently running on the UI thread. Uninit waits for
 // this to reach zero before releasing UI-thread resources.
@@ -7762,10 +7756,10 @@ inline std::mutex g_controlWindowsMutex;
 inline std::unordered_map<DWORD, HWND> g_controlWindows;
 
 // Windows live for one menu session and are destroyed on the thread that owns
-// them. Create() rebuilds the HWND and surface every time, so pooling saved
-// nothing and its process-wide cap leaked a slot per Explorer thread until the
-// custom menu stopped working for the rest of the session.
-class MenuWindowPool {
+// them. Create() rebuilds the HWND and surface every time, so keeping them
+// around saved nothing and its process-wide cap leaked a slot per Explorer
+// thread until the custom menu stopped working for the rest of the session.
+class MenuWindowSet {
 public:
     static constexpr size_t kMaxWindows = 8;
 
@@ -7805,7 +7799,7 @@ private:
     std::vector<std::unique_ptr<MenuWindow>> all_;
 };
 
-CMO_NO_DESTROY inline std::optional<MenuWindowPool> g_menuWindowPool{std::in_place};
+CMO_NO_DESTROY inline std::optional<MenuWindowSet> g_menuWindowSet{std::in_place};
 
 // ===========================================================================
 // [CMO:MenuWindow] Input state, content caches, and Direct2D drawing.
@@ -11383,8 +11377,9 @@ void RunSessionAnimation(MenuSession& session, const AnimationSpec& spec,
         while (PeekMessageW(&msg, nullptr, 0, 0, PM_NOREMOVE)) {
             if (msg.message == WM_QUIT) {
                 // Leave the quit request queued for the thread's own loop;
-                // dispatching it here would swallow it.
-                break;
+                // dispatching it here would swallow it. A long configured
+                // animation must not delay the thread's exit either.
+                return;
             }
             if (IsKeyboardMessage(msg.message)) {
                 // Consume keys while the menu is open, like native menus.
@@ -11466,7 +11461,9 @@ void RunWindowAnimation(MenuSession& session, size_t index,
         while (PeekMessageW(&msg, nullptr, 0, 0, PM_NOREMOVE)) {
             if (msg.message == WM_QUIT) {
                 // Leave the quit request queued for the thread's own loop;
-                // dispatching it here would swallow it.
+                // dispatching it here would swallow it. Marking the session
+                // done ends this animation on the next loop check.
+                session.done = true;
                 break;
             }
             if (IsKeyboardMessage(msg.message)) {
@@ -11529,7 +11526,7 @@ void RepaintMenuWindow(MenuSession* session, int index) {
 void CloseSubmenusBelow(MenuSession* session, int index) {
     while (static_cast<int>(session->windows.size()) > index + 1) {
         MenuWindow* window = session->windows.back();
-        // A closed level must not keep blinking its caret from the pool.
+        // A closed level must not keep blinking its caret.
         if (!session->states.back().focusedControl.empty()) {
             KillTimer(window->Handle(), kSettingsCaretTimerId);
             session->states.back().focusedControl.clear();
@@ -11547,7 +11544,7 @@ void CloseSubmenusBelow(MenuSession* session, int index) {
         if (session->backdrops.size() >= session->windows.size() + 1) {
             session->backdrops.pop_back();
         }
-        g_menuWindowPool->Release(window);
+        g_menuWindowSet->Release(window);
     }
     session->active = index;
     if (index >= 0 && index < static_cast<int>(session->states.size())) {
@@ -11574,12 +11571,12 @@ void OpenSubmenu(MenuSession* session, int index, int itemIndex) {
     CloseSubmenusBelow(session, index);
     const LayoutPanel& childPanel = parent->children[item.submenuIndex];
 
-    MenuWindow* child = g_menuWindowPool->Acquire();
+    MenuWindow* child = g_menuWindowSet->Acquire();
     if (!child ||
         !child->Create(session->windows[index]->Handle(), &childPanel, false,
                        session->margin)) {
         if (child) {
-            g_menuWindowPool->Release(child);
+            g_menuWindowSet->Release(child);
         }
         return;
     }
@@ -12221,7 +12218,7 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
         return result;
     }
 
-    MenuWindow* root = g_menuWindowPool->Acquire();
+    MenuWindow* root = g_menuWindowSet->Acquire();
     const int margin =
         appearance.shadow && (metrics.shadowSize > 0 || metrics.shadowBlur > 0)
             ? ShadowMargin(metrics.shadowSize, metrics.shadowBlur,
@@ -12229,7 +12226,7 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
             : 0;
     if (!root || !root->Create(owner, panel.get(), true, margin, activate)) {
         if (root) {
-            g_menuWindowPool->Release(root);
+            g_menuWindowSet->Release(root);
         }
         result.failed = true;
         return result;
@@ -12388,9 +12385,9 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
         }
     }
     for (size_t i = session.windows.size(); i > 1; --i) {
-        g_menuWindowPool->Release(session.windows[i - 1]);
+        g_menuWindowSet->Release(session.windows[i - 1]);
     }
-    g_menuWindowPool->Release(root);
+    g_menuWindowSet->Release(root);
     if (g_menuSession == &session) {
         g_menuWindowMessageHook = nullptr;
         g_menuSession = nullptr;
@@ -14446,8 +14443,8 @@ private:
 
 // One queue shared by all threads: a capture is only ever handed back to the
 // thread that parked it, and it is released from that thread's teardown (or
-// leaked if the thread is gone). No thread_local destructor can run after the
-// module is unmapped.
+// leaked if the thread is gone). It is a global rather than thread_local so no
+// destructor can run after the module is unmapped.
 inline std::optional<PendingQueue> g_pending{std::in_place};
 
 void ReleasePendingCapturesForCurrentThread() {
@@ -14948,10 +14945,6 @@ std::vector<RegisteredHandlerInfo> BuildRegisteredHandlers(
     return handlers;
 }
 
-bool MatchesRegisteredHandler(const std::vector<RegisteredHandlerInfo>& handlers,
-                              const std::wstring& label, std::wstring* dllOut);
-
-// Compatibility wrapper; the open path uses the prebuilt list directly.
 bool MatchesRegisteredHandler(const std::vector<RegisteredHandlerInfo>& handlers,
                               const std::wstring& label, std::wstring* dllOut) {
     if (label.empty()) {
@@ -19391,9 +19384,9 @@ void Wh_ModUninit() {
     UnregisterClassW(cmo::kMenuWindowClass, cmo::ModModuleHandle());
     UnregisterClassW(cmo::kControlWindowClass, cmo::ModModuleHandle());
 
-    // Fully release the resource-owning globals; CMO_NO_DESTROY keeps their
-    // destructors from running at process exit.
-    cmo::g_menuWindowPool.reset();
+    // Fully release the resource-owning globals; the CMO_NO_DESTROY ones
+    // would otherwise hold their resources until process exit.
+    cmo::g_menuWindowSet.reset();
     cmo::g_layoutCache.reset();
     cmo::g_contentCaches.reset();
     cmo::g_iconCache.reset();

@@ -2622,7 +2622,7 @@ int main() {
               (WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOREDIRECTIONBITMAP |
                WS_EX_NOACTIVATE));
         CHECK(cmo::MenuWindowStyle() == WS_POPUP);
-        cmo::MenuWindowPool pool;
+        cmo::MenuWindowSet pool;
         cmo::MenuWindow* a = pool.Acquire();
         cmo::MenuWindow* b = pool.Acquire();
         CHECK(a != nullptr && b != nullptr && a != b);

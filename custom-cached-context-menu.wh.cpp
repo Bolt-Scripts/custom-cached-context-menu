@@ -1377,7 +1377,7 @@ struct Appearance {
     int shadowOpacity = 120;
     uint32_t shadowColor = 0xFF000000;
     bool shadowAdaptive = true;
-    int shadowBlur = 12;
+    int shadowBlur = 18;
     MarkerStyle marker = MarkerStyle::Dot;
     uint32_t markerColor = 0xFFFFFFFF;
     bool hasMarkerColor = false;
@@ -1939,7 +1939,7 @@ const ConfigSchemaEntry kAppearanceSchema[] = {
     {L"appearance", L"markerColor", L"Selection marker", SettingType::Color, L"#FFFFFFFF", nullptr, 0, 0,
      L"Marker color; defaults to textColor.", 1, true},
     {L"appearance", L"font", L"Text", SettingType::Font, L"Segoe UI, 11", nullptr, 0, 0,
-     L"Text font face and size.", 1, false},
+     L"Text font face and size (size is in pixels at 96 DPI).", 1, false},
     {L"appearance", L"fontWeight", L"Text", SettingType::Enum, L"normal", L"normal|semibold|bold", 0, 0,
      L"Text weight.", 1, false},
     {L"appearance", L"fontStyle", L"Text", SettingType::Enum, L"normal", L"normal|italic", 0, 0,
@@ -6465,7 +6465,7 @@ struct LayoutMetrics {
     int submenuArrowWidth = 16;
     int cornerRadius = 8;
     int borderWidth = 1;
-    int shadowSize = 12;
+    int shadowSize = 0;
     float fontSize = 9.0f;
     std::wstring fontFace = L"Segoe UI";
     uint32_t textColor = 0xFFFFFFFF;
@@ -6475,7 +6475,7 @@ struct LayoutMetrics {
     uint32_t separator = 0x18FFFFFF;
     uint32_t submenuArrow = 0x99FFFFFF;
     int shadowOffsetX = 0;
-    int shadowOffsetY = 2;
+    int shadowOffsetY = 4;
     int blurPasses = 2;
     int verticalPadding = 4;
     int itemPadding = 6;
@@ -6489,7 +6489,7 @@ struct LayoutMetrics {
     bool hasCornerRadii = false;
     int shadowOpacity = 120;
     uint32_t shadowColor = 0xFF000000;
-    int shadowBlur = 12;
+    int shadowBlur = 18;
     MarkerStyle marker = MarkerStyle::Dot;
     uint32_t markerColor = 0xFFFFFFFF;
     uint32_t headerColor = 0x66FFFFFF;
@@ -12521,6 +12521,20 @@ void RelayoutSession(MenuSession& session) {
         }
         session.windows[i]->SetBounds(pos, width, height);
 
+        if (i >= 1 && i < session.shadowClipRects.size()) {
+            // The parent may have moved with the edit; recompute the parent's
+            // panel rect in this panel's coordinates.
+            RECT parentRect = {};
+            GetWindowRect(session.windows[i - 1]->Handle(), &parentRect);
+            const POINT childPanelPos = {pos.x + session.margin,
+                                         pos.y + session.margin};
+            session.shadowClipRects[i] =
+                RECT{parentRect.left + session.margin - childPanelPos.x,
+                     parentRect.top + session.margin - childPanelPos.y,
+                     parentRect.right - session.margin - childPanelPos.x,
+                     parentRect.bottom - session.margin - childPanelPos.y};
+        }
+
         // Refresh the blur backdrop only when the panel size changed.
         const int expectedWidth =
             levelPanel->size.cx / kBackdropDownscaleFactor;
@@ -14489,10 +14503,18 @@ void ReleasePendingCapturesForCurrentThread() {
 constexpr UINT kCmfPopupMenu = 0x00020000;
 
 // Ctrl bypasses the mod entirely (when bypass keys are enabled) so the
-// untouched native menu can show; Shift shows the classic menu instead.
+// untouched native menu can show; Shift shows the classic menu instead. The
+// decision sticks briefly so "Show more options" from the untouched modern
+// menu also stays untouched.
 bool BypassKeyHeld() {
-    return g_settings->enableShiftBypass &&
-           (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
+    static thread_local ULONGLONG bypassUntil = 0;
+    const ULONGLONG now = GetTickCount64();
+    if (g_settings->enableShiftBypass &&
+        (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0) {
+        bypassUntil = now + 3000;
+        return true;
+    }
+    return now < bypassUntil;
 }
 
 // Only main popup menus are deferred. CMF_DEFAULTONLY is the default-verb

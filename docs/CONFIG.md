@@ -97,7 +97,7 @@ rewritten.
 | shadowSize | int | `0` | 0–64 px spread (how far the shadow extends) |
 | shadowOffsetX | int | `0` | -32–32 px horizontal offset |
 | shadowOffsetY | int | `4` | -32–32 px vertical offset |
-| font | font | `Segoe UI, 11` | face, size |
+| font | font | `Segoe UI, 11` | face, size (pixels at 96 DPI) |
 | itemHeight | int | `28` | 1–256 px |
 | iconSize | int | `16` | 1–256 px |
 | padding | int | `6` | 0–256 px base padding |

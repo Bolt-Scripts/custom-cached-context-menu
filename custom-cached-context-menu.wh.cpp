@@ -143,10 +143,10 @@ MIT
   - classic: Classic owner-drawn
 - enableShiftBypass: true
   $name: Bypass keys
-  $description: Hold Shift while right-clicking for the classic menu, or Ctrl for the untouched native menu.
+  $description: Hold Shift while right-clicking to bypass the mod and get the stock classic menu, or Ctrl for the untouched native menu.
 - instantMenuFade: true
   $name: Instant menu open
-  $description: Shows native fallback menus (classic mode, Shift bypass, fallbacks) without the system open animation, via TPM_NOANIMATION.
+  $description: Shows native fallback menus (classic mode, fallbacks) without the system open animation, via TPM_NOANIMATION.
 - showMoreOptionsItem: true
   $name: Show classic menu item
   $description: Add a "Show classic menu" entry at the bottom of the replacement menu.
@@ -14503,9 +14503,10 @@ void ReleasePendingCapturesForCurrentThread() {
 constexpr UINT kCmfPopupMenu = 0x00020000;
 
 // Ctrl bypasses the mod entirely (when bypass keys are enabled) so the
-// untouched native menu can show; Shift shows the classic menu instead. The
-// decision sticks briefly so "Show more options" from the untouched modern
-// menu also stays untouched.
+// untouched native menu can show. The decision sticks briefly so "Show more
+// options" from the untouched modern menu also stays untouched. Shift is a
+// separate, earlier bypass: while it is held the menu is never deferred, so
+// Explorer builds and shows its own stock menu.
 bool BypassKeyHeld() {
     static thread_local ULONGLONG bypassUntil = 0;
     const ULONGLONG now = GetTickCount64();
@@ -14517,12 +14518,25 @@ bool BypassKeyHeld() {
     return now < bypassUntil;
 }
 
+// Shift is checked before the menu is built so the shell populates and shows
+// its own menu untouched, with no capture or replay. That keeps
+// Shift+right-click bit-for-bit stock, including entries the shell menu alone
+// cannot reproduce (view commands, Explorer-added items).
+bool ShiftBypassHeld() {
+    return g_settings->enableShiftBypass &&
+           (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+}
+
 // Only main popup menus are deferred. CMF_DEFAULTONLY is the default-verb
 // resolution used by double-click/open; CMF_NOVERBS builds submenus such as
 // Send to; CMF_VERBSONLY builds verb-only menus. Those never show a popup we
-// could replace and must reach the shell untouched.
-bool ShouldDeferContextMenu(UINT flags) {
+// could replace and must reach the shell untouched. A held Shift bypass is
+// also never deferred so Explorer builds and shows the stock menu.
+bool ShouldDeferContextMenu(UINT flags, bool shiftBypassActive) {
     if (BypassKeyHeld()) {
+        return false;
+    }
+    if (shiftBypassActive) {
         return false;
     }
     if (flags & (CMF_DEFAULTONLY | CMF_NOVERBS | CMF_VERBSONLY)) {
@@ -14538,7 +14552,7 @@ inline QueryContextMenu_t QueryContextMenu_Original = nullptr;
 HRESULT STDMETHODCALLTYPE QueryContextMenu_Hook(IContextMenu* pThis, HMENU hmenu,
                                                 UINT indexMenu, UINT idCmdFirst,
                                                 UINT idCmdLast, UINT uFlags) {
-    if (!ShouldDeferContextMenu(uFlags)) {
+    if (!ShouldDeferContextMenu(uFlags, ShiftBypassHeld())) {
         if (g_settings->debugLogging) Wh_Log(L"QueryContextMenu pass-through: flags=%08X", uFlags);
         return QueryContextMenu_Original(pThis, hmenu, indexMenu, idCmdFirst, idCmdLast,
                                          uFlags);
@@ -18066,7 +18080,7 @@ void RemoveOwnerSubclasses() {
 
 // Shows the retained, really-populated native menu with menu-message
 // forwarding and invokes the selection through the live object. Used by the
-// fallback item and the Shift bypass.
+// fallback item and, as a safety net, the late-Shift bypass.
 std::optional<uint32_t> ShowNativeReplay(PendingCapture& capture, HWND owner, POINT pt) {
     if (!EnsureContextPopulated(capture) || !capture.populatedMenu ||
         !TrackPopupMenuEx_Original) {
@@ -18757,8 +18771,10 @@ namespace cmo {
 
 enum class MenuPath : uint8_t { Ours, NativeBypass, Passthrough };
 
-// Decides which menu a popup owner gets. Shift bypasses the replacement and
-// shows the untouched native menu (stock behavior, extended verbs included).
+// Decides which menu a popup owner gets. A held Shift normally bypasses the
+// replacement before the menu is built (ShouldDeferContextMenu), so the
+// NativeBypass branch only covers the rare case of Shift being pressed after
+// the menu was already deferred; it shows the retained native menu.
 MenuPath DecidePath(bool shiftHeld, ShellViewKind kind, bool hasPendingCapture,
                     bool enableShiftBypass) {
     if (!hasPendingCapture || !IsReplaceableKind(kind)) {
@@ -19235,12 +19251,13 @@ HRESULT WINAPI IUnknown_QueryService_Hook(IUnknown* punk, REFGUID guidService,
     if (IsEqualGUID(guidService, kContextMenuPresenterService) &&
         (IsEqualGUID(riid, kContextMenuPresenterIid) ||
          IsEqualGUID(riid, kContextMenuPresenterIid24H2))) {
-        if (BypassKeyHeld()) {
-            // Ctrl: let the untouched modern menu through.
+        if (BypassKeyHeld() || ShiftBypassHeld()) {
+            // Ctrl: let the untouched modern menu through. Shift: let the
+            // stock Shift behavior (the classic menu) through untouched.
             return IUnknown_QueryService_Original(punk, guidService, riid, ppvOut);
         }
-        // Suppressed otherwise so Shift+right-click reaches our bypass and
-        // shows the classic native menu, matching stock Windows 11.
+        // Suppressed otherwise so the classic path (and our replacement) is
+        // used by default.
         if (g_settings->debugLogging) Wh_Log(L"Blocking modern context menu presenter");
         if (ppvOut) {
             *ppvOut = nullptr;
@@ -19254,15 +19271,14 @@ using ShouldShowMiniMenu_t = bool(WINAPI*)(void*, void*);
 inline ShouldShowMiniMenu_t ShouldShowMiniMenu_Original = nullptr;
 
 bool WINAPI ShouldShowMiniMenu_Hook(void* pThis, void* param) {
-    if (BypassKeyHeld()) {
-        // Ctrl: let the untouched mini menu through.
+    if (BypassKeyHeld() || ShiftBypassHeld()) {
+        // Ctrl: let the untouched mini menu through. Shift: stock behavior.
         return ShouldShowMiniMenu_Original
                    ? ShouldShowMiniMenu_Original(pThis, param)
                    : true;
     }
     // Suppressed otherwise so the classic path (and our replacement) always
-    // handles navigation pane menus; Shift bypass is handled by the popup
-    // hooks.
+    // handles navigation pane menus.
     if (g_settings->debugLogging) Wh_Log(L"Blocking modern navigation pane mini menu");
     return false;
 }

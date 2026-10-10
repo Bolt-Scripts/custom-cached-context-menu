@@ -22,9 +22,9 @@ from the interactive path:
 4. Common contexts are pre-built in the background shortly after Explorer
    starts.
 
-Hold **Shift** while right-clicking for the classic menu (including extended
-verbs), or **Ctrl** for the untouched native menu. **Show classic menu** does
-the same from the menu itself.
+Hold **Shift** while right-clicking to bypass the mod entirely and get the
+stock classic menu (including extended verbs), or **Ctrl** for the untouched
+native menu. **Show classic menu** does the same from the menu itself.
 
 ## Features
 
@@ -65,8 +65,8 @@ the same from the menu itself.
 |---|---|---|
 | Theme | Custom (menu.ini) | Appearance source: `menu.ini`, or a theme file under `<mod storage>\themes\<name>.ini` created from the bundled preset on first use. |
 | Menu mode | Custom (recommended) | Custom draws the self-rendered menu and falls back to the classic menu after repeated failures; Classic always uses the owner-drawn menu. |
-| Bypass keys | on | Hold Shift while right-clicking for the classic menu, or Ctrl for the untouched native menu. |
-| Instant menu open | on | Native fallback menus (classic mode, Shift bypass, fallbacks) are shown without the system open animation, via `TPM_NOANIMATION`. |
+| Bypass keys | on | Hold Shift while right-clicking to bypass the mod and get the stock classic menu, or Ctrl for the untouched native menu. |
+| Instant menu open | on | Native fallback menus (classic mode, fallbacks) are shown without the system open animation, via `TPM_NOANIMATION`. |
 | Show classic menu item | on | Adds a "Show classic menu" entry at the bottom of the replacement menu. |
 | Submenu open delay | 150 ms | Hover delay before a submenu opens; 0 = instant, -1 = keep the Windows setting. |
 | Move Windows extras | on | Moves the configured Windows extras into the More options submenu. |

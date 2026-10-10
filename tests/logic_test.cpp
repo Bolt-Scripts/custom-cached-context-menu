@@ -884,17 +884,28 @@ int main() {
 
     // Fix: only main file/folder menus are deferred. Flags are the exact
     // values seen in the on-device log.
-    CHECK(cmo::ShouldDeferContextMenu(0x00020494));   // file menu
-    CHECK(cmo::ShouldDeferContextMenu(0x00020594));   // Shift-extended menu
-    CHECK(cmo::ShouldDeferContextMenu(0x00020424));   // background menu
+    CHECK(cmo::ShouldDeferContextMenu(0x00020494, false));   // file menu
+    CHECK(cmo::ShouldDeferContextMenu(0x00020594, false));   // Shift-extended menu
+    CHECK(cmo::ShouldDeferContextMenu(0x00020424, false));   // background menu
     // The desktop passes the same flags minus CMF_EXPLORE.
-    CHECK(cmo::ShouldDeferContextMenu(0x00020490));   // desktop icon menu
-    CHECK(cmo::ShouldDeferContextMenu(0x00020420));   // desktop background menu
-    CHECK(!cmo::ShouldDeferContextMenu(0x00000805));  // CMF_DEFAULTONLY (open)
-    CHECK(!cmo::ShouldDeferContextMenu(0x00000008));  // CMF_NOVERBS (Send to)
-    CHECK(!cmo::ShouldDeferContextMenu(0x00000002));  // CMF_VERBSONLY
-    CHECK(!cmo::ShouldDeferContextMenu(0x00000800));  // verb-state query
-    CHECK(!cmo::ShouldDeferContextMenu(0x00008100));  // submenu build
+    CHECK(cmo::ShouldDeferContextMenu(0x00020490, false));   // desktop icon menu
+    CHECK(cmo::ShouldDeferContextMenu(0x00020420, false));   // desktop background menu
+    CHECK(!cmo::ShouldDeferContextMenu(0x00000805, false));  // CMF_DEFAULTONLY (open)
+    CHECK(!cmo::ShouldDeferContextMenu(0x00000008, false));  // CMF_NOVERBS (Send to)
+    CHECK(!cmo::ShouldDeferContextMenu(0x00000002, false));  // CMF_VERBSONLY
+    CHECK(!cmo::ShouldDeferContextMenu(0x00000800, false));  // verb-state query
+    CHECK(!cmo::ShouldDeferContextMenu(0x00008100, false));  // submenu build
+
+    // Shift bypass: while Shift is held the menu is never deferred, so
+    // Explorer populates and shows its own stock menu with no capture or
+    // replay anywhere in the path.
+    CHECK(!cmo::ShouldDeferContextMenu(0x00020494, true));   // file menu
+    CHECK(!cmo::ShouldDeferContextMenu(0x00020594, true));   // Shift-extended menu
+    CHECK(!cmo::ShouldDeferContextMenu(0x00020424, true));   // background menu
+    CHECK(!cmo::ShouldDeferContextMenu(0x00020490, true));   // desktop icon menu
+    CHECK(!cmo::ShouldDeferContextMenu(0x00020420, true));   // desktop background menu
+    CHECK(!cmo::ShouldDeferContextMenu(0x00000805, true));   // CMF_DEFAULTONLY
+    CHECK(!cmo::ShouldDeferContextMenu(0x00000008, true));   // CMF_NOVERBS
 
     // Fix: invocation descriptors carry both the ANSI and the wide verb.
     cmo::MenuItem bothItem{};

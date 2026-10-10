@@ -19193,7 +19193,9 @@ BOOL WINAPI TrackPopupMenu_Hook(HMENU hMenu, UINT uFlags, int x, int y, int nRes
 // Technique adapted from the explorer-context-menu-classic mod by m417z
 // (MIT-licensed Windhawk mod collection): fail the presenter lookup so
 // Explorer falls back to the classic IContextMenu path, and block the
-// desktop mini menu. The Shift key opts out, matching stock behavior.
+// navigation pane's mini menu, whose tree control makes its own decision
+// that never goes through the presenter lookup. The Shift key opts out,
+// matching stock behavior.
 
 bool IsWindows11OrGreater() {
     static const bool isWin11 = [] {
@@ -19259,8 +19261,9 @@ bool WINAPI ShouldShowMiniMenu_Hook(void* pThis, void* param) {
                    : true;
     }
     // Suppressed otherwise so the classic path (and our replacement) always
-    // handles desktop menus; Shift bypass is handled by the popup hooks.
-    if (g_settings->debugLogging) Wh_Log(L"Blocking modern desktop mini menu");
+    // handles navigation pane menus; Shift bypass is handled by the popup
+    // hooks.
+    if (g_settings->debugLogging) Wh_Log(L"Blocking modern navigation pane mini menu");
     return false;
 }
 

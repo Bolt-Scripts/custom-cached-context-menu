@@ -56,7 +56,7 @@ and discovers extension items in the background, so repeated opens are instant.
 
 | Setting | Default | Description |
 |---|---|---|
-| Bypass keys | on | Hold Shift while right-clicking for the classic menu, or Ctrl for the untouched native menu. |
+| Bypass keys | on | Hold Shift while right-clicking to bypass the mod and get the stock classic menu, or Ctrl for the untouched native menu. |
 | Menu mode | Custom (recommended) | Custom draws the self-rendered menu and falls back to the classic menu after repeated failures; Classic always uses the owner-drawn menu. |
 | Theme | Custom (menu.ini) | Loads the appearance from `<mod storage>\themes\<name>.ini` (created from the bundled preset on first use). `menu.ini` is never modified by theme selection. |
 | Show classic menu item | on | Adds a "Show classic menu" entry at the bottom of the menu. |

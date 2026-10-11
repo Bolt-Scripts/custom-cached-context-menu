@@ -10258,7 +10258,10 @@ struct MenuSession {
     struct SettingsSessionContext* settings = nullptr;
 };
 
-inline MenuSession* g_menuSession = nullptr;
+// Per thread: only the thread running the session reads or clears it, and
+// the unload teardown on other threads must not write into the session
+// thread's stack.
+inline thread_local MenuSession* g_menuSession = nullptr;
 
 // One custom menu at a time, process-wide: Explorer runs folder windows on
 // separate UI threads, and the render device, window pool, overlay resources
@@ -14504,18 +14507,34 @@ constexpr UINT kCmfPopupMenu = 0x00020000;
 
 // Ctrl bypasses the mod entirely (when bypass keys are enabled) so the
 // untouched native menu can show. The decision sticks briefly so "Show more
-// options" from the untouched modern menu also stays untouched. Shift is a
-// separate, earlier bypass: while it is held the menu is never deferred, so
-// Explorer builds and shows its own stock menu.
-bool BypassKeyHeld() {
-    static thread_local ULONGLONG bypassUntil = 0;
-    const ULONGLONG now = GetTickCount64();
-    if (g_settings->enableShiftBypass &&
-        (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0) {
-        bypassUntil = now + 3000;
-        return true;
+// options" from the untouched modern menu also stays untouched. The window is
+// armed only where the untouched modern menu is actually let through (the
+// Windows 11 suppression hooks); everywhere else the bypass is read-only, so
+// unrelated Ctrl use (double-click, clipboard verbs, multi-select queries)
+// cannot arm it. Shift is a separate, earlier bypass: while it is held the
+// menu is never deferred, so Explorer builds and shows its own stock menu.
+constexpr ULONGLONG kCtrlBypassWindowMs = 5000;
+
+inline thread_local ULONGLONG g_ctrlBypassUntil = 0;
+
+bool CtrlBypassKeyDown() {
+    return g_settings->enableShiftBypass &&
+           (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
+}
+
+// Arms the sticky window; only the Windows 11 suppression hooks call this,
+// right where the untouched modern menu is shown.
+bool ArmCtrlBypass() {
+    if (!CtrlBypassKeyDown()) {
+        return false;
     }
-    return now < bypassUntil;
+    g_ctrlBypassUntil = GetTickCount64() + kCtrlBypassWindowMs;
+    return true;
+}
+
+// Read-only: Ctrl held now, or a window armed earlier is still open.
+bool CtrlBypassActive() {
+    return CtrlBypassKeyDown() || GetTickCount64() < g_ctrlBypassUntil;
 }
 
 // Shift is checked before the menu is built so the shell populates and shows
@@ -14530,19 +14549,18 @@ bool ShiftBypassHeld() {
 // Only main popup menus are deferred. CMF_DEFAULTONLY is the default-verb
 // resolution used by double-click/open; CMF_NOVERBS builds submenus such as
 // Send to; CMF_VERBSONLY builds verb-only menus. Those never show a popup we
-// could replace and must reach the shell untouched. A held Shift bypass is
-// also never deferred so Explorer builds and shows the stock menu.
-bool ShouldDeferContextMenu(UINT flags, bool shiftBypassActive) {
-    if (BypassKeyHeld()) {
-        return false;
-    }
-    if (shiftBypassActive) {
-        return false;
-    }
+// could replace and must reach the shell untouched. The bypass states are
+// passed in so this stays a pure predicate: non-popup calls cannot arm the
+// Ctrl bypass window (only the Windows 11 suppression hooks do).
+bool ShouldDeferContextMenu(UINT flags, bool shiftBypassActive,
+                            bool ctrlBypassActive) {
     if (flags & (CMF_DEFAULTONLY | CMF_NOVERBS | CMF_VERBSONLY)) {
         return false;
     }
-    return (flags & (CMF_EXPLORE | kCmfPopupMenu)) != 0;
+    if ((flags & (CMF_EXPLORE | kCmfPopupMenu)) == 0) {
+        return false;
+    }
+    return !shiftBypassActive && !ctrlBypassActive;
 }
 
 using QueryContextMenu_t =
@@ -14552,7 +14570,7 @@ inline QueryContextMenu_t QueryContextMenu_Original = nullptr;
 HRESULT STDMETHODCALLTYPE QueryContextMenu_Hook(IContextMenu* pThis, HMENU hmenu,
                                                 UINT indexMenu, UINT idCmdFirst,
                                                 UINT idCmdLast, UINT uFlags) {
-    if (!ShouldDeferContextMenu(uFlags, ShiftBypassHeld())) {
+    if (!ShouldDeferContextMenu(uFlags, ShiftBypassHeld(), CtrlBypassActive())) {
         if (g_settings->debugLogging) Wh_Log(L"QueryContextMenu pass-through: flags=%08X", uFlags);
         return QueryContextMenu_Original(pThis, hmenu, indexMenu, idCmdFirst, idCmdLast,
                                          uFlags);
@@ -19251,9 +19269,10 @@ HRESULT WINAPI IUnknown_QueryService_Hook(IUnknown* punk, REFGUID guidService,
     if (IsEqualGUID(guidService, kContextMenuPresenterService) &&
         (IsEqualGUID(riid, kContextMenuPresenterIid) ||
          IsEqualGUID(riid, kContextMenuPresenterIid24H2))) {
-        if (BypassKeyHeld() || ShiftBypassHeld()) {
-            // Ctrl: let the untouched modern menu through. Shift: let the
-            // stock Shift behavior (the classic menu) through untouched.
+        if (ArmCtrlBypass() || ShiftBypassHeld()) {
+            // Ctrl: let the untouched modern menu through and keep the sticky
+            // window armed for its "Show more options". Shift: let the stock
+            // Shift behavior (the classic menu) through untouched.
             return IUnknown_QueryService_Original(punk, guidService, riid, ppvOut);
         }
         // Suppressed otherwise so the classic path (and our replacement) is
@@ -19271,7 +19290,7 @@ using ShouldShowMiniMenu_t = bool(WINAPI*)(void*, void*);
 inline ShouldShowMiniMenu_t ShouldShowMiniMenu_Original = nullptr;
 
 bool WINAPI ShouldShowMiniMenu_Hook(void* pThis, void* param) {
-    if (BypassKeyHeld() || ShiftBypassHeld()) {
+    if (ArmCtrlBypass() || ShiftBypassHeld()) {
         // Ctrl: let the untouched mini menu through. Shift: stock behavior.
         return ShouldShowMiniMenu_Original
                    ? ShouldShowMiniMenu_Original(pThis, param)

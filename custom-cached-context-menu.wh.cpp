@@ -163,7 +163,7 @@ MIT
 - advancedSubmenuThirdParty: true
   $name: Move third-party handlers
   $description: Move third-party shell extension entries into the More options submenu.
-- advancedSubmenuItems: "Share, Add to Favorites, Cast to Device, Give access to, Restore previous versions, Pin to Start, Pin to Quick access, Open in Terminal, setdesktopwallpaper"
+- advancedSubmenuItems: "Windows.ModernShare, pintohomefile, casttodevice, Give access to, PreviousVersions, pintostartscreen, pintohome, {9F156763-7844-4DC4-B2B1-901F640F5155}, setdesktopwallpaper"
   $name: Windows items to move
   $description: Comma-separated labels or verbs of Windows items to move into the submenu. Verbs (for example setdesktopwallpaper) match on every language; labels match the menu's display language.
 - advancedSubmenuExclude: ""
@@ -765,6 +765,12 @@ bool IsKnownWindowsVerb(const std::wstring& verb) {
         L"pintostartscreen", L"previousversions", L"windows.modernshare",
         L"casttodevice", L"giveaccess",  L"share",       L"includeinlibrary",
         L"setdesktopwallpaper", L"rotate90", L"rotate270",
+        // Windows' modern shell commands (Open in Terminal, Edit with
+        // Photos/Paint/Notepad) expose their class GUIDs as verbs.
+        L"{9F156763-7844-4DC4-B2B1-901F640F5155}",
+        L"{BFE0E2A4-C70C-4AD7-AC3D-10D1ECEBB5B4}",
+        L"{2430F218-B743-4FD6-97BF-5C76541B4AE9}",
+        L"{CA6CC9F1-867A-481E-951E-A28C5E4F01EA}",
     };
     for (const wchar_t* known : kVerbs) {
         if (_wcsicmp(verb.c_str(), known) == 0) {

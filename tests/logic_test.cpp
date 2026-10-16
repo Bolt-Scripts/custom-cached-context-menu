@@ -580,6 +580,13 @@ int main() {
     CHECK(cmo::IsKnownWindowsVerb(L"setdesktopwallpaper"));
     CHECK(cmo::IsKnownWindowsVerb(L"rotate90"));
     CHECK(cmo::IsKnownWindowsVerb(L"rotate270"));
+    CHECK(cmo::IsKnownWindowsVerb(L"Windows.ModernShare"));
+    CHECK(cmo::IsKnownWindowsVerb(L"pintohomefile"));
+    // Windows' modern shell commands carry GUID verbs.
+    CHECK(cmo::IsKnownWindowsVerb(L"{9F156763-7844-4DC4-B2B1-901F640F5155}"));
+    CHECK(cmo::IsKnownWindowsVerb(L"{BFE0E2A4-C70C-4AD7-AC3D-10D1ECEBB5B4}"));
+    CHECK(cmo::IsKnownWindowsVerb(L"{2430F218-B743-4FD6-97BF-5C76541B4AE9}"));
+    CHECK(cmo::IsKnownWindowsVerb(L"{CA6CC9F1-867A-481E-951E-A28C5E4F01EA}"));
 
     // SFGAO_FOLDER alone isn't "directory": .zip files and folder shortcuts
     // report it too; only a real directory has it without SFGAO_STREAM.
@@ -4203,6 +4210,8 @@ int main() {
         command.canonicalVerb = L"rotate90";
         CHECK(!cmo::IsThirdPartyItem(command));
         command.canonicalVerb = L"setdesktopwallpaper";
+        CHECK(!cmo::IsThirdPartyItem(command));
+        command.canonicalVerb = L"{9F156763-7844-4DC4-B2B1-901F640F5155}";
         CHECK(!cmo::IsThirdPartyItem(command));
     }
 

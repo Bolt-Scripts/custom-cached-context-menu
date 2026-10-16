@@ -7862,9 +7862,13 @@ public:
     IDCompositionTarget* CompTarget() const { return target_; }
     IDCompositionVisual* CompVisual() const { return visual_; }
 
-    void Present() {
+    // Interactive repaints (hover feedback) skip the vsync wait: this is a
+    // composition swap chain, so DWM composites whole frames and there is
+    // nothing to tear, while waiting for the previous buffer to be recycled
+    // blocks the menu thread for a full frame per repaint.
+    void Present(bool vsync) {
         if (swapChain_) {
-            swapChain_->Present(1, 0);
+            swapChain_->Present(vsync ? 1 : 0, 0);
         }
     }
 
@@ -10690,7 +10694,7 @@ Appearance AppearanceFromAppearanceText(const std::wstring& text) {
 void RelayoutSession(MenuSession& session);
 void SettingsApplyReset(MenuSession& session, const std::wstring& key);
 void SettingsPerformWrite(SettingsSessionContext* settings);
-void RepaintMenuWindow(MenuSession* session, int index);
+void RepaintMenuWindow(MenuSession* session, int index, bool vsync = true);
 void SettingsSyncOverlayTimer(MenuSession& session);
 
 // Rebuilds the settings model from the working appearance and re-lays out the
@@ -11547,7 +11551,8 @@ void RenderMenuWindow(MenuWindow* window, const LayoutPanel& panel,
                       const BackdropBitmap* backdrop, int margin,
                       const RECT* shadowClipRect = nullptr,
                       const AnimationFrame& frame = AnimationFrame{},
-                      POINT anchor = POINT{0, 0}, float overlayTime = 0.0f) {
+                      POINT anchor = POINT{0, 0}, float overlayTime = 0.0f,
+                      bool vsync = true) {
     if (!window || !window->SwapChain() || !g_renderDevice.D2DDevice()) {
         return;
     }    IDXGISurface* surface = nullptr;
@@ -11585,7 +11590,7 @@ void RenderMenuWindow(MenuWindow* window, const LayoutPanel& panel,
     }
     dc->Release();
     surface->Release();
-    window->Present();
+    window->Present(vsync);
 }
 
 // Renders every window of the session at one animation frame.
@@ -11798,7 +11803,7 @@ void RunWindowAnimation(MenuSession& session, size_t index,
 // Diagnostics: the time of the previous hover change, for the debug log.
 inline thread_local ULONGLONG g_lastHoverChangeTick = 0;
 
-void RepaintMenuWindow(MenuSession* session, int index) {
+void RepaintMenuWindow(MenuSession* session, int index, bool vsync) {
     if (!session || index < 0 ||
         index >= static_cast<int>(session->windows.size())) {
         return;
@@ -11823,7 +11828,7 @@ void RepaintMenuWindow(MenuSession* session, int index) {
     RenderMenuWindow(window, *window->Panel(), session->states[index],
                      session->metrics, session->appearance, backdrop,
                      session->margin, shadowClipRect, session->animationFrame,
-                     session->animationAnchor, session->OverlaySeconds());
+                     session->animationAnchor, session->OverlaySeconds(), vsync);
 }
 
 void CloseSubmenusBelow(MenuSession* session, int index) {
@@ -12318,7 +12323,7 @@ LRESULT CustomMenuWindowProc(MenuWindow* window, HWND hwnd, UINT msg,
                     }
                 } else {
                     levelState.hoverRepaintPending = false;
-                    RepaintMenuWindow(session, level);
+                    RepaintMenuWindow(session, level, false);
                     if (g_settings->debugLogging) {
                         Wh_Log(L"Hover: item=%d bar=%d age=%u ms gap=%llu ms; "
                                L"painted in %llu ms",

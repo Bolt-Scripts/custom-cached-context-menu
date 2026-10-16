@@ -894,8 +894,13 @@ int main() {
     CHECK(!cmo::ShouldDeferContextMenu(0x00000805, false, false));  // CMF_DEFAULTONLY (open)
     CHECK(!cmo::ShouldDeferContextMenu(0x00000008, false, false));  // CMF_NOVERBS (Send to)
     CHECK(!cmo::ShouldDeferContextMenu(0x00000002, false, false));  // CMF_VERBSONLY
-    CHECK(!cmo::ShouldDeferContextMenu(0x00000800, false, false));  // verb-state query
+    CHECK(!cmo::ShouldDeferContextMenu(0x00000800, false, false));  // CMF_OPTIMIZEFORINVOKE (verb-state query)
     CHECK(!cmo::ShouldDeferContextMenu(0x00008100, false, false));  // submenu build
+    // Middle-click "open in new tab" builds the item menu with these exact
+    // flags to resolve and invoke the verb without displaying it; deferring
+    // it leaves the shell with an empty menu and the tab never opens.
+    CHECK(!cmo::ShouldDeferContextMenu(0x00000804, false, false));  // CMF_EXPLORE|CMF_OPTIMIZEFORINVOKE
+    CHECK(!cmo::ShouldDeferContextMenu(0x00020C94, false, false));  // popup bits + CMF_OPTIMIZEFORINVOKE
 
     // Shift bypass: while Shift is held the menu is never deferred, so
     // Explorer populates and shows its own stock menu with no capture or

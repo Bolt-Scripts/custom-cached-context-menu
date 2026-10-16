@@ -14548,13 +14548,16 @@ bool ShiftBypassHeld() {
 
 // Only main popup menus are deferred. CMF_DEFAULTONLY is the default-verb
 // resolution used by double-click/open; CMF_NOVERBS builds submenus such as
-// Send to; CMF_VERBSONLY builds verb-only menus. Those never show a popup we
+// Send to; CMF_VERBSONLY builds verb-only menus; CMF_OPTIMIZEFORINVOKE marks
+// a menu built only to resolve and invoke a command without displaying it
+// (for example middle-click's "Open in new tab"). Those never show a popup we
 // could replace and must reach the shell untouched. The bypass states are
 // passed in so this stays a pure predicate: non-popup calls cannot arm the
 // Ctrl bypass window (only the Windows 11 suppression hooks do).
 bool ShouldDeferContextMenu(UINT flags, bool shiftBypassActive,
                             bool ctrlBypassActive) {
-    if (flags & (CMF_DEFAULTONLY | CMF_NOVERBS | CMF_VERBSONLY)) {
+    if (flags & (CMF_DEFAULTONLY | CMF_NOVERBS | CMF_VERBSONLY |
+                 CMF_OPTIMIZEFORINVOKE)) {
         return false;
     }
     if ((flags & (CMF_EXPLORE | kCmfPopupMenu)) == 0) {

@@ -71,7 +71,7 @@ and discovers extension items in the background, so repeated opens are instant.
 | Move third-party handlers | on | Moves third-party shell extension entries into the More options submenu. |
 | Keep in the main menu | empty | Comma-separated labels or verbs that stay in the main menu. |
 | More options submenu label | `More options` | Label of that submenu. |
-| Windows items to move | common list | Comma-separated labels or verbs of Windows items to move into the submenu. |
+| Windows items to move | common list | Comma-separated labels or verbs of Windows items to move into the submenu. Verbs (e.g. `setdesktopwallpaper`) match on every language; labels match the menu's display language. |
 | Settings hotkey | empty | Optional global hotkey that opens the settings menu (for example `Ctrl+Alt+M`). |
 
 ## Configuration

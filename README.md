@@ -72,7 +72,7 @@ native menu. **Show classic menu** does the same from the menu itself.
 | Submenu open delay | 150 ms | Hover delay before a submenu opens; 0 = instant, -1 = keep the Windows setting. |
 | Move Windows extras | on | Moves the configured Windows extras into the More options submenu. |
 | Move third-party handlers | on | Moves third-party shell extension entries into the More options submenu. |
-| Windows items to move | common list | Comma-separated labels or verbs of Windows items to move into the submenu. |
+| Windows items to move | common list | Comma-separated labels or verbs of Windows items to move into the submenu. Verbs (e.g. `setdesktopwallpaper`) match on every language; labels match the menu's display language. |
 | Keep in the main menu | empty | Comma-separated third-party labels or verbs that stay in the main menu instead of moving into the submenu. |
 | More options submenu label | `More options` | Label of the submenu that collects extra items. |
 | Settings hotkey | empty | Optional global hotkey that opens the settings menu (for example `Ctrl+Alt+M`). Empty disables it. |

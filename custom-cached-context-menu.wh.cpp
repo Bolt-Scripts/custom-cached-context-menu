@@ -11795,6 +11795,9 @@ void RunWindowAnimation(MenuSession& session, size_t index,
     }
 }
 
+// Diagnostics: the time of the previous hover change, for the debug log.
+inline thread_local ULONGLONG g_lastHoverChangeTick = 0;
+
 void RepaintMenuWindow(MenuSession* session, int index) {
     if (!session || index < 0 ||
         index >= static_cast<int>(session->windows.size())) {
@@ -12295,12 +12298,35 @@ LRESULT CustomMenuWindowProc(MenuWindow* window, HWND hwnd, UINT msg,
                 // panel render that waits for the swap chain. When more
                 // moves are already queued, only the last one paints.
                 MSG queued = {};
-                if (PeekMessageW(&queued, hwnd, WM_MOUSEMOVE, WM_MOUSEMOVE,
-                                 PM_NOREMOVE)) {
+                const bool moreQueued =
+                    PeekMessageW(&queued, hwnd, WM_MOUSEMOVE, WM_MOUSEMOVE,
+                                 PM_NOREMOVE) != FALSE;
+                const ULONGLONG now = GetTickCount64();
+                const ULONGLONG gap = now - g_lastHoverChangeTick;
+                g_lastHoverChangeTick = now;
+                const DWORD messageAge = static_cast<DWORD>(GetTickCount()) -
+                                         static_cast<DWORD>(GetMessageTime());
+                const bool bar =
+                    hit >= 0 && levelPanel.items[hit].topBarCell;
+                if (moreQueued) {
                     levelState.hoverRepaintPending = true;
+                    if (g_settings->debugLogging) {
+                        Wh_Log(L"Hover: item=%d bar=%d age=%u ms gap=%llu ms; "
+                               L"repaint deferred",
+                               hit, bar ? 1 : 0, messageAge,
+                               static_cast<unsigned long long>(gap));
+                    }
                 } else {
                     levelState.hoverRepaintPending = false;
                     RepaintMenuWindow(session, level);
+                    if (g_settings->debugLogging) {
+                        Wh_Log(L"Hover: item=%d bar=%d age=%u ms gap=%llu ms; "
+                               L"painted in %llu ms",
+                               hit, bar ? 1 : 0, messageAge,
+                               static_cast<unsigned long long>(gap),
+                               static_cast<unsigned long long>(
+                                   GetTickCount64() - now));
+                    }
                 }
             }
 

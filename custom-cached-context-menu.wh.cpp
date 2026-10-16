@@ -16949,6 +16949,21 @@ std::wstring MakeShortcutPath(const std::wstring& directory,
 // into the view's current folder. Explorer's view adds the standard Paste item
 // itself, so the captured shell menu never contains it and the mod performs
 // the operation directly.
+// Parent directory of a path, with the drive root kept as "C:\\"; empty when
+// the path has no directory part.
+std::wstring ParentDirectoryOf(const std::wstring& path) {
+    std::wstring directory = path;
+    const size_t slash = directory.find_last_of(L"\\/");
+    if (slash == std::wstring::npos || slash == 0) {
+        return std::wstring();
+    }
+    directory.resize(slash);
+    if (directory.size() == 2 && directory[1] == L':') {
+        directory += L'\\';
+    }
+    return directory;
+}
+
 bool InvokePaste(const InvocationContext& ctx) {
     if (ctx.directory.empty()) {
         return false;
@@ -16966,7 +16981,10 @@ bool InvokePaste(const InvocationContext& ctx) {
         !operation) {
         return false;
     }
-    operation->SetOperationFlags(FOF_ALLOWUNDO | FOF_NOCONFIRMMKDIR);
+    // Collisions become "name - Copy" like Explorer's paste instead of a
+    // same-name warning.
+    operation->SetOperationFlags(FOF_ALLOWUNDO | FOF_NOCONFIRMMKDIR |
+                                 FOF_RENAMEONCOLLISION);
 
     IShellItem* destination = nullptr;
     bool ok = false;
@@ -16977,6 +16995,12 @@ bool InvokePaste(const InvocationContext& ctx) {
         const bool move = (dropEffect & DROPEFFECT_MOVE) != 0;
         ok = true;
         for (const std::wstring& source : sources) {
+            const std::wstring sourceParent = ParentDirectoryOf(source);
+            if (move && !sourceParent.empty() && !ctx.directory.empty() &&
+                _wcsicmp(sourceParent.c_str(), ctx.directory.c_str()) == 0) {
+                // Moving onto itself is a no-op, like Explorer's paste.
+                continue;
+            }
             IShellItem* item = nullptr;
             if (FAILED(SHCreateItemFromParsingName(
                     source.c_str(), nullptr, IID_IShellItem,
@@ -17410,20 +17434,130 @@ std::vector<BYTE> BuildDropFilesBlob(const std::vector<std::wstring>& paths) {
     return blob;
 }
 
-// Puts the selection on the clipboard the way Explorer's Cut/Copy do: a
-// CF_HDROP list plus the preferred drop effect that tells paste targets to
-// copy or move, with clipboard viewers suppressed like the shell does.
-bool WriteClipboardFiles(HWND owner, const std::vector<std::wstring>& paths,
-                         bool cut) {
-    const std::vector<BYTE> blob = BuildDropFilesBlob(paths);
-    if (blob.empty()) {
+// Shared parent directory of all paths, or false when they differ (mixed
+// folders, search results) - the caller keeps the shell path then.
+bool ShareOneParentDirectory(const std::vector<std::wstring>& paths,
+                             std::wstring& parent) {
+    parent.clear();
+    if (paths.empty()) {
         return false;
     }
-    HGLOBAL dropMemory = GlobalAlloc(GMEM_MOVEABLE, blob.size());
+    for (const std::wstring& path : paths) {
+        const std::wstring directory = ParentDirectoryOf(path);
+        if (directory.empty()) {
+            return false;
+        }
+        if (parent.empty()) {
+            parent = directory;
+        } else if (_wcsicmp(parent.c_str(), directory.c_str()) != 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// CFSTR_SHELLIDLIST payload: a CIDA header, the parent folder PIDL, then the
+// item PIDLs. The shell identifies clipboard items with this format (for
+// example to dim the cut ones in a view), which CF_HDROP alone cannot do. A
+// null parent becomes the documented empty PIDL (the desktop as root), used
+// for items from different folders; the items are absolute PIDLs then.
+std::vector<BYTE> BuildShellIdListBlob(
+    const ITEMIDLIST* parent, const std::vector<const ITEMIDLIST*>& items) {
+    std::vector<BYTE> blob;
+    if (items.empty()) {
+        return blob;
+    }
+    const size_t parentBytes = parent ? ILGetSize(parent) : sizeof(WORD);
+    std::vector<size_t> itemSizes;
+    size_t itemsBytes = 0;
+    for (const ITEMIDLIST* item : items) {
+        itemSizes.push_back(ILGetSize(item));
+        itemsBytes += itemSizes.back();
+    }
+    // cidl followed by one offset per PIDL, the parent first.
+    const size_t headerBytes = sizeof(UINT) * (items.size() + 2);
+    blob.assign(headerBytes + parentBytes + itemsBytes, 0);
+    UINT* header = reinterpret_cast<UINT*>(blob.data());
+    header[0] = static_cast<UINT>(items.size());
+    header[1] = static_cast<UINT>(headerBytes);
+    BYTE* cursor = blob.data() + headerBytes;
+    if (parent) {
+        memcpy(cursor, parent, parentBytes);
+    }
+    cursor += parentBytes;
+    for (size_t i = 0; i < items.size(); ++i) {
+        header[2 + i] = static_cast<UINT>(cursor - blob.data());
+        memcpy(cursor, items[i], itemSizes[i]);
+        cursor += itemSizes[i];
+    }
+    return blob;
+}
+
+// Builds the CFSTR_SHELLIDLIST payload for file system paths: a real parent
+// PIDL with relative children when they share a folder, the desktop root
+// with absolute children otherwise.
+std::vector<BYTE> BuildShellIdListForPaths(
+    const std::vector<std::wstring>& paths) {
+    std::vector<BYTE> blob;
+    if (paths.empty()) {
+        return blob;
+    }
+    std::wstring parentPath;
+    const bool sharedParent = ShareOneParentDirectory(paths, parentPath);
+    PIDLIST_ABSOLUTE parent = nullptr;
+    bool ok = sharedParent;
+    if (sharedParent &&
+        FAILED(SHParseDisplayName(parentPath.c_str(), nullptr, &parent, 0,
+                                  nullptr))) {
+        ok = false;
+    }
+    std::vector<PIDLIST_ABSOLUTE> absolute;
+    std::vector<const ITEMIDLIST*> items;
+    for (const std::wstring& path : paths) {
+        PIDLIST_ABSOLUTE item = nullptr;
+        if (!ok ||
+            FAILED(SHParseDisplayName(path.c_str(), nullptr, &item, 0,
+                                      nullptr)) ||
+            !item) {
+            ok = false;
+            break;
+        }
+        absolute.push_back(item);
+        items.push_back(sharedParent ? ILFindLastID(item) : item);
+    }
+    if (ok) {
+        blob = BuildShellIdListBlob(sharedParent ? parent : nullptr, items);
+    }
+    for (PIDLIST_ABSOLUTE item : absolute) {
+        CoTaskMemFree(item);
+    }
+    if (parent) {
+        CoTaskMemFree(parent);
+    }
+    return blob;
+}
+
+// Puts the selection on the clipboard the way Explorer's Cut/Copy do: a
+// CF_HDROP list, the shell item list, plus the preferred drop effect that
+// tells paste targets to copy or move, with clipboard viewers suppressed
+// like the shell does.
+bool WriteClipboardFiles(HWND owner, const std::vector<std::wstring>& paths,
+                         bool cut) {
+    const std::vector<BYTE> dropBlob = BuildDropFilesBlob(paths);
+    if (dropBlob.empty()) {
+        return false;
+    }
+    const std::vector<BYTE> idlistBlob = BuildShellIdListForPaths(paths);
+    HGLOBAL dropMemory = GlobalAlloc(GMEM_MOVEABLE, dropBlob.size());
+    HGLOBAL idlistMemory = idlistBlob.empty()
+                               ? nullptr
+                               : GlobalAlloc(GMEM_MOVEABLE, idlistBlob.size());
     HGLOBAL effectMemory = GlobalAlloc(GMEM_MOVEABLE, sizeof(DWORD));
     HGLOBAL ignoreMemory = GlobalAlloc(GMEM_MOVEABLE, sizeof(DWORD));
-    if (!dropMemory || !effectMemory || !ignoreMemory) {
+    if (!dropMemory || (!idlistBlob.empty() && !idlistMemory) ||
+        !effectMemory || !ignoreMemory) {
         if (dropMemory) GlobalFree(dropMemory);
+        if (idlistMemory) GlobalFree(idlistMemory);
         if (effectMemory) GlobalFree(effectMemory);
         if (ignoreMemory) GlobalFree(ignoreMemory);
         return false;
@@ -17440,68 +17574,43 @@ bool WriteClipboardFiles(HWND owner, const std::vector<std::wstring>& paths,
     const DWORD effect =
         cut ? DROPEFFECT_MOVE : (DROPEFFECT_COPY | DROPEFFECT_LINK);
     const DWORD ignore = 1;
-    if (!fill(dropMemory, blob.data(), blob.size()) ||
+    if (!fill(dropMemory, dropBlob.data(), dropBlob.size()) ||
+        (idlistMemory &&
+         !fill(idlistMemory, idlistBlob.data(), idlistBlob.size())) ||
         !fill(effectMemory, &effect, sizeof(effect)) ||
         !fill(ignoreMemory, &ignore, sizeof(ignore))) {
-        GlobalFree(dropMemory);
-        GlobalFree(effectMemory);
-        GlobalFree(ignoreMemory);
+        if (dropMemory) GlobalFree(dropMemory);
+        if (idlistMemory) GlobalFree(idlistMemory);
+        if (effectMemory) GlobalFree(effectMemory);
+        if (ignoreMemory) GlobalFree(ignoreMemory);
         return false;
     }
+    // SetClipboardData takes ownership of the memory on success.
+    auto setFormat = [](UINT format, HGLOBAL& memory) {
+        if (memory && SetClipboardData(format, memory)) {
+            memory = nullptr;
+        }
+    };
     bool ok = false;
     if (OpenClipboard(owner)) {
         if (EmptyClipboard()) {
-            // SetClipboardData takes ownership of the memory on success.
-            if (SetClipboardData(CF_HDROP, dropMemory)) {
-                dropMemory = nullptr;
-                ok = true;
-            }
-            if (SetClipboardData(RegisterClipboardFormatW(L"Preferred DropEffect"),
-                                 effectMemory)) {
-                effectMemory = nullptr;
-            } else {
-                GlobalFree(effectMemory);
-            }
-            if (SetClipboardData(RegisterClipboardFormatW(L"Clipboard Viewer Ignore"),
-                                 ignoreMemory)) {
-                ignoreMemory = nullptr;
-            } else {
-                GlobalFree(ignoreMemory);
-            }
+            setFormat(CF_HDROP, dropMemory);
+            ok = dropMemory == nullptr;
+            // CFSTR_SHELLIDLIST.
+            setFormat(RegisterClipboardFormatW(L"Shell IDList Array"),
+                      idlistMemory);
+            setFormat(RegisterClipboardFormatW(L"Preferred DropEffect"),
+                      effectMemory);
+            setFormat(RegisterClipboardFormatW(L"Clipboard Viewer Ignore"),
+                      ignoreMemory);
         }
         CloseClipboard();
     }
     if (dropMemory) GlobalFree(dropMemory);
+    if (idlistMemory) GlobalFree(idlistMemory);
     if (effectMemory) GlobalFree(effectMemory);
     if (ignoreMemory) GlobalFree(ignoreMemory);
     return ok;
-}
-
-// Shared parent directory of all paths, or false when they differ (mixed
-// folders, search results) - the caller keeps the shell path then.
-bool ShareOneParentDirectory(const std::vector<std::wstring>& paths,
-                             std::wstring& parent) {
-    parent.clear();
-    if (paths.empty()) {
-        return false;
-    }
-    for (const std::wstring& path : paths) {
-        std::wstring directory = path;
-        const size_t slash = directory.find_last_of(L"\\/");
-        if (slash == std::wstring::npos || slash == 0) {
-            return false;
-        }
-        directory.resize(slash);
-        if (directory.size() == 2 && directory[1] == L':') {
-            directory += L'\\';
-        }
-        if (parent.empty()) {
-            parent = directory;
-        } else if (_wcsicmp(parent.c_str(), directory.c_str()) != 0) {
-            return false;
-        }
-    }
-    return true;
 }
 
 // Open: the same default-verb dispatch the shell menu performs, once per
@@ -17652,6 +17761,70 @@ bool TryInvokeVerbDirect(const MenuItem& item, const InvocationContext& ctx) {
     return ShellExecuteExW(&info) != FALSE;
 }
 
+// File views (folder windows, This PC, search results, the desktop) run
+// Explorer's own keyboard commands; the navigation tree does not share them.
+bool IsFileViewKind(ShellViewKind kind) {
+    return kind == ShellViewKind::Desktop || kind == ShellViewKind::ShellDefView;
+}
+
+// Synthesizes the shortcut Explorer binds to a view command. The owner keeps
+// focus while the menu is open, so the keys reach the view.
+bool SendShortcut(WORD virtualKey, bool control) {
+    INPUT inputs[4] = {};
+    size_t count = 0;
+    if (control) {
+        inputs[count].type = INPUT_KEYBOARD;
+        inputs[count].ki.wVk = VK_CONTROL;
+        ++count;
+    }
+    inputs[count].type = INPUT_KEYBOARD;
+    inputs[count].ki.wVk = virtualKey;
+    ++count;
+    inputs[count].type = INPUT_KEYBOARD;
+    inputs[count].ki.wVk = virtualKey;
+    inputs[count].ki.dwFlags = KEYEVENTF_KEYUP;
+    ++count;
+    if (control) {
+        inputs[count].type = INPUT_KEYBOARD;
+        inputs[count].ki.wVk = VK_CONTROL;
+        inputs[count].ki.dwFlags = KEYEVENTF_KEYUP;
+        ++count;
+    }
+    return SendInput(static_cast<UINT>(count), inputs, sizeof(INPUT)) ==
+           static_cast<UINT>(count);
+}
+
+// The view's own commands act on its current selection, so they are only
+// safe when it still matches the selection the menu was built for.
+bool ViewSelectionMatches(const InvocationContext& ctx) {
+    const SelectionInfo current = GetSelection(ctx.owner, ctx.kind);
+    return PathSetsEqual(current.paths, ctx.paths);
+}
+
+// Cut/Copy: prefer the view's own shortcut so the clipboard contents and the
+// cut visual match Explorer exactly (the view marks the cut items and puts
+// the shell's data object on the clipboard); the direct clipboard write
+// covers the tree and any selection that no longer matches.
+bool InvokeCutCopy(const InvocationContext& ctx, bool cut) {
+    if (!ctx.paths.empty() && IsFileViewKind(ctx.kind) &&
+        ViewSelectionMatches(ctx) &&
+        SendShortcut(cut ? L'X' : L'C', true)) {
+        return true;
+    }
+    return WriteClipboardFiles(ctx.owner, ctx.paths, cut);
+}
+
+// A background paste (no selection) targets the view's own folder, which is
+// exactly what Ctrl+V does, so collision naming, undo and virtual clipboard
+// items behave like Explorer's. Folder and tree pastes keep the direct path
+// because they target a folder other than the view's.
+bool InvokePasteViaView(const InvocationContext& ctx) {
+    if (!ctx.paths.empty() || !IsFileViewKind(ctx.kind)) {
+        return false;
+    }
+    return SendShortcut(L'V', true);
+}
+
 InvokeResult InvokeItem(const MenuItem& item, const InvocationContext& ctx,
                         PendingCapture& capture) {
     if (item.kind == ItemKind::Separator || (item.flags & kModelDisabled)) {
@@ -17718,6 +17891,9 @@ InvokeResult InvokeItem(const MenuItem& item, const InvocationContext& ctx,
                                          ctx.clipboardHadData, currentHasData)) {
                     return InvokeResult::Handled;
                 }
+                if (InvokePasteViaView(ctx)) {
+                    return InvokeResult::Handled;
+                }
                 // The captured shell menu never contains the view's standard
                 // Paste item, so perform it ourselves.
                 return InvokePaste(ctx) ? InvokeResult::Handled
@@ -17736,12 +17912,12 @@ InvokeResult InvokeItem(const MenuItem& item, const InvocationContext& ctx,
                     }
                     break;
                 case CoreVerb::Cut:
-                    if (WriteClipboardFiles(ctx.owner, ctx.paths, true)) {
+                    if (InvokeCutCopy(ctx, true)) {
                         return InvokeResult::Handled;
                     }
                     break;
                 case CoreVerb::Copy:
-                    if (WriteClipboardFiles(ctx.owner, ctx.paths, false)) {
+                    if (InvokeCutCopy(ctx, false)) {
                         return InvokeResult::Handled;
                     }
                     break;

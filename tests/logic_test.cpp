@@ -644,6 +644,54 @@ int main() {
         CHECK(cmo::BuildDropFilesBlob({}).empty());
     }
 
+    // CFSTR_SHELLIDLIST: CIDA header, parent PIDL, then the item PIDLs. The
+    // shell identifies clipboard items with this format (cut dimming).
+    {
+        WORD parentPidl[] = {4, 0x10, 0};
+        WORD childA[] = {4, 0x20, 0};
+        WORD childB[] = {4, 0x30, 0};
+        const ITEMIDLIST* parent =
+            reinterpret_cast<const ITEMIDLIST*>(parentPidl);
+        const std::vector<const ITEMIDLIST*> items = {
+            reinterpret_cast<const ITEMIDLIST*>(childA),
+            reinterpret_cast<const ITEMIDLIST*>(childB)};
+        const std::vector<BYTE> blob = cmo::BuildShellIdListBlob(parent, items);
+        const UINT* header = reinterpret_cast<const UINT*>(blob.data());
+        CHECK(blob.size() == 16 + 6 + 6 + 6);
+        CHECK(header[0] == 2);   // cidl
+        CHECK(header[1] == 16);  // parent PIDL offset
+        CHECK(header[2] == 22);  // first item offset
+        CHECK(header[3] == 28);  // second item offset
+        CHECK(memcmp(blob.data() + header[1], parentPidl, 6) == 0);
+        CHECK(memcmp(blob.data() + header[2], childA, 6) == 0);
+        CHECK(memcmp(blob.data() + header[3], childB, 6) == 0);
+
+        // Items from different folders use the documented desktop root: an
+        // empty parent PIDL followed by absolute item PIDLs.
+        const std::vector<BYTE> mixed =
+            cmo::BuildShellIdListBlob(nullptr, items);
+        const UINT* mixedHeader = reinterpret_cast<const UINT*>(mixed.data());
+        CHECK(mixed.size() == 16 + 2 + 6 + 6);
+        CHECK(mixedHeader[0] == 2);
+        CHECK(mixedHeader[1] == 16);
+        CHECK(*reinterpret_cast<const WORD*>(mixed.data() + 16) == 0);
+        CHECK(mixedHeader[2] == 18);
+        CHECK(memcmp(mixed.data() + mixedHeader[2], childA, 6) == 0);
+        CHECK(cmo::BuildShellIdListBlob(parent, {}).empty());
+    }
+
+    // Explorer's own keyboard commands run in file views; the tree does not
+    // share them.
+    CHECK(cmo::IsFileViewKind(cmo::ShellViewKind::Desktop));
+    CHECK(cmo::IsFileViewKind(cmo::ShellViewKind::ShellDefView));
+    CHECK(!cmo::IsFileViewKind(cmo::ShellViewKind::NavPane));
+    CHECK(!cmo::IsFileViewKind(cmo::ShellViewKind::Other));
+    CHECK(!cmo::IsFileViewKind(cmo::ShellViewKind::None));
+
+    CHECK(cmo::ParentDirectoryOf(L"C:\\a\\b.txt") == L"C:\\a");
+    CHECK(cmo::ParentDirectoryOf(L"C:\\b.txt") == L"C:\\");
+    CHECK(cmo::ParentDirectoryOf(L"b.txt").empty());
+
     // Multi-file Properties needs one parent folder for the data object.
     {
         std::wstring parent;

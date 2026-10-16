@@ -165,7 +165,7 @@ MIT
   $description: Move third-party shell extension entries into the More options submenu.
 - advancedSubmenuItems: "Share, Add to Favorites, Cast to Device, Give access to, Restore previous versions, Pin to Start, Pin to Quick access, Open in Terminal, setdesktopwallpaper"
   $name: Windows items to move
-  $description: Comma-separated labels or verbs of Windows items to move into the submenu.
+  $description: Comma-separated labels or verbs of Windows items to move into the submenu. Verbs (for example setdesktopwallpaper) match on every language; labels match the menu's display language.
 - advancedSubmenuExclude: ""
   $name: Keep in the main menu
   $description: Comma-separated third-party labels or verbs that stay in the main menu instead of moving into the submenu.

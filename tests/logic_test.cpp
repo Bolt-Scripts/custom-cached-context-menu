@@ -576,6 +576,9 @@ int main() {
     CHECK(hasOpenInNewWindow);
     CHECK(hasPin);
 
+    // Windows' own image items must not be swept into the advanced submenu.
+    CHECK(cmo::IsKnownWindowsVerb(L"setdesktopwallpaper"));
+
     // SFGAO_FOLDER alone isn't "directory": .zip files and folder shortcuts
     // report it too; only a real directory has it without SFGAO_STREAM.
     CHECK(cmo::IsFolderAttributes(SFGAO_FOLDER));

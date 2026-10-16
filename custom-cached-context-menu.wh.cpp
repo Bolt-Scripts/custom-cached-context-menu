@@ -764,6 +764,7 @@ bool IsKnownWindowsVerb(const std::wstring& verb) {
         L"viewlist",   L"viewdetails",   L"pintohome",   L"pintohomefile",
         L"pintostartscreen", L"previousversions", L"windows.modernshare",
         L"casttodevice", L"giveaccess",  L"share",       L"includeinlibrary",
+        L"setdesktopwallpaper",
     };
     for (const wchar_t* known : kVerbs) {
         if (_wcsicmp(verb.c_str(), known) == 0) {

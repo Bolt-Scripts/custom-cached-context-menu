@@ -576,6 +576,13 @@ int main() {
     CHECK(hasOpenInNewWindow);
     CHECK(hasPin);
 
+    // SFGAO_FOLDER alone isn't "directory": .zip files and folder shortcuts
+    // report it too; only a real directory has it without SFGAO_STREAM.
+    CHECK(cmo::IsFolderAttributes(SFGAO_FOLDER));
+    CHECK(!cmo::IsFolderAttributes(SFGAO_FOLDER | SFGAO_STREAM));
+    CHECK(!cmo::IsFolderAttributes(SFGAO_STREAM));
+    CHECK(!cmo::IsFolderAttributes(SFGAO_FILESYSTEM));
+
     // A single folder pastes into itself, like the Windows 11 menu.
     bool hasPaste = false;
     int pasteIndex = -1;
@@ -4646,6 +4653,13 @@ int main() {
             if (it.invocation.id == 6) deleteLeft = it.rect.left;
         }
         CHECK(cutLeft >= 0 && cutLeft < copyLeft && copyLeft < deleteLeft);
+
+        // Cells from captured menus (no bitmap) fall back to the named glyph
+        // for their verb.
+        for (const cmo::LayoutItem& it : top.items) {
+            if (!it.topBarCell) continue;
+            CHECK(!it.iconRef.empty());
+        }
 
         // The bar reserves roomy cells; the panel widens to fit them.
         CHECK(top.size.cx >= 3 * 56);

@@ -60,7 +60,7 @@ and discovers extension items in the background, so repeated opens are instant.
 | Menu mode | Custom (recommended) | Custom draws the self-rendered menu and falls back to the classic menu after repeated failures; Classic always uses the owner-drawn menu. |
 | Theme | Custom (menu.ini) | Loads the appearance from `<mod storage>\themes\<name>.ini` (created from the bundled preset on first use). `menu.ini` is never modified by theme selection. |
 | Show classic menu item | on | Adds a "Show classic menu" entry at the bottom of the menu. |
-| Top action bar | off | Moves Cut, Copy, Paste, Rename and Delete into an icon bar on the side of the menu nearest the cursor, like the Windows 11 menu. |
+| Top action bar | off | Moves Cut, Copy, Paste, Rename and Delete into an icon bar on the side of the menu nearest the cursor, like the Windows 11 menu. Custom menu mode only. |
 | Warm-up extensions | common list | Comma-separated file types pre-built at Explorer startup. |
 | Warm-up delay | 5 s | Delay before background warm-up starts. |
 | Clear cache | off | Turn on to delete cached models; they rebuild on next use. |
@@ -153,7 +153,7 @@ MIT
   $description: Add a "Show classic menu" entry at the bottom of the replacement menu.
 - topBar: false
   $name: Top action bar
-  $description: Moves Cut, Copy, Paste, Rename and Delete into an icon bar on the side of the menu nearest the cursor, like the Windows 11 menu.
+  $description: Moves Cut, Copy, Paste, Rename and Delete into an icon bar on the side of the menu nearest the cursor, like the Windows 11 menu. Custom menu mode only.
 - submenuDelayMs: 150
   $name: Submenu open delay
   $description: Milliseconds before a hovered submenu opens while the replacement menu is shown. 0 opens instantly; -1 keeps the Windows setting.
@@ -6901,6 +6901,14 @@ LayoutPanel BuildLayoutPanel(const std::vector<MenuItem>& items,
                 item.displayLabel.empty() ? item.label : item.displayLabel;
             cell.iconRef = item.iconRef;
             cell.iconPixels = item.iconPixels;
+            if (cell.iconRef.empty() && cell.iconPixels.empty()) {
+                // Captured menus (e.g. the navigation pane) carry no bitmaps;
+                // fall back to the named glyph for the verb.
+                std::wstring glyph;
+                if (ResolveNamedIcon(item.canonicalVerb, glyph)) {
+                    cell.iconRef = L"@glyph:" + glyph;
+                }
+            }
             cell.flags = item.flags;
             cell.textColor = (item.flags & kModelDisabled)
                                  ? metrics.disabledTextColor
@@ -15989,6 +15997,14 @@ struct SelectionInfo {
     bool allItemsAreFolders = false;
 };
 
+// A .zip file and a folder shortcut both report SFGAO_FOLDER; only a real
+// directory has it without SFGAO_STREAM. Treating a zip as a folder would
+// give it the folder menu and a Paste that pastes into the archive.
+inline bool IsFolderAttributes(SFGAOF attributes) {
+    return (attributes & SFGAO_FOLDER) != 0 &&
+           (attributes & SFGAO_STREAM) == 0;
+}
+
 SelectionInfo GetSelectionFromShellBrowser(IShellBrowser* browser) {
     SelectionInfo info;
     if (!browser) {
@@ -16015,14 +16031,15 @@ SelectionInfo GetSelectionFromShellBrowser(IShellBrowser* browser) {
                     enumIds) {
                     LPITEMIDLIST pidl = nullptr;
                     while (enumIds->Next(1, &pidl, nullptr) == S_OK) {
-                        SFGAOF itemAttributes = SFGAO_FILESYSTEM | SFGAO_FOLDER;
+                        SFGAOF itemAttributes =
+                            SFGAO_FILESYSTEM | SFGAO_FOLDER | SFGAO_STREAM;
                         PCUITEMID_CHILD child = pidl;
                         if (SUCCEEDED(
                                 folder->GetAttributesOf(1, &child, &itemAttributes))) {
                             if (!(itemAttributes & SFGAO_FILESYSTEM)) {
                                 info.allItemsAreFilesystem = false;
                             }
-                            if (!(itemAttributes & SFGAO_FOLDER)) {
+                            if (!IsFolderAttributes(itemAttributes)) {
                                 allFolders = false;
                             }
                         } else {

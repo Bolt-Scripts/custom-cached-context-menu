@@ -68,7 +68,7 @@ native menu. **Show classic menu** does the same from the menu itself.
 | Bypass keys | on | Hold Shift while right-clicking to bypass the mod and get the stock classic menu, or Ctrl for the untouched native menu. |
 | Instant menu open | on | Native fallback menus (classic mode, fallbacks) are shown without the system open animation, via `TPM_NOANIMATION`. |
 | Show classic menu item | on | Adds a "Show classic menu" entry at the bottom of the replacement menu. |
-| Top action bar | off | Moves Cut, Copy, Paste, Rename and Delete into an icon bar on the side of the menu nearest the cursor, like the Windows 11 menu. |
+| Top action bar | off | Moves Cut, Copy, Paste, Rename and Delete into an icon bar on the side of the menu nearest the cursor, like the Windows 11 menu. Custom menu mode only. |
 | Submenu open delay | 150 ms | Hover delay before a submenu opens; 0 = instant, -1 = keep the Windows setting. |
 | Move Windows extras | on | Moves the configured Windows extras into the More options submenu. |
 | Move third-party handlers | on | Moves third-party shell extension entries into the More options submenu. |

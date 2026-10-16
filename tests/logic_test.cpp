@@ -680,6 +680,14 @@ int main() {
         CHECK(cmo::BuildShellIdListBlob(parent, {}).empty());
     }
 
+    // A coalesced hover repaint is cleared when the pointer leaves.
+    {
+        cmo::MenuInputState state{};
+        state.hoverRepaintPending = true;
+        cmo::MenuStateMouseLeave(state);
+        CHECK(!state.hoverRepaintPending);
+    }
+
     // Explorer's own keyboard commands run in file views; the tree does not
     // share them.
     CHECK(cmo::IsFileViewKind(cmo::ShellViewKind::Desktop));

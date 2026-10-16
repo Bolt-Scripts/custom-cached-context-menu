@@ -8068,6 +8068,9 @@ CMO_NO_DESTROY inline std::optional<MenuWindowSet> g_menuWindowSet{std::in_place
 
 struct MenuInputState {
     int hoverIndex = -1;
+    // A hover repaint is owed but was coalesced away: more mouse moves were
+    // already queued, and the last one paints the final hover position.
+    bool hoverRepaintPending = false;
     int keyboardIndex = -1;
     int scrollOffset = 0;
     int openSubmenu = -1;
@@ -10247,6 +10250,7 @@ void MenuStateMouseMove(MenuInputState& state, const LayoutPanel& panel,
 
 void MenuStateMouseLeave(MenuInputState& state) {
     state.hoverIndex = -1;
+    state.hoverRepaintPending = false;
 }
 
 void MenuStateWheel(MenuInputState& state, const LayoutPanel& panel, int delta,
@@ -12283,9 +12287,21 @@ LRESULT CustomMenuWindowProc(MenuWindow* window, HWND hwnd, UINT msg,
                 CloseSubmenusBelow(session, level);
             }
 
-            if (hit != levelState.hoverIndex) {
+            if (hit != levelState.hoverIndex ||
+                levelState.hoverRepaintPending) {
                 MenuStateMouseMove(levelState, levelPanel, hit);
-                RepaintMenuWindow(session, level);
+                // Repainting every intermediate item of a mouse sweep makes
+                // the highlight trail the cursor: each repaint is a full
+                // panel render that waits for the swap chain. When more
+                // moves are already queued, only the last one paints.
+                MSG queued = {};
+                if (PeekMessageW(&queued, hwnd, WM_MOUSEMOVE, WM_MOUSEMOVE,
+                                 PM_NOREMOVE)) {
+                    levelState.hoverRepaintPending = true;
+                } else {
+                    levelState.hoverRepaintPending = false;
+                    RepaintMenuWindow(session, level);
+                }
             }
 
             if (isSubmenu) {

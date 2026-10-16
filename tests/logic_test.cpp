@@ -576,6 +576,29 @@ int main() {
     CHECK(hasOpenInNewWindow);
     CHECK(hasPin);
 
+    // A single folder pastes into itself, like the Windows 11 menu.
+    bool hasPaste = false;
+    int pasteIndex = -1;
+    int cutIndex = -1;
+    for (size_t i = 0; i < folderModel.items.size(); ++i) {
+        if (folderModel.items[i].canonicalVerb == L"paste") {
+            hasPaste = true;
+            pasteIndex = static_cast<int>(i);
+        }
+        if (folderModel.items[i].canonicalVerb == L"cut") {
+            cutIndex = static_cast<int>(i);
+        }
+    }
+    CHECK(hasPaste);
+    CHECK(pasteIndex >= 0 && cutIndex >= 0 && pasteIndex < cutIndex);
+
+    // Multi-folder selections have no unambiguous destination.
+    cmo::MenuModel multiFolderModel = cmo::BuildCoreModel(
+        cmo::Scope::Folders, {L"C:\\a", L"C:\\b"}, cmo::Shape::Multi);
+    for (const cmo::MenuItem& item : multiFolderModel.items) {
+        CHECK(item.canonicalVerb != L"paste");
+    }
+
     cmo::MenuModel backgroundModel =
         cmo::BuildCoreModel(cmo::Scope::Background, {}, cmo::Shape::Single);
     bool hasView = false;

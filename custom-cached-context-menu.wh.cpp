@@ -13498,6 +13498,10 @@ MenuModel BuildCoreModel(Scope scope, const std::vector<std::wstring>& paths, Sh
         addCommand(L"Open in new window", L"opennew");
         addCommand(L"Pin to Quick access", L"pintohome");
         addSeparator();
+        if (shape == Shape::Single) {
+            // A single folder pastes into itself, like the Windows 11 menu.
+            addCommand(L"Paste", L"paste", kModelNone, L"@glyph:E77F");
+        }
     } else {
         addCommand(openLabel, L"open", kModelDefault);
         addCommand(L"Open with", L"openwith", kModelNone, L"@glyph:E8E5");

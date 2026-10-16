@@ -12712,8 +12712,17 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
         session.submenuTimerActive = false;
     }
     KillTimer(root->Handle(), kMenuOverlayTimerId);
-    const AnimationSpec closing = ResolveAnimationSpec(appearance, false);
-    RunSessionAnimation(session, closing, false);
+    if (session.result.chosenItemId.has_value()) {
+        // A chosen action must start now: the menu disappears at once
+        // instead of fading, and nothing lingers on screen while a modal
+        // dialog (Properties, the delete confirmation) is up.
+        for (MenuWindow* window : session.windows) {
+            ::ShowWindow(window->Handle(), SW_HIDE);
+        }
+    } else {
+        const AnimationSpec closing = ResolveAnimationSpec(appearance, false);
+        RunSessionAnimation(session, closing, false);
+    }
     if (session.settings) {
         if (session.settings->write.pending) {
             SettingsPerformWrite(session.settings);
@@ -17166,11 +17175,17 @@ bool EnsureContextPopulated(PendingCapture& capture) {
 std::optional<uint32_t> FindNativeOffsetInMenu(HMENU menu, UINT idCmdFirst,
                                                IContextMenu* context,
                                                const MenuItem& target);
+bool TryInvokeVerbDirect(const MenuItem& item, const InvocationContext& ctx);
 
 InvokeResult InvokeExtensionItem(const MenuItem& item, const InvocationContext& ctx,
                                  PendingCapture& capture) {
     if (item.flags & kModelOwnerDraw) {
         return InvokeResult::FallbackNative;
+    }
+    // A registered verb needs no populated menu; dynamic handlers fall
+    // through to the shell path.
+    if (TryInvokeVerbDirect(item, ctx)) {
+        return InvokeResult::Handled;
     }
     if (!ctx.liveContext || !EnsureContextPopulated(capture)) {
         return InvokeResult::FallbackNative;
@@ -17335,6 +17350,308 @@ bool InvokeBuiltinAction(const MenuItem& item, const InvocationContext& ctx) {
     return false;
 }
 
+// Verbs with a direct implementation. Invoking one of these must not
+// populate the live shell menu first: the population is the slow part of a
+// native menu (hundreds of milliseconds with many handlers), and paying it on
+// click is what makes a chosen action feel late.
+enum class CoreVerb {
+    None,
+    Open,
+    Cut,
+    Copy,
+    Delete,
+    Properties,
+    SetDesktopWallpaper,
+};
+
+CoreVerb ClassifyCoreVerb(const std::wstring& verb) {
+    if (EqualsIgnoreCase(verb, L"open")) {
+        return CoreVerb::Open;
+    }
+    if (EqualsIgnoreCase(verb, L"cut")) {
+        return CoreVerb::Cut;
+    }
+    if (EqualsIgnoreCase(verb, L"copy")) {
+        return CoreVerb::Copy;
+    }
+    if (EqualsIgnoreCase(verb, L"delete")) {
+        return CoreVerb::Delete;
+    }
+    if (EqualsIgnoreCase(verb, L"properties")) {
+        return CoreVerb::Properties;
+    }
+    if (EqualsIgnoreCase(verb, L"setdesktopwallpaper")) {
+        return CoreVerb::SetDesktopWallpaper;
+    }
+    return CoreVerb::None;
+}
+
+// Builds the CF_HDROP payload: a DROPFILES header followed by the paths,
+// each NUL-terminated, with one more NUL closing the list.
+std::vector<BYTE> BuildDropFilesBlob(const std::vector<std::wstring>& paths) {
+    std::vector<BYTE> blob;
+    if (paths.empty()) {
+        return blob;
+    }
+    size_t stringsBytes = sizeof(wchar_t);
+    for (const std::wstring& path : paths) {
+        stringsBytes += (path.size() + 1) * sizeof(wchar_t);
+    }
+    blob.assign(sizeof(DROPFILES) + stringsBytes, 0);
+    DROPFILES* header = reinterpret_cast<DROPFILES*>(blob.data());
+    header->pFiles = sizeof(DROPFILES);
+    header->fWide = TRUE;
+    wchar_t* cursor =
+        reinterpret_cast<wchar_t*>(blob.data() + sizeof(DROPFILES));
+    for (const std::wstring& path : paths) {
+        memcpy(cursor, path.c_str(), (path.size() + 1) * sizeof(wchar_t));
+        cursor += path.size() + 1;
+    }
+    return blob;
+}
+
+// Puts the selection on the clipboard the way Explorer's Cut/Copy do: a
+// CF_HDROP list plus the preferred drop effect that tells paste targets to
+// copy or move, with clipboard viewers suppressed like the shell does.
+bool WriteClipboardFiles(HWND owner, const std::vector<std::wstring>& paths,
+                         bool cut) {
+    const std::vector<BYTE> blob = BuildDropFilesBlob(paths);
+    if (blob.empty()) {
+        return false;
+    }
+    HGLOBAL dropMemory = GlobalAlloc(GMEM_MOVEABLE, blob.size());
+    HGLOBAL effectMemory = GlobalAlloc(GMEM_MOVEABLE, sizeof(DWORD));
+    HGLOBAL ignoreMemory = GlobalAlloc(GMEM_MOVEABLE, sizeof(DWORD));
+    if (!dropMemory || !effectMemory || !ignoreMemory) {
+        if (dropMemory) GlobalFree(dropMemory);
+        if (effectMemory) GlobalFree(effectMemory);
+        if (ignoreMemory) GlobalFree(ignoreMemory);
+        return false;
+    }
+    auto fill = [](HGLOBAL memory, const void* data, size_t size) {
+        void* target = GlobalLock(memory);
+        if (!target) {
+            return false;
+        }
+        memcpy(target, data, size);
+        GlobalUnlock(memory);
+        return true;
+    };
+    const DWORD effect =
+        cut ? DROPEFFECT_MOVE : (DROPEFFECT_COPY | DROPEFFECT_LINK);
+    const DWORD ignore = 1;
+    if (!fill(dropMemory, blob.data(), blob.size()) ||
+        !fill(effectMemory, &effect, sizeof(effect)) ||
+        !fill(ignoreMemory, &ignore, sizeof(ignore))) {
+        GlobalFree(dropMemory);
+        GlobalFree(effectMemory);
+        GlobalFree(ignoreMemory);
+        return false;
+    }
+    bool ok = false;
+    if (OpenClipboard(owner)) {
+        if (EmptyClipboard()) {
+            // SetClipboardData takes ownership of the memory on success.
+            if (SetClipboardData(CF_HDROP, dropMemory)) {
+                dropMemory = nullptr;
+                ok = true;
+            }
+            if (SetClipboardData(RegisterClipboardFormatW(L"Preferred DropEffect"),
+                                 effectMemory)) {
+                effectMemory = nullptr;
+            } else {
+                GlobalFree(effectMemory);
+            }
+            if (SetClipboardData(RegisterClipboardFormatW(L"Clipboard Viewer Ignore"),
+                                 ignoreMemory)) {
+                ignoreMemory = nullptr;
+            } else {
+                GlobalFree(ignoreMemory);
+            }
+        }
+        CloseClipboard();
+    }
+    if (dropMemory) GlobalFree(dropMemory);
+    if (effectMemory) GlobalFree(effectMemory);
+    if (ignoreMemory) GlobalFree(ignoreMemory);
+    return ok;
+}
+
+// Shared parent directory of all paths, or false when they differ (mixed
+// folders, search results) - the caller keeps the shell path then.
+bool ShareOneParentDirectory(const std::vector<std::wstring>& paths,
+                             std::wstring& parent) {
+    parent.clear();
+    if (paths.empty()) {
+        return false;
+    }
+    for (const std::wstring& path : paths) {
+        std::wstring directory = path;
+        const size_t slash = directory.find_last_of(L"\\/");
+        if (slash == std::wstring::npos || slash == 0) {
+            return false;
+        }
+        directory.resize(slash);
+        if (directory.size() == 2 && directory[1] == L':') {
+            directory += L'\\';
+        }
+        if (parent.empty()) {
+            parent = directory;
+        } else if (_wcsicmp(parent.c_str(), directory.c_str()) != 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Open: the same default-verb dispatch the shell menu performs, once per
+// path for multi-selections. Unassociated files fall through to the shell
+// path, which shows the picker.
+bool InvokeOpenPaths(const InvocationContext& ctx) {
+    bool any = false;
+    for (const std::wstring& path : ctx.paths) {
+        SHELLEXECUTEINFOW info = {};
+        info.cbSize = sizeof(info);
+        info.fMask = SEE_MASK_FLAG_NO_UI;
+        info.hwnd = ctx.owner;
+        info.lpVerb = L"open";
+        info.lpFile = path.c_str();
+        info.nShow = SW_SHOWNORMAL;
+        any = ShellExecuteExW(&info) != FALSE || any;
+    }
+    return any;
+}
+
+// Delete: the modern file operation with recycling, like Explorer's Delete.
+// The confirmation and error UI come from the operation itself.
+bool InvokeDeletePaths(const InvocationContext& ctx) {
+    if (ctx.paths.empty()) {
+        return false;
+    }
+    IFileOperation* operation = nullptr;
+    if (FAILED(CoCreateInstance(CLSID_FileOperation, nullptr, CLSCTX_ALL,
+                                IID_IFileOperation,
+                                reinterpret_cast<void**>(&operation))) ||
+        !operation) {
+        return false;
+    }
+    operation->SetOperationFlags(FOF_ALLOWUNDO);
+    bool ok = true;
+    for (const std::wstring& path : ctx.paths) {
+        IShellItem* item = nullptr;
+        if (FAILED(SHCreateItemFromParsingName(path.c_str(), nullptr,
+                                               IID_IShellItem,
+                                               reinterpret_cast<void**>(&item))) ||
+            !item) {
+            ok = false;
+            continue;
+        }
+        if (FAILED(operation->DeleteItem(item, nullptr))) {
+            ok = false;
+        }
+        item->Release();
+    }
+    if (ok) {
+        // Whatever PerformOperations decided (including a canceled
+        // confirmation) is the user's answer; retrying through the shell
+        // menu would only ask twice.
+        ok = SUCCEEDED(operation->PerformOperations());
+    }
+    operation->Release();
+    return ok;
+}
+
+// Properties: the same sheet the shell shows. A multi-selection uses the
+// aggregate dialog when the items share one parent folder; other shapes
+// keep the shell path.
+bool InvokeProperties(const InvocationContext& ctx) {
+    std::vector<std::wstring> targets = ctx.paths;
+    if (targets.empty() && !ctx.directory.empty()) {
+        // Background menus: the sheet belongs to the current folder.
+        targets.push_back(ctx.directory);
+    }
+    if (targets.empty()) {
+        return false;
+    }
+    if (targets.size() == 1) {
+        return SHObjectProperties(ctx.owner, SHOP_FILEPATH,
+                                  targets.front().c_str(), nullptr) != FALSE;
+    }
+    std::wstring parent;
+    if (!ShareOneParentDirectory(targets, parent)) {
+        return false;
+    }
+    PIDLIST_ABSOLUTE folder = nullptr;
+    if (FAILED(SHParseDisplayName(parent.c_str(), nullptr, &folder, 0,
+                                  nullptr)) ||
+        !folder) {
+        return false;
+    }
+    std::vector<PIDLIST_ABSOLUTE> absolute;
+    std::vector<PCUITEMID_CHILD> children;
+    bool ok = true;
+    for (const std::wstring& path : targets) {
+        PIDLIST_ABSOLUTE item = nullptr;
+        if (FAILED(SHParseDisplayName(path.c_str(), nullptr, &item, 0,
+                                      nullptr)) ||
+            !item) {
+            ok = false;
+            break;
+        }
+        absolute.push_back(item);
+        children.push_back(ILFindLastID(item));
+    }
+    IDataObject* dataObject = nullptr;
+    if (ok) {
+        ok = SUCCEEDED(SHCreateDataObject(
+                 folder, static_cast<UINT>(children.size()), children.data(),
+                 nullptr, IID_IDataObject,
+                 reinterpret_cast<void**>(&dataObject))) &&
+             dataObject;
+    }
+    bool shown = false;
+    if (ok) {
+        shown = SUCCEEDED(SHMultiFileProperties(dataObject, 0));
+    }
+    if (dataObject) {
+        dataObject->Release();
+    }
+    for (PIDLIST_ABSOLUTE item : absolute) {
+        CoTaskMemFree(item);
+    }
+    CoTaskMemFree(folder);
+    return shown;
+}
+
+// Set as desktop background: the same system call the shell verb makes.
+bool InvokeSetDesktopWallpaper(const std::vector<std::wstring>& paths) {
+    if (paths.size() != 1) {
+        // Multi-selection behavior is the shell's call; keep its path.
+        return false;
+    }
+    return SystemParametersInfoW(
+               SPI_SETDESKWALLPAPER, 0,
+               const_cast<wchar_t*>(paths.front().c_str()),
+               SPIF_UPDATEINIFILE | SPIF_SENDWININICHANGE) != FALSE;
+}
+
+// Registered verbs dispatch through ShellExecuteEx without any context menu
+// population. Dynamic menu items (empty or unregistered verbs) fail quickly
+// here and keep the populated shell menu as the correctness net.
+bool TryInvokeVerbDirect(const MenuItem& item, const InvocationContext& ctx) {
+    if (ctx.paths.size() != 1 || item.canonicalVerb.empty()) {
+        return false;
+    }
+    SHELLEXECUTEINFOW info = {};
+    info.cbSize = sizeof(info);
+    info.fMask = SEE_MASK_FLAG_NO_UI;
+    info.hwnd = ctx.owner;
+    info.lpVerb = item.canonicalVerb.c_str();
+    info.lpFile = ctx.paths.front().c_str();
+    info.nShow = SW_SHOWNORMAL;
+    return ShellExecuteExW(&info) != FALSE;
+}
+
 InvokeResult InvokeItem(const MenuItem& item, const InvocationContext& ctx,
                         PendingCapture& capture) {
     if (item.kind == ItemKind::Separator || (item.flags & kModelDisabled)) {
@@ -17409,6 +17726,47 @@ InvokeResult InvokeItem(const MenuItem& item, const InvocationContext& ctx,
             if (item.canonicalVerb == L"pastelink") {
                 return InvokePasteShortcut(ctx) ? InvokeResult::Handled
                                                 : InvokeResult::FallbackNative;
+            }
+            // Core actions run directly, so a click never waits for the
+            // full shell menu population first.
+            switch (ClassifyCoreVerb(item.canonicalVerb)) {
+                case CoreVerb::Open:
+                    if (InvokeOpenPaths(ctx)) {
+                        return InvokeResult::Handled;
+                    }
+                    break;
+                case CoreVerb::Cut:
+                    if (WriteClipboardFiles(ctx.owner, ctx.paths, true)) {
+                        return InvokeResult::Handled;
+                    }
+                    break;
+                case CoreVerb::Copy:
+                    if (WriteClipboardFiles(ctx.owner, ctx.paths, false)) {
+                        return InvokeResult::Handled;
+                    }
+                    break;
+                case CoreVerb::Delete:
+                    if (InvokeDeletePaths(ctx)) {
+                        return InvokeResult::Handled;
+                    }
+                    break;
+                case CoreVerb::Properties:
+                    if (InvokeProperties(ctx)) {
+                        return InvokeResult::Handled;
+                    }
+                    break;
+                case CoreVerb::SetDesktopWallpaper:
+                    if (InvokeSetDesktopWallpaper(ctx.paths)) {
+                        return InvokeResult::Handled;
+                    }
+                    break;
+                case CoreVerb::None:
+                    break;
+            }
+            // Registered verbs (for example "opennew" or "pintohome") also
+            // dispatch without the populated menu.
+            if (TryInvokeVerbDirect(item, ctx)) {
+                return InvokeResult::Handled;
             }
             // The shell only knows its own commands once the object has been
             // populated. Verb strings are rejected by the default context

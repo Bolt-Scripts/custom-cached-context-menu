@@ -603,6 +603,66 @@ int main() {
         CHECK(cmo::IsBuiltinExtra(terminal, {L"openterminal"}));
     }
 
+    // Core actions dispatch directly instead of populating the shell menu
+    // just to find a command offset.
+    CHECK(cmo::ClassifyCoreVerb(L"open") == cmo::CoreVerb::Open);
+    CHECK(cmo::ClassifyCoreVerb(L"OPEN") == cmo::CoreVerb::Open);
+    CHECK(cmo::ClassifyCoreVerb(L"cut") == cmo::CoreVerb::Cut);
+    CHECK(cmo::ClassifyCoreVerb(L"Copy") == cmo::CoreVerb::Copy);
+    CHECK(cmo::ClassifyCoreVerb(L"delete") == cmo::CoreVerb::Delete);
+    CHECK(cmo::ClassifyCoreVerb(L"properties") == cmo::CoreVerb::Properties);
+    CHECK(cmo::ClassifyCoreVerb(L"setdesktopwallpaper") ==
+          cmo::CoreVerb::SetDesktopWallpaper);
+    CHECK(cmo::ClassifyCoreVerb(L"paste") == cmo::CoreVerb::None);
+    CHECK(cmo::ClassifyCoreVerb(L"rotate90") == cmo::CoreVerb::None);
+    CHECK(cmo::ClassifyCoreVerb(L"VSCode") == cmo::CoreVerb::None);
+    CHECK(cmo::ClassifyCoreVerb(L"") == cmo::CoreVerb::None);
+
+    // The clipboard payload is a DROPFILES header plus NUL-terminated wide
+    // paths with a final list terminator, like Explorer's own Cut/Copy.
+    {
+        const std::vector<std::wstring> paths = {L"C:\\a\\one.txt",
+                                                 L"C:\\a\\two.txt"};
+        const std::vector<BYTE> blob = cmo::BuildDropFilesBlob(paths);
+        CHECK(blob.size() ==
+              sizeof(DROPFILES) +
+                  (paths[0].size() + 1 + paths[1].size() + 1 + 1) *
+                      sizeof(wchar_t));
+        const DROPFILES* header =
+            reinterpret_cast<const DROPFILES*>(blob.data());
+        CHECK(header->pFiles == sizeof(DROPFILES));
+        CHECK(header->fWide != 0);
+        const wchar_t* text = reinterpret_cast<const wchar_t*>(
+            blob.data() + sizeof(DROPFILES));
+        CHECK(std::wstring(text) == paths[0]);
+        text += paths[0].size() + 1;
+        CHECK(std::wstring(text) == paths[1]);
+        text += paths[1].size() + 1;
+        CHECK(text ==
+              reinterpret_cast<const wchar_t*>(blob.data() + blob.size()) - 1);
+        CHECK(*text == L'\0');
+        CHECK(cmo::BuildDropFilesBlob({}).empty());
+    }
+
+    // Multi-file Properties needs one parent folder for the data object.
+    {
+        std::wstring parent;
+        CHECK(cmo::ShareOneParentDirectory(
+            {L"C:\\a\\one.txt", L"C:\\a\\two.txt"}, parent));
+        CHECK(parent == L"C:\\a");
+        CHECK(cmo::ShareOneParentDirectory({L"C:\\a\\one.txt"}, parent));
+        CHECK(parent == L"C:\\a");
+        CHECK(cmo::ShareOneParentDirectory({L"C:\\one.txt", L"C:\\two.txt"},
+                                           parent));
+        CHECK(parent == L"C:\\");
+        CHECK(cmo::ShareOneParentDirectory(
+            {L"C:\\A\\ONE.TXT", L"c:\\a\\two.txt"}, parent));
+        CHECK(parent == L"C:\\A");
+        CHECK(!cmo::ShareOneParentDirectory(
+            {L"C:\\a\\one.txt", L"D:\\b\\two.txt"}, parent));
+        CHECK(!cmo::ShareOneParentDirectory({}, parent));
+    }
+
     // SFGAO_FOLDER alone isn't "directory": .zip files and folder shortcuts
     // report it too; only a real directory has it without SFGAO_STREAM.
     CHECK(cmo::IsFolderAttributes(SFGAO_FOLDER));

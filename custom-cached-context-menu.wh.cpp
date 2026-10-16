@@ -1917,7 +1917,16 @@ bool ParseCornerRadii(const std::wstring& value, CornerRadii& radii) {
 enum class SettingType : uint8_t { Bool, Int, Color, Font, Enum, IntList, EffectList };
 
 // The build's schema version; bump when a row is added.
-constexpr int kConfigSchemaVersion = 8;
+constexpr int kConfigSchemaVersion = 9;
+
+// v9 tightened the default padding from 6 to 4. Configs and theme files
+// written by older versions carry the old default as an explicit value; it is
+// migrated once, while a value the user changed is left alone.
+constexpr int kLegacyDefaultPadding = 6;
+inline bool ShouldMigratePadding(int sourceVersion, int padding) {
+    return sourceVersion < kConfigSchemaVersion &&
+           padding == kLegacyDefaultPadding;
+}
 
 struct ConfigSchemaEntry {
     const wchar_t* section;
@@ -3492,8 +3501,24 @@ std::wstring EmitCanonicalConfig(const CanonicalSource& source, int toVersion) {
     return out;
 }
 
+// Applies versioned value migrations to a parsed canonical source. The source
+// version comes from the file's [meta]; texts without one predate versioning
+// and are treated as legacy.
+void MigrateCanonicalSource(CanonicalSource& source, int sourceVersion) {
+    if (sourceVersion >= kConfigSchemaVersion) {
+        return;
+    }
+    const auto it = source.baseValues.find(L"padding");
+    if (it != source.baseValues.end() &&
+        it->second == std::to_wstring(kLegacyDefaultPadding)) {
+        it->second = L"4";
+    }
+}
+
 std::wstring CanonicalizeConfig(const std::wstring& text, int toVersion) {
-    return EmitCanonicalConfig(SplitConfigForCanonical(text), toVersion);
+    CanonicalSource source = SplitConfigForCanonical(text);
+    MigrateCanonicalSource(source, ReadSchemaVersion(text));
+    return EmitCanonicalConfig(source, toVersion);
 }
 
 // One change for CanonicalizeConfigWithOverrides: a set in a section, or a
@@ -3512,6 +3537,7 @@ std::wstring CanonicalizeConfigWithOverrides(
     const std::wstring& text, int toVersion,
     const std::vector<ConfigOverride>& overrides) {
     CanonicalSource source = SplitConfigForCanonical(text);
+    MigrateCanonicalSource(source, ReadSchemaVersion(text));
     for (const ConfigOverride& change : overrides) {
         std::unordered_map<std::wstring, std::wstring>* values = nullptr;
         const std::wstring section = ToLowerCopy(change.section);
@@ -4436,6 +4462,12 @@ private:
             Wh_Log(L"menu.ini:%d: warning: %s", warning.line,
                    warning.message.c_str());
         }
+        if (ShouldMigratePadding(parsed.schemaVersion,
+                                 parsed.appearance.padding)) {
+            // v9: migrate the old default padding so it reaches existing
+            // installs; a value the user changed is left alone.
+            parsed.appearance.padding = 4;
+        }
         if (outWarnings) {
             *outWarnings = warnings;
         }
@@ -5074,6 +5106,13 @@ std::wstring CanonicalAppearanceBlock(const std::wstring& configText) {
         CanonicalizeConfig(configText, kConfigSchemaVersion));
 }
 
+// Theme files carry the schema version so value migrations run once, the same
+// way menu.ini does.
+std::wstring ThemeFileText(const std::wstring& appearanceBlock) {
+    return L"[meta]\nschemaVersion = " +
+           std::to_wstring(kConfigSchemaVersion) + L"\n\n" + appearanceBlock;
+}
+
 // Canonical, complete [appearance] block for a theme: canonicalizing the
 // preset snippet fills every missing key from the schema defaults, and only
 // the appearance section is kept.
@@ -5393,7 +5432,14 @@ private:
                    combinedWarnings[i].message.c_str());
         }
 
-        const std::wstring canonical = CanonicalAppearanceBlock(combined);
+        if (ShouldMigratePadding(ReadSchemaVersion(combined),
+                                 effective.appearance.padding)) {
+            // Migrate the old default padding once; the rewrite below stamps
+            // the file with the current schema version.
+            effective.appearance.padding = 4;
+        }
+        const std::wstring canonical =
+            ThemeFileText(CanonicalAppearanceBlock(combined));
         const bool writeSafe = !fileExists || hasFile;
         if (writeSafe && !canonical.empty() &&
             (!hasFile || fileText != canonical)) {
@@ -6453,7 +6499,7 @@ std::wstring BuildThemeTextWithChanges(
     const std::wstring combined = presetSnippet + L"\n" + fileText;
     const std::wstring canonical = CanonicalizeConfigWithOverrides(
         combined, kConfigSchemaVersion, changes);
-    return ExtractAppearanceBlock(canonical);
+    return ThemeFileText(ExtractAppearanceBlock(canonical));
 }
 
 

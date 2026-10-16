@@ -2910,7 +2910,7 @@ int main() {
             explicitConfig, warnings));
         CHECK(explicitConfig.appearance.animationOpen == kAnimFade);
         CHECK(explicitConfig.appearance.animationClose == kAnimSlide);
-        CHECK(kConfigSchemaVersion == 8);
+        CHECK(kConfigSchemaVersion == 9);
         RulesConfig submenuConfig;
         CHECK(ParseRulesConfig(L"[appearance]\nanimateSubmenus = true\n",
                                submenuConfig, warnings));
@@ -3627,7 +3627,7 @@ int main() {
                       entry, entry.defaultValue)) != std::wstring::npos);
         }
         CHECK(text.find(L"[meta]") != std::wstring::npos);
-        CHECK(text.find(L"schemaVersion = 8") != std::wstring::npos);
+        CHECK(text.find(L"schemaVersion = 9") != std::wstring::npos);
         // The tighter default padding and the matching item inset.
         CHECK(text.find(L"padding = 4") != std::wstring::npos);
         CHECK(text.find(L"itemPadding = 4") != std::wstring::npos);
@@ -3636,7 +3636,39 @@ int main() {
         cmo::RulesConfig config;
         std::vector<cmo::ConfigParseError> errors;
         CHECK(cmo::ParseRulesConfig(text, config, errors));
-        CHECK(config.schemaVersion == 8);
+        CHECK(config.schemaVersion == 9);
+    }
+
+    // v9 migration: the default padding was tightened from 6 to 4. Configs
+    // and theme files written by older versions carry the old default as an
+    // explicit value; it is migrated once, while a value the user changed is
+    // left alone.
+    {
+        CHECK(cmo::ShouldMigratePadding(8, 6));
+        CHECK(cmo::ShouldMigratePadding(0, 6));  // no version: legacy file
+        CHECK(!cmo::ShouldMigratePadding(8, 7));
+        CHECK(!cmo::ShouldMigratePadding(9, 6));
+
+        const std::wstring legacy = cmo::CanonicalizeConfig(
+            L"[appearance]\nitemHeight = 30\npadding = 6\n", 9);
+        CHECK(legacy.find(L"padding = 4") != std::wstring::npos);
+        CHECK(legacy.find(L"itemHeight = 30") != std::wstring::npos);
+        const std::wstring custom =
+            cmo::CanonicalizeConfig(L"[appearance]\npadding = 8\n", 9);
+        CHECK(custom.find(L"padding = 8") != std::wstring::npos);
+        const std::wstring current = cmo::CanonicalizeConfig(
+            L"[meta]\nschemaVersion = 9\n[appearance]\npadding = 6\n", 9);
+        CHECK(current.find(L"padding = 6") != std::wstring::npos);
+
+        // Theme files: the old default migrates and the file gains the version
+        // header; one already written by v9 keeps its value.
+        const std::wstring migratedTheme =
+            cmo::BuildThemeTextWithChanges(L"[appearance]\n", L"padding = 6\n", {});
+        CHECK(migratedTheme.find(L"schemaVersion = 9") != std::wstring::npos);
+        CHECK(migratedTheme.find(L"padding = 4") != std::wstring::npos);
+        const std::wstring keptTheme = cmo::BuildThemeTextWithChanges(
+            L"[appearance]\n", L"padding = 6\n\n[meta]\nschemaVersion = 9\n", {});
+        CHECK(keptTheme.find(L"padding = 6") != std::wstring::npos);
     }
 
     // v2.3/v2.4 review fixes: inert examples, '#' comments.
@@ -3768,7 +3800,7 @@ int main() {
         CHECK(store.Snapshot()->appearance.itemHeight == 30);
         std::wstring text;
         CHECK(cmo::ReadConfigFile(path, text));
-        CHECK(text.find(L"schemaVersion = 8") != std::wstring::npos);
+        CHECK(text.find(L"schemaVersion = 9") != std::wstring::npos);
         CHECK(text.find(L"itemHeight = 30") != std::wstring::npos);
         CHECK(text.find(L"; itemPadding = 4") != std::wstring::npos);
 
@@ -3779,7 +3811,7 @@ int main() {
         std::wstring rewritten;
         CHECK(cmo::ReadConfigFile(path, rewritten));
         CHECK(rewritten.find(L"[appearance]") != std::wstring::npos);
-        CHECK(rewritten.find(L"schemaVersion = 8") != std::wstring::npos);
+        CHECK(rewritten.find(L"schemaVersion = 9") != std::wstring::npos);
         DeleteFileW(path.c_str());
     }
 
@@ -3905,7 +3937,7 @@ int main() {
         CHECK(text.find(L"none | fade | slide") != std::wstring::npos);
         CHECK(text.find(L"1-256") != std::wstring::npos);
         CHECK(text.find(L"dot | check | bar | none") != std::wstring::npos);
-        CHECK(text.find(L"schemaVersion = 8") != std::wstring::npos);
+        CHECK(text.find(L"schemaVersion = 9") != std::wstring::npos);
     }
 
     // v2.6 advanced grouping: toggles, exclude, keep.
@@ -4209,7 +4241,7 @@ int main() {
         const std::wstring canonical = cmo::CanonicalizeConfig(
             L"[appearance]\noverlay = scanlines\n", cmo::kConfigSchemaVersion);
         CHECK(canonical.find(L"overlay = scanlines") != std::wstring::npos);
-        CHECK(canonical.find(L"schemaVersion = 8") != std::wstring::npos);
+        CHECK(canonical.find(L"schemaVersion = 9") != std::wstring::npos);
 
         cmo::SettingsModelInputs inputs;
         const std::vector<cmo::MenuItem> root = cmo::BuildSettingsTree(inputs);

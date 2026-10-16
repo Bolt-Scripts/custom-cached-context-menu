@@ -2,7 +2,7 @@
 // @id              custom-cached-context-menu
 // @name            Custom Cached Context Menu
 // @description     Instantly-opening cached Explorer context menu that is fully customizable: themes, layout, colors, animations, rules, and custom commands.
-// @version         1.0.0
+// @version         1.0.1
 // @include         explorer.exe
 // @architecture    x86-64
 // @compilerOptions -lole32 -lshlwapi -luuid -lcomctl32 -ladvapi32 -lgdi32 -luxtheme -lversion -ld3d11 -ld2d1 -ldwrite -ldcomp

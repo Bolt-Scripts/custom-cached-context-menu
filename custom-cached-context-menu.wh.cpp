@@ -6839,13 +6839,14 @@ LayoutPanel BuildLayoutPanel(const std::vector<MenuItem>& items,
 
     int rowsHeight = 0;
     int contentWidth = 0;
+    // The bar's width is the sum of its cells, each with roomy sides.
+    const int barCellPad = metrics.padding * 3 + 4;
+    const int barCellMin = metrics.iconSize * 3 + 8;
     for (const MenuItem* item : barItems) {
         const std::wstring& measureLabel =
             item->displayLabel.empty() ? item->label : item->displayLabel;
-        contentWidth =
-            std::max(contentWidth,
-                     std::max(measureText(measureLabel), metrics.iconSize) +
-                         2 * metrics.padding);
+        contentWidth += std::max(measureText(measureLabel) + 2 * barCellPad,
+                                 barCellMin);
     }
     for (const MenuItem* itemPtr : listItems) {
         const MenuItem& item = *itemPtr;

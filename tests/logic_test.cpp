@@ -4647,6 +4647,14 @@ int main() {
         }
         CHECK(cutLeft >= 0 && cutLeft < copyLeft && copyLeft < deleteLeft);
 
+        // The bar reserves roomy cells; the panel widens to fit them.
+        CHECK(top.size.cx >= 3 * 56);
+        for (const cmo::LayoutItem& it : top.items) {
+            if (!it.topBarCell) continue;
+            CHECK((it.rect.right - it.rect.left) -
+                      (it.textRect.right - it.textRect.left) >= 16);
+        }
+
         // Cell geometry: the icon keeps a margin from the top edge and the
         // label (centered by the text layout in an itemHeight-tall box) fits
         // inside the cell with room below.

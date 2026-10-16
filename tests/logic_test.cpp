@@ -588,6 +588,21 @@ int main() {
     CHECK(cmo::IsKnownWindowsVerb(L"{2430F218-B743-4FD6-97BF-5C76541B4AE9}"));
     CHECK(cmo::IsKnownWindowsVerb(L"{CA6CC9F1-867A-481E-951E-A28C5E4F01EA}"));
 
+    // GUID-verb Windows commands accept friendly aliases in the item lists.
+    {
+        cmo::MenuItem terminal{};
+        terminal.kind = cmo::ItemKind::Command;
+        terminal.action = cmo::ActionKind::ShellVerb;
+        terminal.label = L"Open in Terminal";
+        terminal.canonicalVerb = L"{9F156763-7844-4DC4-B2B1-901F640F5155}";
+        CHECK(cmo::MatchesAnyToken(terminal, {L"openterminal"}));
+        CHECK(cmo::MatchesAnyToken(
+            terminal, {L"{9F156763-7844-4DC4-B2B1-901F640F5155}"}));
+        CHECK(cmo::MatchesAnyToken(terminal, {L"Open in Terminal"}));
+        CHECK(!cmo::MatchesAnyToken(terminal, {L"editwithphotos"}));
+        CHECK(cmo::IsBuiltinExtra(terminal, {L"openterminal"}));
+    }
+
     // SFGAO_FOLDER alone isn't "directory": .zip files and folder shortcuts
     // report it too; only a real directory has it without SFGAO_STREAM.
     CHECK(cmo::IsFolderAttributes(SFGAO_FOLDER));

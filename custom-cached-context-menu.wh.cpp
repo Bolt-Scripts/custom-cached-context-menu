@@ -71,7 +71,7 @@ and discovers extension items in the background, so repeated opens are instant.
 | Move third-party handlers | on | Moves third-party shell extension entries into the More options submenu. |
 | Keep in the main menu | empty | Comma-separated labels or verbs that stay in the main menu. |
 | More options submenu label | `More options` | Label of that submenu. |
-| Windows items to move | common list | Comma-separated labels or verbs of Windows items to move into the submenu. Verbs (e.g. `setdesktopwallpaper`) match on every language; labels match the menu's display language. |
+| Windows items to move | common list | Comma-separated labels or verbs of Windows items to move into the submenu. Verbs (e.g. `setdesktopwallpaper`) match on every language; labels match the menu's display language. GUID-verb commands accept aliases: `openterminal`, `editwithphotos`, `editwithpaint`, `editwithnotepad`. |
 | Settings hotkey | empty | Optional global hotkey that opens the settings menu (for example `Ctrl+Alt+M`). |
 
 ## Configuration
@@ -163,9 +163,9 @@ MIT
 - advancedSubmenuThirdParty: true
   $name: Move third-party handlers
   $description: Move third-party shell extension entries into the More options submenu.
-- advancedSubmenuItems: "Windows.ModernShare, pintohomefile, casttodevice, Give access to, PreviousVersions, pintostartscreen, pintohome, {9F156763-7844-4DC4-B2B1-901F640F5155}, setdesktopwallpaper"
+- advancedSubmenuItems: "Windows.ModernShare, pintohomefile, casttodevice, Give access to, PreviousVersions, pintostartscreen, pintohome, openterminal, setdesktopwallpaper"
   $name: Windows items to move
-  $description: Comma-separated labels or verbs of Windows items to move into the submenu. Verbs (for example setdesktopwallpaper) match on every language; labels match the menu's display language.
+  $description: Comma-separated labels or verbs of Windows items to move into the submenu. Verbs (for example setdesktopwallpaper) match on every language; labels match the menu's display language. GUID-verb commands also accept the aliases openterminal, editwithphotos, editwithpaint and editwithnotepad.
 - advancedSubmenuExclude: ""
   $name: Keep in the main menu
   $description: Comma-separated third-party labels or verbs that stay in the main menu instead of moving into the submenu.
@@ -780,13 +780,39 @@ bool IsKnownWindowsVerb(const std::wstring& verb) {
     return false;
 }
 
+// Friendly aliases for Windows' modern shell commands, whose canonical verbs
+// are class GUIDs. They work wherever labels or verbs are accepted.
+struct VerbAlias {
+    const wchar_t* alias;
+    const wchar_t* verb;
+};
+
+constexpr VerbAlias kVerbAliases[] = {
+    {L"openterminal", L"{9F156763-7844-4DC4-B2B1-901F640F5155}"},
+    {L"editwithphotos", L"{BFE0E2A4-C70C-4AD7-AC3D-10D1ECEBB5B4}"},
+    {L"editwithpaint", L"{2430F218-B743-4FD6-97BF-5C76541B4AE9}"},
+    {L"editwithnotepad", L"{CA6CC9F1-867A-481E-951E-A28C5E4F01EA}"},
+};
+
+// Resolves a token that names a known alias to its canonical verb; returns the
+// token unchanged when it is not an alias.
+std::wstring ResolveVerbAlias(const std::wstring& token) {
+    for (const VerbAlias& alias : kVerbAliases) {
+        if (_wcsicmp(alias.alias, token.c_str()) == 0) {
+            return alias.verb;
+        }
+    }
+    return token;
+}
+
 // Windows extras (configured list or a known Windows verb) sort above
 // third-party handlers inside the More options submenu.
 bool IsBuiltinExtra(const MenuItem& item,
                     const std::vector<std::wstring>& windowsItems) {
     for (const std::wstring& token : windowsItems) {
         if (LabelsMatchIgnoreCase(item.label, token) ||
-            EqualsIgnoreCase(item.canonicalVerb, token)) {
+            EqualsIgnoreCase(item.canonicalVerb, token) ||
+            EqualsIgnoreCase(item.canonicalVerb, ResolveVerbAlias(token))) {
             return true;
         }
     }
@@ -4560,7 +4586,8 @@ bool MatchesAnyToken(const MenuItem& item,
                      const std::vector<std::wstring>& tokens) {
     for (const std::wstring& token : tokens) {
         if (LabelsMatchIgnoreCase(item.label, token) ||
-            EqualsIgnoreCase(item.canonicalVerb, token)) {
+            EqualsIgnoreCase(item.canonicalVerb, token) ||
+            EqualsIgnoreCase(item.canonicalVerb, ResolveVerbAlias(token))) {
             return true;
         }
     }

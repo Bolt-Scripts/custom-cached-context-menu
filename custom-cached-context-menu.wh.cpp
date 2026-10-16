@@ -60,6 +60,7 @@ and discovers extension items in the background, so repeated opens are instant.
 | Menu mode | Custom (recommended) | Custom draws the self-rendered menu and falls back to the classic menu after repeated failures; Classic always uses the owner-drawn menu. |
 | Theme | Custom (menu.ini) | Loads the appearance from `<mod storage>\themes\<name>.ini` (created from the bundled preset on first use). `menu.ini` is never modified by theme selection. |
 | Show classic menu item | on | Adds a "Show classic menu" entry at the bottom of the menu. |
+| Top action bar | off | Moves Cut, Copy, Paste, Rename and Delete into an icon bar on the side of the menu nearest the cursor, like the Windows 11 menu. |
 | Warm-up extensions | common list | Comma-separated file types pre-built at Explorer startup. |
 | Warm-up delay | 5 s | Delay before background warm-up starts. |
 | Clear cache | off | Turn on to delete cached models; they rebuild on next use. |
@@ -150,6 +151,9 @@ MIT
 - showMoreOptionsItem: true
   $name: Show classic menu item
   $description: Add a "Show classic menu" entry at the bottom of the replacement menu.
+- topBar: false
+  $name: Top action bar
+  $description: Moves Cut, Copy, Paste, Rename and Delete into an icon bar on the side of the menu nearest the cursor, like the Windows 11 menu.
 - submenuDelayMs: 150
   $name: Submenu open delay
   $description: Milliseconds before a hovered submenu opens while the replacement menu is shown. 0 opens instantly; -1 keeps the Windows setting.
@@ -265,6 +269,7 @@ struct Settings {
     std::wstring settingsHotkey;
     int menuMode = 0;
     bool showMoreOptionsItem = true;
+    bool topBar = false;
     int submenuDelayMs = 150;
     int warmupDelaySeconds = 5;
     bool clearCache = false;
@@ -395,6 +400,7 @@ void LoadSettings() {
     next.menuMode = _wcsicmp(menuMode.get(), L"classic") == 0 ? 1 : 0;
 
     next.showMoreOptionsItem = Wh_GetIntSetting(L"showMoreOptionsItem") != 0;
+    next.topBar = Wh_GetIntSetting(L"topBar") != 0;
     next.submenuDelayMs = Wh_GetIntSetting(L"submenuDelayMs");
     next.warmupDelaySeconds = Wh_GetIntSetting(L"warmupDelaySeconds");
     next.clearCache = Wh_GetIntSetting(L"clearCache") != 0;
@@ -557,6 +563,7 @@ enum ModelFlags : uint32_t {
     kModelHasOffset = 1u << 7,
     kModelWarmup = 1u << 8,
     kModelThirdParty = 1u << 9,
+    kModelTopBar = 1u << 10,
 };
 
 // Settings-UI controls attached to menu items. ControlKind::None is an
@@ -605,6 +612,8 @@ struct MenuItem {
     // Transient display overrides (not serialized): per-item label and marker.
     std::wstring displayLabel;
     int markerOverride = -1;
+    // Top action bar position: index in the fixed bar order, -1 for list items.
+    int topBarOrder = -1;
     // Built-in action for ActionKind::Builtin.
     BuiltinAction builtinAction = BuiltinAction::None;
     // Sort/group field index into kShellPropertyKeys, and sort direction.
@@ -687,6 +696,39 @@ void PruneMenuItems(std::vector<MenuItem>& items) {
         }
         return item.kind == ItemKind::Submenu && item.children.empty();
     });
+}
+
+// Common actions that Windows' own menu shows as an icon bar on the side
+// nearest the cursor. The order here is the bar's left-to-right order.
+constexpr const wchar_t* kTopBarVerbs[] = {
+    L"cut", L"copy", L"paste", L"rename", L"delete"};
+
+// Marks the top-level items that belong in the top action bar. Disabled
+// actions stay in the list (the Windows 11 menu hides them from the bar).
+// Idempotent: clears previous marks first.
+void MarkTopBarActions(std::vector<MenuItem>& items, bool enabled) {
+    for (MenuItem& item : items) {
+        item.flags &= ~kModelTopBar;
+        item.topBarOrder = -1;
+    }
+    if (!enabled) {
+        return;
+    }
+    for (size_t i = 0; i < ARRAYSIZE(kTopBarVerbs); ++i) {
+        for (MenuItem& item : items) {
+            if (item.kind != ItemKind::Command ||
+                (item.flags & kModelDisabled) != 0 ||
+                item.canonicalVerb.empty()) {
+                continue;
+            }
+            if (_wcsicmp(item.canonicalVerb.c_str(), kTopBarVerbs[i]) != 0) {
+                continue;
+            }
+            item.flags |= kModelTopBar;
+            item.topBarOrder = static_cast<int>(i);
+            break;
+        }
+    }
 }
 
 bool EqualsIgnoreCase(const std::wstring& left, const std::wstring& right) {
@@ -6606,6 +6648,7 @@ struct LayoutItemResources {
 
 struct LayoutItem {
     RECT rect = {};
+    bool topBarCell = false;
     RECT gutterRect = {};
     RECT markerRect = {};
     RECT iconRect = {};
@@ -6693,14 +6736,59 @@ inline int ContentSideInset(const LayoutMetrics& metrics) {
     return metrics.padding + metrics.markerWidth + metrics.padding / 2;
 }
 
+void FillInvocation(const MenuItem& item, LayoutItem& layout) {
+    layout.invocation.id = item.id;
+    layout.invocation.action = item.action;
+    layout.invocation.viewAction = item.viewAction;
+    layout.invocation.verbOffset = item.verbOffset;
+    layout.invocation.sortIndex = item.sortIndex;
+    layout.invocation.customCommandIndex = item.customCommandIndex;
+    layout.invocation.newIndex = item.newIndex;
+    layout.invocation.canonicalVerb = item.canonicalVerb;
+    layout.invocation.targetPath = item.targetPath;
+    layout.invocation.hasOffset = (item.flags & kModelHasOffset) != 0;
+}
+
 LayoutPanel BuildLayoutPanel(const std::vector<MenuItem>& items,
                              const LayoutMetrics& metrics,
-                             TextMeasureFn measure = nullptr) {
+                             TextMeasureFn measure = nullptr,
+                             bool barAtBottom = false) {
     LayoutPanel panel;
     const int markerLeft = metrics.itemPadding;
     const int iconLeft = ContentSideInset(metrics);
     const int rightInset = iconLeft;
     const int textLeft = iconLeft + metrics.iconSize + metrics.padding;
+
+    // Top action bar items get their own row; the list skips them and
+    // collapses the separators they leave behind.
+    std::vector<const MenuItem*> barItems;
+    std::vector<const MenuItem*> listItems;
+    for (const MenuItem& item : items) {
+        if ((item.flags & kModelTopBar) != 0) {
+            barItems.push_back(&item);
+            continue;
+        }
+        if (item.kind == ItemKind::Separator &&
+            (listItems.empty() ||
+             listItems.back()->kind == ItemKind::Separator)) {
+            continue;
+        }
+        listItems.push_back(&item);
+    }
+    while (!listItems.empty() &&
+           listItems.back()->kind == ItemKind::Separator) {
+        listItems.pop_back();
+    }
+    std::stable_sort(barItems.begin(), barItems.end(),
+                     [](const MenuItem* left, const MenuItem* right) {
+                         return left->topBarOrder < right->topBarOrder;
+                     });
+    const bool hasBar = !barItems.empty();
+    const int barTextHeight = static_cast<int>(metrics.fontSize * 1.4f) + 1;
+    const int barHeight = metrics.verticalPadding + metrics.iconSize + 4 +
+                          barTextHeight + metrics.verticalPadding;
+    const int separatorRow =
+        metrics.separatorHeight + 2 * metrics.separatorSpacing;
 
     auto measureText = [&](const std::wstring& text) {
         return text.empty()
@@ -6745,9 +6833,18 @@ LayoutPanel BuildLayoutPanel(const std::vector<MenuItem>& items,
         return metrics.itemHeight;
     };
 
-    int y = metrics.verticalPadding;
+    int rowsHeight = 0;
     int contentWidth = 0;
-    for (const MenuItem& item : items) {
+    for (const MenuItem* item : barItems) {
+        const std::wstring& measureLabel =
+            item->displayLabel.empty() ? item->label : item->displayLabel;
+        contentWidth =
+            std::max(contentWidth,
+                     std::max(measureText(measureLabel), metrics.iconSize) +
+                         2 * metrics.padding);
+    }
+    for (const MenuItem* itemPtr : listItems) {
+        const MenuItem& item = *itemPtr;
         const int height = rowHeight(item);
         if (item.kind != ItemKind::Separator) {
             const std::wstring& measureLabel =
@@ -6762,7 +6859,7 @@ LayoutPanel BuildLayoutPanel(const std::vector<MenuItem>& items,
                 std::max(contentWidth, textLeft + textWidth + arrowSpace +
                                            labelGap + reserve + rightInset);
         }
-        y += height;
+        rowsHeight += height;
     }
     int panelWidth = std::max(contentWidth, 80);
     if (metrics.minWidth > 0) {
@@ -6773,10 +6870,70 @@ LayoutPanel BuildLayoutPanel(const std::vector<MenuItem>& items,
         panelWidth =
             std::min(panelWidth, std::max(metrics.maxWidth, contentWidth));
     }
-    panel.size = {panelWidth, y + metrics.verticalPadding};
+    int panelHeight =
+        metrics.verticalPadding + rowsHeight + metrics.verticalPadding;
+    if (hasBar) {
+        // The bar replaces the padding on its side; a separator divides it
+        // from the list. Both sides give the same total height.
+        panelHeight = barHeight +
+                      (listItems.empty() ? 0 : separatorRow) + rowsHeight +
+                      metrics.verticalPadding;
+    }
+    panel.size = {panelWidth, panelHeight};
+
+    auto appendTopBar = [&](int top) {
+        const int count = static_cast<int>(barItems.size());
+        const int cellWidth = panelWidth / count;
+        for (int i = 0; i < count; ++i) {
+            const MenuItem& item = *barItems[i];
+            const int left = i * cellWidth;
+            const int right =
+                i + 1 == count ? panelWidth : (i + 1) * cellWidth;
+            LayoutItem cell{};
+            cell.topBarCell = true;
+            cell.kind = item.kind;
+            cell.label =
+                item.displayLabel.empty() ? item.label : item.displayLabel;
+            cell.iconRef = item.iconRef;
+            cell.iconPixels = item.iconPixels;
+            cell.flags = item.flags;
+            cell.textColor = (item.flags & kModelDisabled)
+                                 ? metrics.disabledTextColor
+                                 : metrics.textColor;
+            cell.hoverTextColor = metrics.textColor;
+            cell.markerStyle = static_cast<int>(MarkerStyle::None);
+            FillInvocation(item, cell);
+            cell.rect = {left, top, right, top + barHeight};
+            const int iconX = left + (right - left - metrics.iconSize) / 2;
+            const int iconY = top + metrics.verticalPadding;
+            cell.iconRect = {iconX, iconY, iconX + metrics.iconSize,
+                             iconY + metrics.iconSize};
+            const int textWidth = measureText(cell.label);
+            const int textX = left + (right - left - textWidth) / 2;
+            const int textY = iconY + metrics.iconSize + 4;
+            cell.textRect = {textX, textY, textX + textWidth,
+                             textY + barTextHeight};
+            panel.items.push_back(std::move(cell));
+        }
+    };
+    auto appendSeparatorRow = [&](int top) {
+        LayoutItem separator{};
+        separator.kind = ItemKind::Separator;
+        separator.rect = {0, top, panelWidth, top + separatorRow};
+        panel.items.push_back(std::move(separator));
+    };
 
     int offset = metrics.verticalPadding;
-    for (const MenuItem& item : items) {
+    if (hasBar && !barAtBottom) {
+        appendTopBar(0);
+        offset = barHeight;
+        if (!listItems.empty()) {
+            appendSeparatorRow(offset);
+            offset += separatorRow;
+        }
+    }
+    for (const MenuItem* itemPtr : listItems) {
+        const MenuItem& item = *itemPtr;
         LayoutItem layout{};
         layout.kind = item.kind;
         layout.label = item.displayLabel.empty() ? item.label : item.displayLabel;
@@ -6786,16 +6943,7 @@ LayoutPanel BuildLayoutPanel(const std::vector<MenuItem>& items,
         layout.textColor = (item.flags & kModelDisabled) ? metrics.disabledTextColor
                                                          : metrics.textColor;
         layout.hoverTextColor = metrics.textColor;
-        layout.invocation.id = item.id;
-        layout.invocation.action = item.action;
-        layout.invocation.viewAction = item.viewAction;
-        layout.invocation.verbOffset = item.verbOffset;
-        layout.invocation.sortIndex = item.sortIndex;
-        layout.invocation.customCommandIndex = item.customCommandIndex;
-        layout.invocation.newIndex = item.newIndex;
-        layout.invocation.canonicalVerb = item.canonicalVerb;
-        layout.invocation.targetPath = item.targetPath;
-        layout.invocation.hasOffset = (item.flags & kModelHasOffset) != 0;
+        FillInvocation(item, layout);
 
         const int height = rowHeight(item);
         layout.rect = {0, offset, panel.size.cx, offset + height};
@@ -6888,6 +7036,14 @@ LayoutPanel BuildLayoutPanel(const std::vector<MenuItem>& items,
         }
         panel.items.push_back(std::move(layout));
         offset += height;
+    }
+    if (hasBar && barAtBottom) {
+        if (!listItems.empty()) {
+            appendSeparatorRow(offset);
+            offset += separatorRow;
+        }
+        appendTopBar(offset);
+        offset += barHeight;
     }
     return panel;
 }
@@ -7136,6 +7292,7 @@ struct LayoutKey {
     uint64_t themeRevision = 0;
     uint32_t dpi = 96;
     bool darkTheme = false;
+    bool topBarAtBottom = false;
     uint64_t modelFingerprint = 0;
 
     bool operator==(const LayoutKey&) const = default;
@@ -7147,6 +7304,7 @@ struct LayoutKey {
         hash = HashCombine(hash, themeRevision);
         hash = HashCombine(hash, dpi);
         hash = HashCombine(hash, darkTheme ? 1 : 0);
+        hash = HashCombine(hash, topBarAtBottom ? 1 : 0);
         hash = HashCombine(hash, modelFingerprint);
         return hash;
     }
@@ -10136,6 +10294,12 @@ int MenuStateItemAt(const LayoutPanel& panel, const MenuInputState& state,
     for (size_t i = 0; i < panel.items.size(); ++i) {
         const LayoutItem& item = panel.items[i];
         if (clientPoint.y >= item.rect.top && clientPoint.y < item.rect.bottom) {
+            if (item.topBarCell &&
+                (clientPoint.x < item.rect.left ||
+                 clientPoint.x >= item.rect.right)) {
+                // Bar cells share one row; pick the one under the cursor.
+                continue;
+            }
             if (!MenuItemIsSelectable(item)) {
                 return -1;
             }
@@ -12259,6 +12423,50 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
         return result;
     }
 
+    const RECT workArea = WorkAreaForPoint(pt);
+    POINT panelPos = ClampPanelPosition(pt, panel->size, workArea);
+    // The top action bar sits on the side nearest the cursor: normally the
+    // top, but the bottom when the menu is pushed up by the screen edge.
+    // Both variants share the same size, so the position stays valid.
+    if (!settings &&
+        ((pt.y - panelPos.y) > panel->size.cy / 2) != key.topBarAtBottom) {
+        bool hasBarCells = false;
+        for (const LayoutItem& item : panel->items) {
+            if (item.topBarCell) {
+                hasBarCells = true;
+                break;
+            }
+        }
+        if (hasBarCells) {
+            LayoutKey altKey = key;
+            altKey.topBarAtBottom = !key.topBarAtBottom;
+            std::shared_ptr<const LayoutPanel> altPanel =
+                g_layoutCache->Find(altKey);
+            if (!altPanel) {
+                auto built = std::make_shared<LayoutPanel>(BuildLayoutPanel(
+                    model.items, metrics, &MeasureTextWidthDirectWrite,
+                    altKey.topBarAtBottom));
+                bool bound = false;
+                ID2D1DeviceContext* bindDc = nullptr;
+                if (SUCCEEDED(g_renderDevice.D2DDevice()->CreateDeviceContext(
+                        D2D1_DEVICE_CONTEXT_OPTIONS_NONE, &bindDc)) &&
+                    bindDc) {
+                    g_contentCaches->Bind(*built, metrics, bindDc);
+                    bindDc->Release();
+                    bound = true;
+                }
+                if (bound) {
+                    g_layoutCache->Put(altKey, built);
+                }
+                altPanel = built;
+            }
+            if (altPanel) {
+                panel = altPanel;
+                panelPos = ClampPanelPosition(pt, panel->size, workArea);
+            }
+        }
+    }
+
     MenuWindow* root = g_menuWindowSet->Acquire();
     const int margin =
         appearance.shadow && (metrics.shadowSize > 0 || metrics.shadowBlur > 0)
@@ -12273,8 +12481,6 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
         return result;
     }
 
-    const RECT workArea = WorkAreaForPoint(pt);
-    const POINT panelPos = ClampPanelPosition(pt, panel->size, workArea);
     if (settings) {
         settings->panelOrigin = panelPos;
     }
@@ -12714,6 +12920,7 @@ void OpenSettingsMenu(HWND owner, POINT pt, bool activate = false) {
         {L"Menu mode", g_settings->menuMode == 0 ? L"Custom" : L"Classic"},
         {L"Show classic menu item",
          g_settings->showMoreOptionsItem ? L"on" : L"off"},
+        {L"Top action bar", g_settings->topBar ? L"on" : L"off"},
         {L"Submenu delay",
          std::to_wstring(g_settings->submenuDelayMs) + L" ms"},
         {L"Bypass keys", g_settings->enableShiftBypass ? L"on" : L"off"},
@@ -19026,6 +19233,7 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
         if (scope == Scope::Background || scope == Scope::Desktop) {
             ApplyViewStateChecks(model.items, owner, kind);
         }
+        MarkTopBarActions(model.items, g_settings->topBar);
         if (g_settings->debugLogging) Wh_Log(L"Menu prep: %llu ms",
                static_cast<unsigned long long>(g_perf.OpenPathElapsedMs()));
 

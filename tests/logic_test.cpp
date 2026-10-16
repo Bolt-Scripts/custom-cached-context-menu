@@ -4525,6 +4525,132 @@ int main() {
                  0);
     }
 
+    // Top action bar: marking, layout and side.
+    {
+        auto makeItem = [](uint32_t id, const wchar_t* verb, const wchar_t* label,
+                           uint32_t flags = cmo::kModelNone) {
+            cmo::MenuItem item{};
+            item.id = id;
+            item.kind = cmo::ItemKind::Command;
+            item.action = cmo::ActionKind::ShellVerb;
+            item.canonicalVerb = verb;
+            item.label = label;
+            item.flags = flags;
+            return item;
+        };
+
+        // Marking: enabled matches only, in the fixed verb order.
+        std::vector<cmo::MenuItem> marked = {
+            makeItem(1, L"open", L"Open"),
+            makeItem(2, L"cut", L"Cut"),
+            makeItem(3, L"copy", L"Copy"),
+            makeItem(4, L"rename", L"Rename", cmo::kModelDisabled),
+            makeItem(5, L"delete", L"Delete"),
+            makeItem(6, L"paste", L"Paste"),
+        };
+        cmo::MarkTopBarActions(marked, true);
+        CHECK((marked[1].flags & cmo::kModelTopBar) != 0);
+        CHECK_EQ(marked[1].topBarOrder, 0);
+        CHECK((marked[2].flags & cmo::kModelTopBar) != 0);
+        CHECK_EQ(marked[2].topBarOrder, 1);
+        CHECK((marked[3].flags & cmo::kModelTopBar) == 0);  // disabled: hidden
+        CHECK((marked[4].flags & cmo::kModelTopBar) != 0);
+        CHECK_EQ(marked[4].topBarOrder, 4);
+        CHECK((marked[5].flags & cmo::kModelTopBar) != 0);
+        CHECK_EQ(marked[5].topBarOrder, 2);
+        CHECK((marked[0].flags & cmo::kModelTopBar) == 0);
+
+        cmo::MarkTopBarActions(marked, false);
+        for (const cmo::MenuItem& item : marked) {
+            CHECK((item.flags & cmo::kModelTopBar) == 0);
+            CHECK_EQ(item.topBarOrder, -1);
+        }
+
+        // Layout: cells on the near side, list keeps its order, separators
+        // around the moved items collapse.
+        cmo::LayoutMetrics m{};
+        m.itemHeight = 28;
+        m.padding = 4;
+        m.itemPadding = 4;
+        m.markerWidth = 14;
+        m.iconSize = 16;
+        m.verticalPadding = 4;
+        m.submenuArrowWidth = 16;
+        auto makeSeparator = [](uint32_t id) {
+            cmo::MenuItem item{};
+            item.id = id;
+            item.kind = cmo::ItemKind::Separator;
+            return item;
+        };
+        std::vector<cmo::MenuItem> items = {
+            makeItem(1, L"open", L"Open"),
+            makeSeparator(2),
+            makeItem(3, L"cut", L"Cut"),
+            makeItem(4, L"copy", L"Copy"),
+            makeSeparator(5),
+            makeItem(6, L"delete", L"Delete"),
+            makeItem(7, L"properties", L"Properties"),
+        };
+        cmo::MarkTopBarActions(items, true);
+
+        const cmo::LayoutPanel top = cmo::BuildLayoutPanel(items, m, nullptr);
+        int cells = 0;
+        int listRows = 0;
+        int separators = 0;
+        bool cellsAtTop = true;
+        for (const cmo::LayoutItem& it : top.items) {
+            if (it.topBarCell) {
+                ++cells;
+                if (it.rect.top != 0) cellsAtTop = false;
+            } else if (it.kind == cmo::ItemKind::Separator) {
+                ++separators;
+            } else {
+                ++listRows;
+            }
+        }
+        CHECK_EQ(cells, 3);
+        CHECK_EQ(listRows, 2);
+        // The synthetic bar divider plus one collapsed list separator (the
+        // two separators around the moved items merge into one).
+        CHECK_EQ(separators, 2);
+        CHECK(cellsAtTop);
+        // Cells follow the fixed order: Cut, Copy, Delete.
+        int cutLeft = -1, copyLeft = -1, deleteLeft = -1;
+        for (const cmo::LayoutItem& it : top.items) {
+            if (!it.topBarCell) continue;
+            if (it.invocation.id == 3) cutLeft = it.rect.left;
+            if (it.invocation.id == 4) copyLeft = it.rect.left;
+            if (it.invocation.id == 6) deleteLeft = it.rect.left;
+        }
+        CHECK(cutLeft >= 0 && cutLeft < copyLeft && copyLeft < deleteLeft);
+
+        // Cells in the same row are distinguished by x.
+        cmo::MenuInputState inputState{};
+        int copyIndex = -1;
+        for (size_t i = 0; i < top.items.size(); ++i) {
+            if (top.items[i].topBarCell && top.items[i].invocation.id == 4) {
+                copyIndex = static_cast<int>(i);
+            }
+        }
+        CHECK(copyIndex >= 0);
+        const cmo::LayoutItem& copyCell = top.items[copyIndex];
+        const POINT copyCenter = {
+            (copyCell.rect.left + copyCell.rect.right) / 2,
+            (copyCell.rect.top + copyCell.rect.bottom) / 2};
+        CHECK_EQ(cmo::MenuStateItemAt(top, inputState, copyCenter), copyIndex);
+
+        const cmo::LayoutPanel bottom =
+            cmo::BuildLayoutPanel(items, m, nullptr, /*barAtBottom=*/true);
+        CHECK_EQ(static_cast<int>(top.size.cy), static_cast<int>(bottom.size.cy));
+        bool cellsAtBottom = true;
+        for (const cmo::LayoutItem& it : bottom.items) {
+            if (it.topBarCell && it.rect.bottom != bottom.size.cy) {
+                cellsAtBottom = false;
+            }
+        }
+        CHECK(cellsAtBottom);
+    }
+
     {
         cmo::SettingsWriteState st;
         cmo::SettingsMarkDirty(st, 1000, 400);

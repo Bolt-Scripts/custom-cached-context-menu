@@ -118,23 +118,23 @@ MIT
   $name: Theme
   $description: Loads the appearance from <storage>\themes\<name>.ini (created from the bundled preset on first use). menu.ini is never modified.
   $options:
-  - Custom (menu.ini): Use menu.ini as-is
-  - Windows 11 Dark: Fluent dark with translucent blur
-  - Windows 11 Light: Fluent light with translucent blur
-  - Windows 10 Dark: Flat dark, square corners
-  - Windows 10 Light: Flat light, square corners
-  - Nord: Arctic blue-grey palette
-  - Dracula: Purple and green dark palette
-  - Solarized Dark: Low-contrast teal dark palette
-  - Gruvbox Dark: Warm retro dark palette
-  - One Dark: Atom-style dark palette
-  - Cyberpunk: Neon yellow, cyan, and magenta on near-black
-  - Synthwave: Retro purple and pink with teal accents
-  - Terminal Green: Phosphor terminal green on black
-  - Amber CRT: Amber terminal on black
-  - Tokyo Night: Blue night palette with violet accents
-  - AMOLED Black: True black, no blur or shadow
-  - High Contrast: White on black, thick border
+  - Custom (menu.ini): Custom (menu.ini)
+  - Windows 11 Dark: Windows 11 Dark
+  - Windows 11 Light: Windows 11 Light
+  - Windows 10 Dark: Windows 10 Dark
+  - Windows 10 Light: Windows 10 Light
+  - Nord: Nord
+  - Dracula: Dracula
+  - Solarized Dark: Solarized Dark
+  - Gruvbox Dark: Gruvbox Dark
+  - One Dark: One Dark
+  - Cyberpunk: Cyberpunk
+  - Synthwave: Synthwave
+  - Terminal Green: Terminal Green
+  - Amber CRT: Amber CRT
+  - Tokyo Night: Tokyo Night
+  - AMOLED Black: AMOLED Black
+  - High Contrast: High Contrast
 - menuMode: "custom"
   $name: Menu mode
   $description: Custom draws the self-rendered menu and falls back to the classic menu after repeated failures. Classic always uses the owner-drawn menu.

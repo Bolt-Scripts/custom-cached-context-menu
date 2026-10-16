@@ -3598,6 +3598,9 @@ int main() {
         }
         CHECK(text.find(L"[meta]") != std::wstring::npos);
         CHECK(text.find(L"schemaVersion = 8") != std::wstring::npos);
+        // The tighter default padding and the matching item inset.
+        CHECK(text.find(L"padding = 4") != std::wstring::npos);
+        CHECK(text.find(L"itemPadding = 4") != std::wstring::npos);
         CHECK(text.find(L"[rules]") != std::wstring::npos);
         CHECK(text.find(L"[command ") != std::wstring::npos);
         cmo::RulesConfig config;
@@ -3646,7 +3649,7 @@ int main() {
         CHECK(text.find(L"background = 30, 30, 30, 240") != std::wstring::npos);
         CHECK(text.find(L"; background") == std::wstring::npos);
         CHECK(text.find(L"itemHeight = 28") != std::wstring::npos);
-        CHECK(text.find(L"; itemPadding = 6") != std::wstring::npos);
+        CHECK(text.find(L"; itemPadding = 4") != std::wstring::npos);
         CHECK(text.find(L"unset") != std::wstring::npos);
         cmo::RulesConfig config;
         std::vector<cmo::ConfigParseError> errors;
@@ -3737,7 +3740,7 @@ int main() {
         CHECK(cmo::ReadConfigFile(path, text));
         CHECK(text.find(L"schemaVersion = 8") != std::wstring::npos);
         CHECK(text.find(L"itemHeight = 30") != std::wstring::npos);
-        CHECK(text.find(L"; itemPadding = 6") != std::wstring::npos);
+        CHECK(text.find(L"; itemPadding = 4") != std::wstring::npos);
 
         const std::wstring bad = L"this is not a config";
         CHECK(cmo::WriteConfigFile(path, bad));
@@ -3807,7 +3810,7 @@ int main() {
             L"[appearance]\n[appearance.light]\nitemPadding = nope\n"
             L"cornerRadii = 1, 2, 3\nmarkerColor = nope\n";
         const std::wstring canonical = cmo::CanonicalizeConfig(themed, 3);
-        CHECK(canonical.find(L"\nitemPadding = 6\n") == std::wstring::npos);
+        CHECK(canonical.find(L"\nitemPadding = 4\n") == std::wstring::npos);
         CHECK(canonical.find(L"\ncornerRadii = 2, 4, 6, 8\n") == std::wstring::npos);
         CHECK(canonical.find(L"\nmarkerColor = 255, 255, 255, 255\n") ==
               std::wstring::npos);
@@ -4489,9 +4492,13 @@ int main() {
             cmo::BuildLayoutPanel(submenuRow, m, nullptr);
         const cmo::LayoutItem& submenuItem = submenuPanel.items[0];
         CHECK(submenuItem.controlRect.right <= submenuItem.textRect.right);
+        // Right-aligned content mirrors the icon's left inset.
         CHECK_EQ(submenuItem.controlRect.right,
-                 static_cast<int>(submenuPanel.size.cx) - m.padding -
-                     m.submenuArrowWidth);
+                 static_cast<int>(submenuPanel.size.cx) -
+                     submenuItem.iconRect.left - m.submenuArrowWidth);
+        CHECK_EQ(submenuItem.textRect.right,
+                 static_cast<int>(submenuPanel.size.cx) -
+                     submenuItem.iconRect.left - m.submenuArrowWidth);
 
         std::vector<cmo::MenuItem> swatchRow(1);
         swatchRow[0].label = L"Background";
@@ -4511,6 +4518,8 @@ int main() {
         CHECK_EQ(
             static_cast<int>(p3.items[0].rect.bottom - p3.items[0].rect.top),
             m.itemHeight);
+        CHECK_EQ(p3.items[0].textRect.right,
+                 static_cast<int>(p3.size.cx) - p3.items[0].iconRect.left);
         CHECK_EQ(static_cast<int>(p3.items[0].controlRect.right -
                                   p3.items[0].controlRect.left),
                  0);
@@ -4864,7 +4873,7 @@ int main() {
         out = cmo::CanonicalizeConfigWithOverrides(
             L"", cmo::kConfigSchemaVersion,
             {{L"appearance", L"itemPadding", L"", true}});
-        CHECK(out.find(L"; itemPadding = 6") != std::wstring::npos);
+        CHECK(out.find(L"; itemPadding = 4") != std::wstring::npos);
         out = cmo::CanonicalizeConfigWithOverrides(
             L"", cmo::kConfigSchemaVersion,
             {{L"appearance", L"itemPadding", L"6", false}});

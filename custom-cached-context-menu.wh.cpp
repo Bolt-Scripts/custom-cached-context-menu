@@ -1343,7 +1343,7 @@ struct Appearance {
     float fontSize = 11.0f;
     int itemHeight = 28;
     int iconSize = 16;
-    int padding = 6;
+    int padding = 4;
     uint32_t separator = 0x18FFFFFF;
     uint32_t hoverBackground = 0x14FFFFFF;
     uint32_t pressedBackground = 0x22FFFFFF;
@@ -1916,9 +1916,9 @@ const ConfigSchemaEntry kAppearanceSchema[] = {
      L"Per-corner radii; overrides cornerRadius.", 1, true},
     {L"appearance", L"borderWidth", L"Layout", SettingType::Int, L"1", nullptr, 0, 64,
      L"Border width in pixels (0 hides it).", 1, false},
-    {L"appearance", L"padding", L"Layout", SettingType::Int, L"6", nullptr, 0, 256,
+    {L"appearance", L"padding", L"Layout", SettingType::Int, L"4", nullptr, 0, 256,
      L"Base padding inside the panel.", 1, false},
-    {L"appearance", L"itemPadding", L"Layout", SettingType::Int, L"6", nullptr, 0, 256,
+    {L"appearance", L"itemPadding", L"Layout", SettingType::Int, L"4", nullptr, 0, 256,
      L"Horizontal inset of item content; defaults to padding.", 1, true},
     {L"appearance", L"verticalPadding", L"Layout", SettingType::Int, L"4", nullptr, 0, 256,
      L"Padding above and below the items.", 1, false},
@@ -6460,7 +6460,7 @@ struct LayoutMetrics {
     int itemHeight = 28;
     int separatorHeight = 7;
     int iconSize = 16;
-    int padding = 6;
+    int padding = 4;
     int gutterWidth = 22;
     int submenuArrowWidth = 16;
     int cornerRadius = 8;
@@ -6478,7 +6478,7 @@ struct LayoutMetrics {
     int shadowOffsetY = 4;
     int blurPasses = 2;
     int verticalPadding = 4;
-    int itemPadding = 6;
+    int itemPadding = 4;
     int separatorSpacing = 0;
     int minWidth = 0;
     int maxWidth = 0;
@@ -6687,15 +6687,20 @@ int EstimateTextWidth(const wchar_t* label, size_t length,
            4;
 }
 
+// The icon's left inset, mirrored on the right for right-aligned content
+// (submenu chevrons and control columns) so both sides line up.
+inline int ContentSideInset(const LayoutMetrics& metrics) {
+    return metrics.padding + metrics.markerWidth + metrics.padding / 2;
+}
+
 LayoutPanel BuildLayoutPanel(const std::vector<MenuItem>& items,
                              const LayoutMetrics& metrics,
                              TextMeasureFn measure = nullptr) {
     LayoutPanel panel;
     const int markerLeft = metrics.itemPadding;
-    const int iconLeft =
-        metrics.padding + metrics.markerWidth + metrics.padding / 2;
+    const int iconLeft = ContentSideInset(metrics);
+    const int rightInset = iconLeft;
     const int textLeft = iconLeft + metrics.iconSize + metrics.padding;
-    const int textGap = metrics.padding;
 
     auto measureText = [&](const std::wstring& text) {
         return text.empty()
@@ -6755,7 +6760,7 @@ LayoutPanel BuildLayoutPanel(const std::vector<MenuItem>& items,
             const int labelGap = reserve > 0 ? 12 : 0;
             contentWidth =
                 std::max(contentWidth, textLeft + textWidth + arrowSpace +
-                                           labelGap + reserve + textGap);
+                                           labelGap + reserve + rightInset);
         }
         y += height;
     }
@@ -6810,7 +6815,8 @@ LayoutPanel BuildLayoutPanel(const std::vector<MenuItem>& items,
             const int arrowSpace =
                 item.kind == ItemKind::Submenu ? metrics.submenuArrowWidth : 0;
             layout.textRect = {textLeft, offset,
-                               panel.size.cx - textGap - arrowSpace, offset + height};
+                               panel.size.cx - rightInset - arrowSpace,
+                               offset + height};
         }
 
         if (item.control.kind != ControlKind::None) {
@@ -6823,7 +6829,7 @@ LayoutPanel BuildLayoutPanel(const std::vector<MenuItem>& items,
             // text, swatch, field) left of it so they never overlap.
             const int arrowSpace =
                 item.kind == ItemKind::Submenu ? metrics.submenuArrowWidth : 0;
-            const int controlRight = panel.size.cx - textGap - arrowSpace;
+            const int controlRight = panel.size.cx - rightInset - arrowSpace;
             const int controlLeft = controlRight - reserve;
             layout.controlRect = {controlLeft, offset, controlRight,
                                   offset + height};
@@ -6861,11 +6867,12 @@ LayoutPanel BuildLayoutPanel(const std::vector<MenuItem>& items,
                     int stripLeft = textLeft + labelWidth + 12;
                     const int minBarWidth = 120;
                     stripLeft = std::min(
-                        stripLeft, static_cast<int>(panel.size.cx) - textGap -
+                        stripLeft, static_cast<int>(panel.size.cx) - rightInset -
                                        minBarWidth);
                     stripLeft = std::max(stripLeft, textLeft);
                     layout.areaRect = {stripLeft, offset,
-                                       panel.size.cx - textGap, offset + height};
+                                       panel.size.cx - rightInset,
+                                       offset + height};
                     layout.stripRect = layout.areaRect;
                     break;
                 }
@@ -8733,7 +8740,7 @@ void DrawSubmenuArrow(ID2D1DeviceContext* dc, const LayoutItem& item,
     if (FAILED(dc->CreateSolidColorBrush(ColorFromArgb(color), &brush)) || !brush) {
         return;
     }
-    const float right = static_cast<float>(panelWidth - metrics.padding);
+    const float right = static_cast<float>(panelWidth - ContentSideInset(metrics));
     const float left = right - static_cast<float>(metrics.submenuArrowWidth) * 0.4f;
     const float midY = (static_cast<float>(item.rect.top) +
                         static_cast<float>(item.rect.bottom)) / 2.0f;

@@ -100,7 +100,7 @@ rewritten.
 | font | font | `Segoe UI, 11` | face, size (pixels at 96 DPI) |
 | itemHeight | int | `28` | 1–256 px |
 | iconSize | int | `16` | 1–256 px |
-| padding | int | `6` | 0–256 px base padding |
+| padding | int | `4` | 0–256 px base padding |
 | separator | color | `#18FFFFFF` | separator line |
 | hoverBackground | color | `#14FFFFFF` | hovered item |
 | pressedBackground | color | `#22FFFFFF` | pressed item |
@@ -122,7 +122,7 @@ rewritten.
 | verticalPadding | int | `4` | 0–256 px above/below items |
 | minWidth | int | `0` | 0–4096 px (0 = automatic) |
 | maxWidth | int | `0` | 0–4096 px (0 = unlimited) |
-| itemPadding | int | `6` | 0–256 px; defaults to padding |
+| itemPadding | int | `4` | 0–256 px; defaults to padding |
 | separatorSpacing | int | `0` | 0–256 px above/below separators |
 | markerWidth | int | `14` | 0–256 px marker column |
 | fontWeight | enum | `normal` | normal, semibold, bold |

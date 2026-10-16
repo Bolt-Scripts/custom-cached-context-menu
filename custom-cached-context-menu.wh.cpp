@@ -17901,7 +17901,7 @@ private:
     std::unordered_map<std::wstring, HICON> icons_;
 };
 
-inline std::optional<IconCache> g_iconCache{std::in_place};
+CMO_NO_DESTROY inline std::optional<IconCache> g_iconCache{std::in_place};
 
 HBITMAP GetIconBitmapForMenu(const std::wstring& iconRef,
                              const std::vector<uint8_t>& iconPixels, int sizePx) {

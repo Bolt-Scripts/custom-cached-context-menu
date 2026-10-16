@@ -4624,6 +4624,18 @@ int main() {
         }
         CHECK(cutLeft >= 0 && cutLeft < copyLeft && copyLeft < deleteLeft);
 
+        // Cell geometry: the icon keeps a margin from the top edge and the
+        // label (centered by the text layout in an itemHeight-tall box) fits
+        // inside the cell with room below.
+        const int textLine = static_cast<int>(m.fontSize * 1.33f) + 1;
+        for (const cmo::LayoutItem& it : top.items) {
+            if (!it.topBarCell) continue;
+            CHECK(it.iconRect.top - it.rect.top >= 6);
+            const int textCenter = it.textRect.top + m.itemHeight / 2;
+            CHECK(textCenter - textLine / 2 >= it.iconRect.bottom + 2);
+            CHECK(textCenter + textLine / 2 <= it.rect.bottom - 4);
+        }
+
         // Cells in the same row are distinguished by x.
         cmo::MenuInputState inputState{};
         int copyIndex = -1;

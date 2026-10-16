@@ -6784,9 +6784,13 @@ LayoutPanel BuildLayoutPanel(const std::vector<MenuItem>& items,
                          return left->topBarOrder < right->topBarOrder;
                      });
     const bool hasBar = !barItems.empty();
-    const int barTextHeight = static_cast<int>(metrics.fontSize * 1.4f) + 1;
-    const int barHeight = metrics.verticalPadding + metrics.iconSize + 4 +
-                          barTextHeight + metrics.verticalPadding;
+    // The label layout centers the text in a box of metrics.itemHeight, so the
+    // cell reserves the visible line and places the box around it.
+    const int barPad = metrics.verticalPadding + 4;
+    const int barGap = 4;
+    const int barTextLine = static_cast<int>(metrics.fontSize * 1.33f) + 1;
+    const int barHeight =
+        barPad + metrics.iconSize + barGap + barTextLine + barPad;
     const int separatorRow =
         metrics.separatorHeight + 2 * metrics.separatorSpacing;
 
@@ -6905,14 +6909,17 @@ LayoutPanel BuildLayoutPanel(const std::vector<MenuItem>& items,
             FillInvocation(item, cell);
             cell.rect = {left, top, right, top + barHeight};
             const int iconX = left + (right - left - metrics.iconSize) / 2;
-            const int iconY = top + metrics.verticalPadding;
+            const int iconY = top + barPad;
             cell.iconRect = {iconX, iconY, iconX + metrics.iconSize,
                              iconY + metrics.iconSize};
             const int textWidth = measureText(cell.label);
             const int textX = left + (right - left - textWidth) / 2;
-            const int textY = iconY + metrics.iconSize + 4;
+            // Place the box so the centered label sits below the icon.
+            const int textCenter =
+                iconY + metrics.iconSize + barGap + barTextLine / 2;
+            const int textY = textCenter - metrics.itemHeight / 2;
             cell.textRect = {textX, textY, textX + textWidth,
-                             textY + barTextHeight};
+                             textY + metrics.itemHeight};
             panel.items.push_back(std::move(cell));
         }
     };

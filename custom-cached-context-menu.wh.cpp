@@ -2,7 +2,7 @@
 // @id              custom-cached-context-menu
 // @name            Custom Cached Context Menu
 // @description     Instantly-opening cached Explorer context menu that is fully customizable: themes, layout, colors, animations, rules, and custom commands.
-// @version         1.0.1
+// @version         1.1.0
 // @include         explorer.exe
 // @architecture    x86-64
 // @compilerOptions -lole32 -lshlwapi -luuid -lcomctl32 -ladvapi32 -lgdi32 -luxtheme -lversion -ld3d11 -ld2d1 -ldwrite -ldcomp
@@ -6840,7 +6840,7 @@ LayoutPanel BuildLayoutPanel(const std::vector<MenuItem>& items,
     int rowsHeight = 0;
     int contentWidth = 0;
     // The bar's width is the sum of its cells, each with roomy sides.
-    const int barCellPad = metrics.padding * 3 + 4;
+    const int barCellPad = metrics.padding * 2 + 4;
     const int barCellMin = metrics.iconSize * 3 + 8;
     for (const MenuItem* item : barItems) {
         const std::wstring& measureLabel =

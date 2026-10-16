@@ -163,7 +163,7 @@ MIT
 - advancedSubmenuThirdParty: true
   $name: Move third-party handlers
   $description: Move third-party shell extension entries into the More options submenu.
-- advancedSubmenuItems: "Share, Add to Favorites, Cast to Device, Give access to, Restore previous versions, Pin to Start, Pin to Quick access, Open in Terminal"
+- advancedSubmenuItems: "Share, Add to Favorites, Cast to Device, Give access to, Restore previous versions, Pin to Start, Pin to Quick access, Open in Terminal, setdesktopwallpaper"
   $name: Windows items to move
   $description: Comma-separated labels or verbs of Windows items to move into the submenu.
 - advancedSubmenuExclude: ""
@@ -764,7 +764,7 @@ bool IsKnownWindowsVerb(const std::wstring& verb) {
         L"viewlist",   L"viewdetails",   L"pintohome",   L"pintohomefile",
         L"pintostartscreen", L"previousversions", L"windows.modernshare",
         L"casttodevice", L"giveaccess",  L"share",       L"includeinlibrary",
-        L"setdesktopwallpaper",
+        L"setdesktopwallpaper", L"rotate90", L"rotate270",
     };
     for (const wchar_t* known : kVerbs) {
         if (_wcsicmp(verb.c_str(), known) == 0) {

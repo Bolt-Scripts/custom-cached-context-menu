@@ -578,6 +578,8 @@ int main() {
 
     // Windows' own image items must not be swept into the advanced submenu.
     CHECK(cmo::IsKnownWindowsVerb(L"setdesktopwallpaper"));
+    CHECK(cmo::IsKnownWindowsVerb(L"rotate90"));
+    CHECK(cmo::IsKnownWindowsVerb(L"rotate270"));
 
     // SFGAO_FOLDER alone isn't "directory": .zip files and folder shortcuts
     // report it too; only a real directory has it without SFGAO_STREAM.
@@ -4198,6 +4200,10 @@ int main() {
         command.canonicalVerb = L"WinRAR.ExtractHere";
         command.flags = cmo::kModelExtension;
         CHECK(cmo::IsThirdPartyItem(command));
+        command.canonicalVerb = L"rotate90";
+        CHECK(!cmo::IsThirdPartyItem(command));
+        command.canonicalVerb = L"setdesktopwallpaper";
+        CHECK(!cmo::IsThirdPartyItem(command));
     }
 
     {

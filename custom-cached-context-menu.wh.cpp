@@ -16950,7 +16950,18 @@ bool CopyAsPath(const std::vector<std::wstring>& paths) {
 }
 
 bool ClipboardHasFileData() {
-    return IsClipboardFormatAvailable(CF_HDROP) != FALSE;
+    // The OLE clipboard wraps classic clipboard content as well, and it is
+    // the only reliable view of data objects (our own Cut/Copy put the
+    // shell's data object there).
+    IDataObject* data = nullptr;
+    bool has = false;
+    if (SUCCEEDED(OleGetClipboard(&data)) && data) {
+        FORMATETC format = {CF_HDROP, nullptr, DVASPECT_CONTENT, -1,
+                            TYMED_HGLOBAL};
+        has = data->QueryGetData(&format) == S_OK;
+        data->Release();
+    }
+    return has;
 }
 
 // Paste availability: cached state while the clipboard sequence is unchanged,
@@ -16961,35 +16972,51 @@ bool ComputePasteEnabled(DWORD sequenceAtOpen, DWORD currentSequence,
 }
 
 // Reads the clipboard's CF_HDROP file list plus the preferred drop effect
-// (DROPEFFECT_MOVE means the files were cut).
+// (DROPEFFECT_MOVE means the files were cut). The OLE clipboard is used so
+// data objects put there by the shell (or by our own Cut/Copy) are read
+// correctly; classic clipboard content is wrapped by OLE as well.
 bool ReadClipboardFiles(std::vector<std::wstring>& paths, DWORD& dropEffect) {
     paths.clear();
     dropEffect = DROPEFFECT_COPY;
-    if (!OpenClipboard(nullptr)) {
+    IDataObject* data = nullptr;
+    if (FAILED(OleGetClipboard(&data)) || !data) {
         return false;
     }
     bool ok = false;
-    if (HANDLE handle = GetClipboardData(CF_HDROP)) {
-        HDROP drop = static_cast<HDROP>(handle);
-        const UINT count = DragQueryFileW(drop, 0xFFFFFFFF, nullptr, 0);
-        for (UINT i = 0; i < count; ++i) {
-            const UINT length = DragQueryFileW(drop, i, nullptr, 0);
-            std::vector<wchar_t> buffer(static_cast<size_t>(length) + 1);
-            if (DragQueryFileW(drop, i, buffer.data(), length + 1) == length) {
-                paths.emplace_back(buffer.data());
+    FORMATETC format = {CF_HDROP, nullptr, DVASPECT_CONTENT, -1,
+                        TYMED_HGLOBAL};
+    STGMEDIUM medium = {};
+    if (SUCCEEDED(data->GetData(&format, &medium))) {
+        if (medium.tymed == TYMED_HGLOBAL && medium.hGlobal) {
+            HDROP drop = static_cast<HDROP>(medium.hGlobal);
+            const UINT count = DragQueryFileW(drop, 0xFFFFFFFF, nullptr, 0);
+            for (UINT i = 0; i < count; ++i) {
+                const UINT length = DragQueryFileW(drop, i, nullptr, 0);
+                std::vector<wchar_t> buffer(static_cast<size_t>(length) + 1);
+                if (DragQueryFileW(drop, i, buffer.data(), length + 1) ==
+                    length) {
+                    paths.emplace_back(buffer.data());
+                }
+            }
+            ok = !paths.empty();
+        }
+        ReleaseStgMedium(&medium);
+    }
+    FORMATETC effectFormat = {
+        static_cast<CLIPFORMAT>(RegisterClipboardFormatW(L"Preferred DropEffect")),
+        nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+    STGMEDIUM effectMedium = {};
+    if (SUCCEEDED(data->GetData(&effectFormat, &effectMedium))) {
+        if (effectMedium.tymed == TYMED_HGLOBAL && effectMedium.hGlobal) {
+            if (const DWORD* effect = static_cast<const DWORD*>(
+                    GlobalLock(effectMedium.hGlobal))) {
+                dropEffect = *effect;
+                GlobalUnlock(effectMedium.hGlobal);
             }
         }
-        ok = !paths.empty();
+        ReleaseStgMedium(&effectMedium);
     }
-    if (HANDLE handle = GetClipboardData(
-            RegisterClipboardFormatW(L"Preferred DropEffect"))) {
-        if (const DWORD* effect =
-                static_cast<const DWORD*>(GlobalLock(handle))) {
-            dropEffect = *effect;
-            GlobalUnlock(handle);
-        }
-    }
-    CloseClipboard();
+    data->Release();
     return ok;
 }
 
@@ -17056,6 +17083,7 @@ bool InvokePaste(const InvocationContext& ctx) {
 
     IShellItem* destination = nullptr;
     bool ok = false;
+    bool queued = false;
     if (SUCCEEDED(SHCreateItemFromParsingName(ctx.directory.c_str(), nullptr,
                                               IID_IShellItem,
                                               reinterpret_cast<void**>(&destination))) &&
@@ -17082,18 +17110,21 @@ bool InvokePaste(const InvocationContext& ctx) {
                      : operation->CopyItem(item, destination, nullptr, nullptr);
             if (FAILED(hr)) {
                 ok = false;
+            } else {
+                queued = true;
             }
             item->Release();
         }
         destination->Release();
     }
-    if (ok) {
-        ok = SUCCEEDED(operation->PerformOperations());
+    if (ok && queued) {
+        const HRESULT hr = operation->PerformOperations();
         BOOL aborted = FALSE;
-        if (ok && SUCCEEDED(operation->GetAnyOperationsAborted(&aborted)) &&
-            aborted) {
-            ok = false;
-        }
+        operation->GetAnyOperationsAborted(&aborted);
+        // A canceled confirmation is the user's answer, so the click is done
+        // either way; only a real failure falls back. Nothing queued (for
+        // example moving onto the same folder) is a completed no-op.
+        ok = SUCCEEDED(hr) || aborted != FALSE;
     }
     operation->Release();
     if (g_settings->debugLogging) {
@@ -17932,12 +17963,78 @@ bool CopySelectionViaView(const InvocationContext& ctx, bool cut) {
     return ok;
 }
 
-// Cut/Copy: the view's own data object when a file view owns the selection;
-// the direct clipboard write covers the tree and any selection that no longer
-// matches.
+// Synthesizes the shortcut Explorer binds to a view command. The owner keeps
+// focus while the menu is open, so the keys reach the view.
+bool SendShortcut(WORD virtualKey, bool control) {
+    INPUT inputs[4] = {};
+    size_t count = 0;
+    if (control) {
+        inputs[count].type = INPUT_KEYBOARD;
+        inputs[count].ki.wVk = VK_CONTROL;
+        ++count;
+    }
+    inputs[count].type = INPUT_KEYBOARD;
+    inputs[count].ki.wVk = virtualKey;
+    ++count;
+    inputs[count].type = INPUT_KEYBOARD;
+    inputs[count].ki.wVk = virtualKey;
+    inputs[count].ki.dwFlags = KEYEVENTF_KEYUP;
+    ++count;
+    if (control) {
+        inputs[count].type = INPUT_KEYBOARD;
+        inputs[count].ki.wVk = VK_CONTROL;
+        inputs[count].ki.dwFlags = KEYEVENTF_KEYUP;
+        ++count;
+    }
+    return SendInput(static_cast<UINT>(count), inputs, sizeof(INPUT)) ==
+           static_cast<UINT>(count);
+}
+
+// A view shortcut is only safe when the view that owns the selection is the
+// foreground window's focused window and no modifier keys are held (the
+// synthetic keys would otherwise combine with the user's own keys).
+bool SendShortcutAllowed(bool foregroundIsOwnerRoot, bool focusInView,
+                         bool shiftDown, bool altDown, bool winDown,
+                         bool ctrlDown) {
+    return foregroundIsOwnerRoot && focusInView && !shiftDown && !altDown &&
+           !winDown && !ctrlDown;
+}
+
+bool ViewReadyForShortcut(HWND owner) {
+    const HWND focus = GetFocus();
+    return SendShortcutAllowed(
+        GetForegroundWindow() == GetAncestor(owner, GA_ROOT),
+        focus && (focus == owner || IsChild(owner, focus)),
+        (GetKeyState(VK_SHIFT) & 0x8000) != 0,
+        (GetKeyState(VK_MENU) & 0x8000) != 0,
+        ((GetKeyState(VK_LWIN) | GetKeyState(VK_RWIN)) & 0x8000) != 0,
+        (GetKeyState(VK_CONTROL) & 0x8000) != 0);
+}
+
+// Cut/Copy: the view's own command when it safely owns the keyboard, so the
+// cut visual appears exactly like the native menu (the view marks its own cut
+// items; clipboard formats alone do not reproduce that). The view's selection
+// data object is the fallback (correct clipboard, no cut visual), and the
+// direct clipboard write covers the tree and unmatched selections.
 bool InvokeCutCopy(const InvocationContext& ctx, bool cut) {
-    if (CopySelectionViaView(ctx, cut)) {
+    const bool viewOwnsSelection = IsFileViewKind(ctx.kind) &&
+                                   !ctx.paths.empty() &&
+                                   ViewSelectionMatches(ctx);
+    if (viewOwnsSelection && ViewReadyForShortcut(ctx.owner) &&
+        SendShortcut(cut ? L'X' : L'C', true)) {
+        if (g_settings->debugLogging) {
+            Wh_Log(L"Cut/Copy: view shortcut");
+        }
         return true;
+    }
+    if (viewOwnsSelection && CopySelectionViaView(ctx, cut)) {
+        if (g_settings->debugLogging) {
+            Wh_Log(L"Cut/Copy: view data object");
+        }
+        return true;
+    }
+    if (g_settings->debugLogging) {
+        Wh_Log(L"Cut/Copy: direct clipboard write");
     }
     return WriteClipboardFiles(ctx.owner, ctx.paths, cut);
 }

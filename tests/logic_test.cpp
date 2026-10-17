@@ -740,6 +740,16 @@ int main() {
     CHECK(cmo::ParentDirectoryOf(L"C:\\b.txt") == L"C:\\");
     CHECK(cmo::ParentDirectoryOf(L"b.txt").empty());
 
+    // View shortcuts are only sent when the view owns the keyboard and no
+    // modifier keys are held.
+    CHECK(cmo::SendShortcutAllowed(true, true, false, false, false, false));
+    CHECK(!cmo::SendShortcutAllowed(false, true, false, false, false, false));
+    CHECK(!cmo::SendShortcutAllowed(true, false, false, false, false, false));
+    CHECK(!cmo::SendShortcutAllowed(true, true, true, false, false, false));
+    CHECK(!cmo::SendShortcutAllowed(true, true, false, true, false, false));
+    CHECK(!cmo::SendShortcutAllowed(true, true, false, false, true, false));
+    CHECK(!cmo::SendShortcutAllowed(true, true, false, false, false, true));
+
     // Delete flags: Shift deletes permanently; recycling follows the Recycle
     // Bin's confirmation setting.
     CHECK(cmo::DeleteOperationFlags(true, false) == 0);

@@ -16956,9 +16956,21 @@ bool ClipboardHasFileData() {
     IDataObject* data = nullptr;
     bool has = false;
     if (SUCCEEDED(OleGetClipboard(&data)) && data) {
-        FORMATETC format = {CF_HDROP, nullptr, DVASPECT_CONTENT, -1,
-                            TYMED_HGLOBAL};
-        has = data->QueryGetData(&format) == S_OK;
+        // Shell formats cover virtual items (for example Outlook
+        // attachments), which have no file system paths.
+        const CLIPFORMAT formats[] = {
+            CF_HDROP,
+            static_cast<CLIPFORMAT>(RegisterClipboardFormatW(L"Shell IDList Array")),
+            static_cast<CLIPFORMAT>(RegisterClipboardFormatW(L"FileGroupDescriptorW")),
+        };
+        for (const CLIPFORMAT format : formats) {
+            FORMATETC formatEtc = {format, nullptr, DVASPECT_CONTENT, -1,
+                                   TYMED_HGLOBAL};
+            if (data->QueryGetData(&formatEtc) == S_OK) {
+                has = true;
+                break;
+            }
+        }
         data->Release();
     }
     return has;
@@ -16969,6 +16981,29 @@ bool ClipboardHasFileData() {
 bool ComputePasteEnabled(DWORD sequenceAtOpen, DWORD currentSequence,
                          bool cachedHadData, bool currentHasData) {
     return sequenceAtOpen == currentSequence ? cachedHadData : currentHasData;
+}
+
+// Reads a data object's preferred drop effect; false when the format is
+// absent (the caller picks the default for its purpose).
+bool ReadPreferredDropEffect(IDataObject* data, DWORD& effect) {
+    FORMATETC format = {
+        static_cast<CLIPFORMAT>(RegisterClipboardFormatW(L"Preferred DropEffect")),
+        nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
+    STGMEDIUM medium = {};
+    if (FAILED(data->GetData(&format, &medium))) {
+        return false;
+    }
+    bool found = false;
+    if (medium.tymed == TYMED_HGLOBAL && medium.hGlobal) {
+        if (const DWORD* value =
+                static_cast<const DWORD*>(GlobalLock(medium.hGlobal))) {
+            effect = *value;
+            GlobalUnlock(medium.hGlobal);
+            found = true;
+        }
+    }
+    ReleaseStgMedium(&medium);
+    return found;
 }
 
 // Reads the clipboard's CF_HDROP file list plus the preferred drop effect
@@ -17002,19 +17037,9 @@ bool ReadClipboardFiles(std::vector<std::wstring>& paths, DWORD& dropEffect) {
         }
         ReleaseStgMedium(&medium);
     }
-    FORMATETC effectFormat = {
-        static_cast<CLIPFORMAT>(RegisterClipboardFormatW(L"Preferred DropEffect")),
-        nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL};
-    STGMEDIUM effectMedium = {};
-    if (SUCCEEDED(data->GetData(&effectFormat, &effectMedium))) {
-        if (effectMedium.tymed == TYMED_HGLOBAL && effectMedium.hGlobal) {
-            if (const DWORD* effect = static_cast<const DWORD*>(
-                    GlobalLock(effectMedium.hGlobal))) {
-                dropEffect = *effect;
-                GlobalUnlock(effectMedium.hGlobal);
-            }
-        }
-        ReleaseStgMedium(&effectMedium);
+    DWORD preferred = 0;
+    if (ReadPreferredDropEffect(data, preferred)) {
+        dropEffect = preferred;
     }
     data->Release();
     return ok;
@@ -17708,20 +17733,35 @@ bool WriteClipboardFiles(HWND owner, const std::vector<std::wstring>& paths,
     return ok;
 }
 
-// Open: a single folder or drive navigates the owner's folder window in
-// place, exactly like the view's own Open command (ShellExecuteEx would leave
-// the window behind and open a new one). A single file keeps the default-verb
-// dispatch; multi-selections stay with the shell, which invokes the handler
-// once for the whole selection.
+// True when the shell treats the item as a container the view can browse
+// into: real folders, drives and archives like .zip files. File attributes
+// would miss archives.
+bool IsShellContainerPath(const std::wstring& path) {
+    IShellItem* item = nullptr;
+    bool container = false;
+    if (SUCCEEDED(SHCreateItemFromParsingName(path.c_str(), nullptr,
+                                              IID_IShellItem,
+                                              reinterpret_cast<void**>(&item))) &&
+        item) {
+        SFGAOF attributes = 0;
+        container = SUCCEEDED(item->GetAttributes(SFGAO_FOLDER, &attributes)) &&
+                    (attributes & SFGAO_FOLDER) != 0;
+        item->Release();
+    }
+    return container;
+}
+
+// Open: a single folder, drive or archive navigates the owner's folder window
+// in place, exactly like the view's own Open command (ShellExecuteEx would
+// leave the window behind and open a new one). A single file keeps the
+// default-verb dispatch; multi-selections stay with the shell, which invokes
+// the handler once for the whole selection.
 bool InvokeOpenPaths(const InvocationContext& ctx) {
     if (ctx.paths.size() != 1) {
         return false;
     }
     const std::wstring& path = ctx.paths.front();
-    const DWORD attributes = GetFileAttributesW(path.c_str());
-    if (attributes != INVALID_FILE_ATTRIBUTES &&
-        (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0 &&
-        ctx.kind == ShellViewKind::ShellDefView) {
+    if (ctx.kind == ShellViewKind::ShellDefView && IsShellContainerPath(path)) {
         IShellBrowser* browser = GetShellBrowserForWindow(ctx.owner);
         if (browser) {
             browser->AddRef();  // borrowed pointer from CWM_GETISHELLBROWSER
@@ -18011,6 +18051,59 @@ bool ViewReadyForShortcut(HWND owner) {
         (GetKeyState(VK_CONTROL) & 0x8000) != 0);
 }
 
+// Runs one of the view's own commands through the view's selection context
+// menu: the same object the view's menu items belong to, so it may mark cut
+// items exactly like the view's own command does, without any synthetic
+// input. Built invoke-only (CMF_OPTIMIZEFORINVOKE), which the hook already
+// passes through.
+bool InvokeViewMenuCommand(const InvocationContext& ctx, const wchar_t* verb) {
+    IShellView* view = GetActiveShellView(ctx.owner, ctx.kind);
+    if (!view) {
+        return false;
+    }
+    IContextMenu* menu = nullptr;
+    HMENU hmenu = CreatePopupMenu();
+    bool invoked = false;
+    if (hmenu &&
+        SUCCEEDED(view->GetItemObject(SVGIO_SELECTION, IID_IContextMenu,
+                                      reinterpret_cast<void**>(&menu))) &&
+        menu) {
+        const ULONGLONG start = GetTickCount64();
+        if (SUCCEEDED(menu->QueryContextMenu(
+                hmenu, 0, 1, 0x7FFF, CMF_NORMAL | CMF_OPTIMIZEFORINVOKE))) {
+            const int count = GetMenuItemCount(hmenu);
+            for (int i = 0; i < count && !invoked; ++i) {
+                const UINT id = GetMenuItemID(hmenu, static_cast<UINT>(i));
+                if (id == 0 || id == static_cast<UINT>(-1)) {
+                    continue;
+                }
+                wchar_t buffer[256] = {};
+                if (SUCCEEDED(menu->GetCommandString(
+                        id - 1, GCS_VERBW, nullptr,
+                        reinterpret_cast<LPSTR>(buffer), ARRAYSIZE(buffer))) &&
+                    _wcsicmp(buffer, verb) == 0) {
+                    MenuItem item{};
+                    item.verbOffset = id - 1;
+                    invoked = InvokeContextItem(menu, item, ctx);
+                }
+            }
+        }
+        if (g_settings->debugLogging) {
+            Wh_Log(L"View menu '%s': invoked=%d after %llu ms", verb,
+                   invoked ? 1 : 0,
+                   static_cast<unsigned long long>(GetTickCount64() - start));
+        }
+    }
+    if (menu) {
+        menu->Release();
+    }
+    if (hmenu) {
+        DestroyMenu(hmenu);
+    }
+    view->Release();
+    return invoked;
+}
+
 // Cut/Copy: the view's own command when it safely owns the keyboard, so the
 // cut visual appears exactly like the native menu (the view marks its own cut
 // items; clipboard formats alone do not reproduce that). The view's selection
@@ -18020,6 +18113,13 @@ bool InvokeCutCopy(const InvocationContext& ctx, bool cut) {
     const bool viewOwnsSelection = IsFileViewKind(ctx.kind) &&
                                    !ctx.paths.empty() &&
                                    ViewSelectionMatches(ctx);
+    if (viewOwnsSelection &&
+        InvokeViewMenuCommand(ctx, cut ? L"cut" : L"copy")) {
+        if (g_settings->debugLogging) {
+            Wh_Log(L"Cut/Copy: view menu");
+        }
+        return true;
+    }
     if (viewOwnsSelection && ViewReadyForShortcut(ctx.owner) &&
         SendShortcut(cut ? L'X' : L'C', true)) {
         if (g_settings->debugLogging) {
@@ -18110,11 +18210,26 @@ bool InvokePasteViaDropTarget(const InvocationContext& ctx) {
     bool ok = false;
     if (SUCCEEDED(OleGetClipboard(&data)) && data) {
         const POINTL point = {ctx.pt.x, ctx.pt.y};
-        DWORD effect = DROPEFFECT_NONE;
+        // DragEnter and Drop take the effects the source allows on input and
+        // return the effect the target chose. The allowed set comes from the
+        // data object's preferred effect; without one, copy and link, so a
+        // drag default can never turn a copy into an implicit move.
+        DWORD allowed = DROPEFFECT_COPY | DROPEFFECT_LINK;
+        DWORD preferred = 0;
+        if (ReadPreferredDropEffect(data, preferred)) {
+            allowed = preferred;
+        }
+        DWORD effect = allowed;
         if (SUCCEEDED(target->DragEnter(data, MK_LBUTTON, point, &effect)) &&
             effect != DROPEFFECT_NONE) {
-            effect = DROPEFFECT_NONE;
+            effect = allowed;
             ok = SUCCEEDED(target->Drop(data, MK_LBUTTON, point, &effect));
+        } else {
+            target->DragLeave();
+        }
+        if (g_settings->debugLogging) {
+            Wh_Log(L"Paste: drop target (allowed=%08X, effect=%08X, ok=%d)",
+                   allowed, effect, ok ? 1 : 0);
         }
     }
     if (data) {

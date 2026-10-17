@@ -13787,11 +13787,15 @@ MenuModel MergeCoreWithCached(const MenuModel& core, const MenuModel& cached) {
                 found = true;
             }
         }
-        if (!found) {
-            insertAt = std::min<size_t>(1, result.items.size());
+        if (found) {
+            result.items.insert(result.items.begin() + insertAt,
+                                addedOpen.begin(), addedOpen.end());
+        } else {
+            // No open group to attach to (for example a background menu):
+            // keep these with the other extras at the bottom of the list
+            // instead of putting them at the very top.
+            added.insert(added.end(), addedOpen.begin(), addedOpen.end());
         }
-        result.items.insert(result.items.begin() + insertAt, addedOpen.begin(),
-                            addedOpen.end());
     }
 
     if (!added.empty()) {

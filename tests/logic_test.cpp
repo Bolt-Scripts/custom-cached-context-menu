@@ -303,6 +303,47 @@ int main() {
     CHECK(separatorCount >= 3);
     CHECK_EQ(mergedModel.items.back().label, std::wstring(L"Show classic menu"));
 
+    // A cached "Open ..." extra in a menu with no open group (for example a
+    // background menu) stays with the other extras at the bottom instead of
+    // jumping to the very top of the list.
+    {
+        cmo::MenuModel core{};
+        cmo::MenuItem view{};
+        view.id = 1;
+        view.kind = cmo::ItemKind::Command;
+        view.action = cmo::ActionKind::ShellVerb;
+        view.label = L"View";
+        core.items.push_back(view);
+        cmo::MenuItem sortBy{};
+        sortBy.id = 2;
+        sortBy.kind = cmo::ItemKind::Submenu;
+        sortBy.action = cmo::ActionKind::Submenu;
+        sortBy.label = L"Sort by";
+        core.items.push_back(sortBy);
+        cmo::MenuItem fallback{};
+        fallback.id = 3;
+        fallback.kind = cmo::ItemKind::Command;
+        fallback.action = cmo::ActionKind::Fallback;
+        fallback.label = L"Show classic menu";
+        core.items.push_back(fallback);
+
+        cmo::MenuModel cached{};
+        cmo::MenuItem terminal{};
+        terminal.id = 10;
+        terminal.kind = cmo::ItemKind::Command;
+        terminal.action = cmo::ActionKind::ShellVerb;
+        terminal.label = L"Open in Terminal";
+        terminal.canonicalVerb = L"{9F156763-7844-4DC4-B2B1-901F640F5155}";
+        cached.items.push_back(terminal);
+
+        const cmo::MenuModel merged = cmo::MergeCoreWithCached(core, cached);
+        CHECK_EQ(merged.items[0].label, std::wstring(L"View"));
+        CHECK_EQ(merged.items[1].label, std::wstring(L"Sort by"));
+        CHECK_EQ(merged.items[2].label, std::wstring(L"Open in Terminal"));
+        CHECK(merged.items[3].kind == cmo::ItemKind::Separator);
+        CHECK_EQ(merged.items[4].label, std::wstring(L"Show classic menu"));
+    }
+
     cmo::MenuItem verbInvoke{};
     verbInvoke.canonicalVerb = L"open";
     verbInvoke.verbOffset = 3;

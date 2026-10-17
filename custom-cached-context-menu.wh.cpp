@@ -18051,59 +18051,6 @@ bool ViewReadyForShortcut(HWND owner) {
         (GetKeyState(VK_CONTROL) & 0x8000) != 0);
 }
 
-// Runs one of the view's own commands through the view's selection context
-// menu: the same object the view's menu items belong to, so it may mark cut
-// items exactly like the view's own command does, without any synthetic
-// input. Built invoke-only (CMF_OPTIMIZEFORINVOKE), which the hook already
-// passes through.
-bool InvokeViewMenuCommand(const InvocationContext& ctx, const wchar_t* verb) {
-    IShellView* view = GetActiveShellView(ctx.owner, ctx.kind);
-    if (!view) {
-        return false;
-    }
-    IContextMenu* menu = nullptr;
-    HMENU hmenu = CreatePopupMenu();
-    bool invoked = false;
-    if (hmenu &&
-        SUCCEEDED(view->GetItemObject(SVGIO_SELECTION, IID_IContextMenu,
-                                      reinterpret_cast<void**>(&menu))) &&
-        menu) {
-        const ULONGLONG start = GetTickCount64();
-        if (SUCCEEDED(menu->QueryContextMenu(
-                hmenu, 0, 1, 0x7FFF, CMF_NORMAL | CMF_OPTIMIZEFORINVOKE))) {
-            const int count = GetMenuItemCount(hmenu);
-            for (int i = 0; i < count && !invoked; ++i) {
-                const UINT id = GetMenuItemID(hmenu, static_cast<UINT>(i));
-                if (id == 0 || id == static_cast<UINT>(-1)) {
-                    continue;
-                }
-                wchar_t buffer[256] = {};
-                if (SUCCEEDED(menu->GetCommandString(
-                        id - 1, GCS_VERBW, nullptr,
-                        reinterpret_cast<LPSTR>(buffer), ARRAYSIZE(buffer))) &&
-                    _wcsicmp(buffer, verb) == 0) {
-                    MenuItem item{};
-                    item.verbOffset = id - 1;
-                    invoked = InvokeContextItem(menu, item, ctx);
-                }
-            }
-        }
-        if (g_settings->debugLogging) {
-            Wh_Log(L"View menu '%s': invoked=%d after %llu ms", verb,
-                   invoked ? 1 : 0,
-                   static_cast<unsigned long long>(GetTickCount64() - start));
-        }
-    }
-    if (menu) {
-        menu->Release();
-    }
-    if (hmenu) {
-        DestroyMenu(hmenu);
-    }
-    view->Release();
-    return invoked;
-}
-
 // Cut/Copy: the view's own command when it safely owns the keyboard, so the
 // cut visual appears exactly like the native menu (the view marks its own cut
 // items; clipboard formats alone do not reproduce that). The view's selection
@@ -18113,13 +18060,6 @@ bool InvokeCutCopy(const InvocationContext& ctx, bool cut) {
     const bool viewOwnsSelection = IsFileViewKind(ctx.kind) &&
                                    !ctx.paths.empty() &&
                                    ViewSelectionMatches(ctx);
-    if (viewOwnsSelection &&
-        InvokeViewMenuCommand(ctx, cut ? L"cut" : L"copy")) {
-        if (g_settings->debugLogging) {
-            Wh_Log(L"Cut/Copy: view menu");
-        }
-        return true;
-    }
     if (viewOwnsSelection && ViewReadyForShortcut(ctx.owner) &&
         SendShortcut(cut ? L'X' : L'C', true)) {
         if (g_settings->debugLogging) {

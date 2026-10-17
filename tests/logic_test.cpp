@@ -652,8 +652,7 @@ int main() {
     CHECK(cmo::ClassifyCoreVerb(L"Copy") == cmo::CoreVerb::Copy);
     CHECK(cmo::ClassifyCoreVerb(L"delete") == cmo::CoreVerb::Delete);
     CHECK(cmo::ClassifyCoreVerb(L"properties") == cmo::CoreVerb::Properties);
-    CHECK(cmo::ClassifyCoreVerb(L"setdesktopwallpaper") ==
-          cmo::CoreVerb::SetDesktopWallpaper);
+    CHECK(cmo::ClassifyCoreVerb(L"setdesktopwallpaper") == cmo::CoreVerb::None);
     CHECK(cmo::ClassifyCoreVerb(L"paste") == cmo::CoreVerb::None);
     CHECK(cmo::ClassifyCoreVerb(L"rotate90") == cmo::CoreVerb::None);
     CHECK(cmo::ClassifyCoreVerb(L"VSCode") == cmo::CoreVerb::None);
@@ -740,6 +739,43 @@ int main() {
     CHECK(cmo::ParentDirectoryOf(L"C:\\a\\b.txt") == L"C:\\a");
     CHECK(cmo::ParentDirectoryOf(L"C:\\b.txt") == L"C:\\");
     CHECK(cmo::ParentDirectoryOf(L"b.txt").empty());
+
+    // Delete flags: Shift deletes permanently; recycling follows the Recycle
+    // Bin's confirmation setting.
+    CHECK(cmo::DeleteOperationFlags(true, false) == 0);
+    CHECK(cmo::DeleteOperationFlags(false, false) == FOF_ALLOWUNDO);
+    CHECK(cmo::DeleteOperationFlags(false, true) ==
+          (FOF_ALLOWUNDO | FOF_NOCONFIRMATION));
+
+    // "Open in new tab" needs the window's browser site, so it keeps the
+    // shell menu path instead of ShellExecuteEx.
+    CHECK(cmo::VerbNeedsBrowserSite(L"opennewtab"));
+    CHECK(cmo::VerbNeedsBrowserSite(L"OpenNewTab"));
+    CHECK(!cmo::VerbNeedsBrowserSite(L"opennew"));
+    CHECK(!cmo::VerbNeedsBrowserSite(L"open"));
+
+    // The appearance variants inherit the canonical section, so the old
+    // default padding migrates there too; explicit values are left alone.
+    {
+        cmo::RulesConfig legacyVariants;
+        std::vector<cmo::ConfigParseError> errors;
+        CHECK(cmo::ParseRulesConfig(
+            L"[appearance]\npadding = 6\n[appearance.light]\nitemHeight = 30\n",
+            legacyVariants, errors));
+        CHECK(legacyVariants.lightAppearance.padding == 4);
+        CHECK(legacyVariants.lightAppearance.itemHeight == 30);
+        cmo::RulesConfig explicitVariant;
+        CHECK(cmo::ParseRulesConfig(
+            L"[appearance]\npadding = 6\n[appearance.light]\npadding = 8\n",
+            explicitVariant, errors));
+        CHECK(explicitVariant.lightAppearance.padding == 8);
+        cmo::RulesConfig currentVariants;
+        CHECK(cmo::ParseRulesConfig(
+            L"[meta]\nschemaVersion = 9\n[appearance]\npadding = 6\n"
+            L"[appearance.dark]\nitemHeight = 30\n",
+            currentVariants, errors));
+        CHECK(currentVariants.darkAppearance.padding == 6);
+    }
 
     // Multi-file Properties needs one parent folder for the data object.
     {
@@ -3843,6 +3879,10 @@ int main() {
         const std::wstring current = cmo::CanonicalizeConfig(
             L"[meta]\nschemaVersion = 9\n[appearance]\npadding = 6\n", 9);
         CHECK(current.find(L"padding = 6") != std::wstring::npos);
+        const std::wstring legacyVariants = cmo::CanonicalizeConfig(
+            L"[appearance]\npadding = 6\n[appearance.light]\npadding = 6\n", 9);
+        CHECK(legacyVariants.find(L"padding = 6") == std::wstring::npos);
+        CHECK(legacyVariants.find(L"padding = 4") != std::wstring::npos);
 
         // Theme files: the old default migrates and the file gains the version
         // header; one already written by v9 keeps its value.

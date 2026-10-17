@@ -2927,12 +2927,23 @@ bool ParseRulesConfig(const std::wstring& text, RulesConfig& out,
         for (const auto& pair : lightValues) {
             ApplyAppearanceValue(config.lightAppearance, pair.first, pair.second, nullptr);
         }
+        // The variant inherits the canonical appearance, so an old default
+        // copied into it must migrate as well; the file rewrite fixes the
+        // stored value and this keeps the first session consistent.
+        if (ShouldMigratePadding(config.schemaVersion,
+                                 config.lightAppearance.padding)) {
+            config.lightAppearance.padding = 4;
+        }
     }
     config.hasDarkAppearance = hasDark;
     if (hasDark) {
         config.darkAppearance = config.appearance;
         for (const auto& pair : darkValues) {
             ApplyAppearanceValue(config.darkAppearance, pair.first, pair.second, nullptr);
+        }
+        if (ShouldMigratePadding(config.schemaVersion,
+                                 config.darkAppearance.padding)) {
+            config.darkAppearance.padding = 4;
         }
     }
 
@@ -3541,11 +3552,17 @@ void MigrateCanonicalSource(CanonicalSource& source, int sourceVersion) {
     if (sourceVersion >= kConfigSchemaVersion) {
         return;
     }
-    const auto it = source.baseValues.find(L"padding");
-    if (it != source.baseValues.end() &&
-        it->second == std::to_wstring(kLegacyDefaultPadding)) {
-        it->second = L"4";
-    }
+    const std::wstring legacy = std::to_wstring(kLegacyDefaultPadding);
+    auto migrate = [&legacy](
+                       std::unordered_map<std::wstring, std::wstring>& values) {
+        const auto it = values.find(L"padding");
+        if (it != values.end() && it->second == legacy) {
+            it->second = L"4";
+        }
+    };
+    migrate(source.baseValues);
+    migrate(source.lightValues);
+    migrate(source.darkValues);
 }
 
 std::wstring CanonicalizeConfig(const std::wstring& text, int toVersion) {
@@ -17436,7 +17453,6 @@ enum class CoreVerb {
     Copy,
     Delete,
     Properties,
-    SetDesktopWallpaper,
 };
 
 CoreVerb ClassifyCoreVerb(const std::wstring& verb) {
@@ -17454,9 +17470,6 @@ CoreVerb ClassifyCoreVerb(const std::wstring& verb) {
     }
     if (EqualsIgnoreCase(verb, L"properties")) {
         return CoreVerb::Properties;
-    }
-    if (EqualsIgnoreCase(verb, L"setdesktopwallpaper")) {
-        return CoreVerb::SetDesktopWallpaper;
     }
     return CoreVerb::None;
 }
@@ -17664,26 +17677,59 @@ bool WriteClipboardFiles(HWND owner, const std::vector<std::wstring>& paths,
     return ok;
 }
 
-// Open: the same default-verb dispatch the shell menu performs, once per
-// path for multi-selections. Unassociated files fall through to the shell
-// path, which shows the picker.
+// Open: a single folder or drive navigates the owner's folder window in
+// place, exactly like the view's own Open command (ShellExecuteEx would leave
+// the window behind and open a new one). A single file keeps the default-verb
+// dispatch; multi-selections stay with the shell, which invokes the handler
+// once for the whole selection.
 bool InvokeOpenPaths(const InvocationContext& ctx) {
-    bool any = false;
-    for (const std::wstring& path : ctx.paths) {
-        SHELLEXECUTEINFOW info = {};
-        info.cbSize = sizeof(info);
-        info.fMask = SEE_MASK_FLAG_NO_UI;
-        info.hwnd = ctx.owner;
-        info.lpVerb = L"open";
-        info.lpFile = path.c_str();
-        info.nShow = SW_SHOWNORMAL;
-        any = ShellExecuteExW(&info) != FALSE || any;
+    if (ctx.paths.size() != 1) {
+        return false;
     }
-    return any;
+    const std::wstring& path = ctx.paths.front();
+    const DWORD attributes = GetFileAttributesW(path.c_str());
+    if (attributes != INVALID_FILE_ATTRIBUTES &&
+        (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0 &&
+        ctx.kind == ShellViewKind::ShellDefView) {
+        IShellBrowser* browser = GetShellBrowserForWindow(ctx.owner);
+        if (browser) {
+            browser->AddRef();  // borrowed pointer from CWM_GETISHELLBROWSER
+            PIDLIST_ABSOLUTE pidl = nullptr;
+            bool navigated = false;
+            if (SUCCEEDED(SHParseDisplayName(path.c_str(), nullptr, &pidl, 0,
+                                             nullptr)) &&
+                pidl) {
+                navigated = SUCCEEDED(browser->BrowseObject(
+                    pidl, SBSP_DEFBROWSER | SBSP_ABSOLUTE));
+                CoTaskMemFree(pidl);
+            }
+            browser->Release();
+            if (navigated) {
+                return true;
+            }
+        }
+    }
+    SHELLEXECUTEINFOW info = {};
+    info.cbSize = sizeof(info);
+    info.fMask = SEE_MASK_FLAG_NO_UI;
+    info.hwnd = ctx.owner;
+    info.lpVerb = L"open";
+    info.lpFile = path.c_str();
+    info.nShow = SW_SHOWNORMAL;
+    return ShellExecuteExW(&info) != FALSE;
 }
 
 // Delete: the modern file operation with recycling, like Explorer's Delete.
 // The confirmation and error UI come from the operation itself.
+// Delete flags: Shift deletes permanently, like the shell's Delete; otherwise
+// items are recycled and the Recycle Bin's confirmation setting is honored.
+DWORD DeleteOperationFlags(bool permanent, bool noConfirmRecycle) {
+    if (permanent) {
+        return 0;  // the shell always warns before a permanent delete
+    }
+    return FOF_ALLOWUNDO | (noConfirmRecycle ? FOF_NOCONFIRMATION : 0);
+}
+
 bool InvokeDeletePaths(const InvocationContext& ctx) {
     if (ctx.paths.empty()) {
         return false;
@@ -17695,7 +17741,11 @@ bool InvokeDeletePaths(const InvocationContext& ctx) {
         !operation) {
         return false;
     }
-    operation->SetOperationFlags(FOF_ALLOWUNDO);
+    SHELLSTATE shellState = {};
+    SHGetSetSettings(&shellState, SSF_NOCONFIRMRECYCLE, FALSE);
+    operation->SetOperationFlags(DeleteOperationFlags(
+        (GetKeyState(VK_SHIFT) & 0x8000) != 0,
+        shellState.fNoConfirmRecycle != FALSE));
     bool ok = true;
     for (const std::wstring& path : ctx.paths) {
         IShellItem* item = nullptr;
@@ -17783,23 +17833,18 @@ bool InvokeProperties(const InvocationContext& ctx) {
     return shown;
 }
 
-// Set as desktop background: the same system call the shell verb makes.
-bool InvokeSetDesktopWallpaper(const std::vector<std::wstring>& paths) {
-    if (paths.size() != 1) {
-        // Multi-selection behavior is the shell's call; keep its path.
-        return false;
-    }
-    return SystemParametersInfoW(
-               SPI_SETDESKWALLPAPER, 0,
-               const_cast<wchar_t*>(paths.front().c_str()),
-               SPIF_UPDATEINIFILE | SPIF_SENDWININICHANGE) != FALSE;
-}
-
 // Registered verbs dispatch through ShellExecuteEx without any context menu
 // population. Dynamic menu items (empty or unregistered verbs) fail quickly
 // here and keep the populated shell menu as the correctness net.
+// Verbs that need the window's browser site to pick their target window.
+// ShellExecuteEx has no site, so these keep the shell menu path.
+bool VerbNeedsBrowserSite(const std::wstring& verb) {
+    return EqualsIgnoreCase(verb, L"opennewtab");
+}
+
 bool TryInvokeVerbDirect(const MenuItem& item, const InvocationContext& ctx) {
-    if (ctx.paths.size() != 1 || item.canonicalVerb.empty()) {
+    if (ctx.paths.size() != 1 || item.canonicalVerb.empty() ||
+        VerbNeedsBrowserSite(item.canonicalVerb)) {
         return false;
     }
     SHELLEXECUTEINFOW info = {};
@@ -17818,33 +17863,6 @@ bool IsFileViewKind(ShellViewKind kind) {
     return kind == ShellViewKind::Desktop || kind == ShellViewKind::ShellDefView;
 }
 
-// Synthesizes the shortcut Explorer binds to a view command. The owner keeps
-// focus while the menu is open, so the keys reach the view.
-bool SendShortcut(WORD virtualKey, bool control) {
-    INPUT inputs[4] = {};
-    size_t count = 0;
-    if (control) {
-        inputs[count].type = INPUT_KEYBOARD;
-        inputs[count].ki.wVk = VK_CONTROL;
-        ++count;
-    }
-    inputs[count].type = INPUT_KEYBOARD;
-    inputs[count].ki.wVk = virtualKey;
-    ++count;
-    inputs[count].type = INPUT_KEYBOARD;
-    inputs[count].ki.wVk = virtualKey;
-    inputs[count].ki.dwFlags = KEYEVENTF_KEYUP;
-    ++count;
-    if (control) {
-        inputs[count].type = INPUT_KEYBOARD;
-        inputs[count].ki.wVk = VK_CONTROL;
-        inputs[count].ki.dwFlags = KEYEVENTF_KEYUP;
-        ++count;
-    }
-    return SendInput(static_cast<UINT>(count), inputs, sizeof(INPUT)) ==
-           static_cast<UINT>(count);
-}
-
 // The view's own commands act on its current selection, so they are only
 // safe when it still matches the selection the menu was built for.
 bool ViewSelectionMatches(const InvocationContext& ctx) {
@@ -17852,28 +17870,161 @@ bool ViewSelectionMatches(const InvocationContext& ctx) {
     return PathSetsEqual(current.paths, ctx.paths);
 }
 
-// Cut/Copy: prefer the view's own shortcut so the clipboard contents and the
-// cut visual match Explorer exactly (the view marks the cut items and puts
-// the shell's data object on the clipboard); the direct clipboard write
-// covers the tree and any selection that no longer matches.
+// Sets the preferred drop effect on a data object, like the shell's own
+// Cut/Copy do before putting the object on the clipboard.
+bool SetPreferredDropEffect(IDataObject* data, DWORD effect) {
+    FORMATETC format = {};
+    format.cfFormat = static_cast<CLIPFORMAT>(
+        RegisterClipboardFormatW(L"Preferred DropEffect"));
+    format.dwAspect = DVASPECT_CONTENT;
+    format.lindex = -1;
+    format.tymed = TYMED_HGLOBAL;
+    STGMEDIUM medium = {};
+    medium.tymed = TYMED_HGLOBAL;
+    medium.hGlobal = GlobalAlloc(GMEM_MOVEABLE, sizeof(DWORD));
+    if (!medium.hGlobal) {
+        return false;
+    }
+    void* target = GlobalLock(medium.hGlobal);
+    if (!target) {
+        GlobalFree(medium.hGlobal);
+        return false;
+    }
+    memcpy(target, &effect, sizeof(effect));
+    GlobalUnlock(medium.hGlobal);
+    const HRESULT hr = data->SetData(&format, &medium, TRUE);
+    if (FAILED(hr)) {
+        ReleaseStgMedium(&medium);
+        return false;
+    }
+    return true;
+}
+
+// Puts the view's own selection data object on the clipboard, with the
+// preferred drop effect, exactly like the view's Copy/Cut commands. The
+// shell's formats (including the Shell IDList Array the views use to dim cut
+// items), virtual items and the clipboard owner all match the native menu,
+// and no synthetic keystrokes are involved.
+bool CopySelectionViaView(const InvocationContext& ctx, bool cut) {
+    if (!IsFileViewKind(ctx.kind) || ctx.paths.empty() ||
+        !ViewSelectionMatches(ctx)) {
+        return false;
+    }
+    IShellView* view = GetActiveShellView(ctx.owner, ctx.kind);
+    if (!view) {
+        return false;
+    }
+    IDataObject* data = nullptr;
+    bool ok = false;
+    if (SUCCEEDED(view->GetItemObject(SVGIO_SELECTION, IID_IDataObject,
+                                      reinterpret_cast<void**>(&data))) &&
+        data) {
+        ok = SetPreferredDropEffect(
+            data, cut ? DROPEFFECT_MOVE : (DROPEFFECT_COPY | DROPEFFECT_LINK));
+        if (ok) {
+            ok = SUCCEEDED(OleSetClipboard(data));
+        }
+    }
+    if (data) {
+        data->Release();
+    }
+    view->Release();
+    return ok;
+}
+
+// Cut/Copy: the view's own data object when a file view owns the selection;
+// the direct clipboard write covers the tree and any selection that no longer
+// matches.
 bool InvokeCutCopy(const InvocationContext& ctx, bool cut) {
-    if (!ctx.paths.empty() && IsFileViewKind(ctx.kind) &&
-        ViewSelectionMatches(ctx) &&
-        SendShortcut(cut ? L'X' : L'C', true)) {
+    if (CopySelectionViaView(ctx, cut)) {
         return true;
     }
     return WriteClipboardFiles(ctx.owner, ctx.paths, cut);
 }
 
-// A background paste (no selection) targets the view's own folder, which is
-// exactly what Ctrl+V does, so collision naming, undo and virtual clipboard
-// items behave like Explorer's. Folder and tree pastes keep the direct path
-// because they target a folder other than the view's.
-bool InvokePasteViaView(const InvocationContext& ctx) {
-    if (!ctx.paths.empty() || !IsFileViewKind(ctx.kind)) {
+// The drop target of a folder other than the view's current one (a
+// right-clicked folder or a navigation-pane item).
+IDropTarget* FolderDropTargetForPath(HWND owner, const std::wstring& path) {
+    PIDLIST_ABSOLUTE pidl = nullptr;
+    if (FAILED(SHParseDisplayName(path.c_str(), nullptr, &pidl, 0, nullptr)) ||
+        !pidl) {
+        return nullptr;
+    }
+    IShellFolder* parent = nullptr;
+    PCUITEMID_CHILD child = nullptr;
+    IDropTarget* target = nullptr;
+    if (SUCCEEDED(SHBindToParent(pidl, IID_IShellFolder,
+                                 reinterpret_cast<void**>(&parent), &child)) &&
+        parent && child) {
+        parent->GetUIObjectOf(owner, 1, &child, IID_IDropTarget, nullptr,
+                              reinterpret_cast<void**>(&target));
+    }
+    if (parent) {
+        parent->Release();
+    }
+    CoTaskMemFree(pidl);
+    return target;
+}
+
+// The drop target of the folder the view is showing, for background pastes.
+IDropTarget* ViewFolderDropTarget(HWND owner, ShellViewKind kind) {
+    IShellView* view = GetActiveShellView(owner, kind);
+    if (!view) {
+        return nullptr;
+    }
+    IFolderView* folderView = nullptr;
+    IShellFolder* folder = nullptr;
+    IDropTarget* target = nullptr;
+    if (SUCCEEDED(view->QueryInterface(IID_IFolderView,
+                                       reinterpret_cast<void**>(&folderView))) &&
+        folderView) {
+        if (SUCCEEDED(folderView->GetFolder(
+                IID_IShellFolder, reinterpret_cast<void**>(&folder))) &&
+            folder) {
+            folder->CreateViewObject(owner, IID_IDropTarget,
+                                     reinterpret_cast<void**>(&target));
+        }
+    }
+    if (folder) {
+        folder->Release();
+    }
+    if (folderView) {
+        folderView->Release();
+    }
+    view->Release();
+    return target;
+}
+
+// Pastes by dropping the clipboard object on the target folder's drop target,
+// which is how the shell's own Paste works: collision naming, undo and
+// virtual clipboard items (for example Outlook attachments) all match, and it
+// covers the view's folder, a right-clicked folder and tree items alike.
+bool InvokePasteViaDropTarget(const InvocationContext& ctx) {
+    IDropTarget* target = nullptr;
+    if (!ctx.paths.empty()) {
+        target = FolderDropTargetForPath(ctx.owner, ctx.paths.front());
+    } else {
+        target = ViewFolderDropTarget(ctx.owner, ctx.kind);
+    }
+    if (!target) {
         return false;
     }
-    return SendShortcut(L'V', true);
+    IDataObject* data = nullptr;
+    bool ok = false;
+    if (SUCCEEDED(OleGetClipboard(&data)) && data) {
+        const POINTL point = {ctx.pt.x, ctx.pt.y};
+        DWORD effect = DROPEFFECT_NONE;
+        if (SUCCEEDED(target->DragEnter(data, MK_LBUTTON, point, &effect)) &&
+            effect != DROPEFFECT_NONE) {
+            effect = DROPEFFECT_NONE;
+            ok = SUCCEEDED(target->Drop(data, MK_LBUTTON, point, &effect));
+        }
+    }
+    if (data) {
+        data->Release();
+    }
+    target->Release();
+    return ok;
 }
 
 InvokeResult InvokeItem(const MenuItem& item, const InvocationContext& ctx,
@@ -17942,7 +18093,7 @@ InvokeResult InvokeItem(const MenuItem& item, const InvocationContext& ctx,
                                          ctx.clipboardHadData, currentHasData)) {
                     return InvokeResult::Handled;
                 }
-                if (InvokePasteViaView(ctx)) {
+                if (InvokePasteViaDropTarget(ctx)) {
                     return InvokeResult::Handled;
                 }
                 // The captured shell menu never contains the view's standard
@@ -17979,11 +18130,6 @@ InvokeResult InvokeItem(const MenuItem& item, const InvocationContext& ctx,
                     break;
                 case CoreVerb::Properties:
                     if (InvokeProperties(ctx)) {
-                        return InvokeResult::Handled;
-                    }
-                    break;
-                case CoreVerb::SetDesktopWallpaper:
-                    if (InvokeSetDesktopWallpaper(ctx.paths)) {
                         return InvokeResult::Handled;
                     }
                     break;

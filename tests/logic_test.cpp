@@ -750,6 +750,16 @@ int main() {
     CHECK(!cmo::SendShortcutAllowed(true, true, false, false, true, false));
     CHECK(!cmo::SendShortcutAllowed(true, true, false, false, false, true));
 
+    // A faulted capture is abandoned: its references are leaked instead of
+    // being released (Release would re-enter the crashed handler).
+    {
+        cmo::PendingCapture capture{};
+        capture.obj = reinterpret_cast<IContextMenu*>(0x1);
+        capture.populationFaulted = true;
+        cmo::ReleaseCapture(capture);
+        CHECK(capture.obj == nullptr);
+    }
+
     // Delete flags: Shift deletes permanently; recycling follows the Recycle
     // Bin's confirmation setting.
     CHECK(cmo::DeleteOperationFlags(true, false) == 0);

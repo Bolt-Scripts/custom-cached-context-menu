@@ -2,7 +2,7 @@
 // @id              custom-cached-context-menu
 // @name            Custom Cached Context Menu
 // @description     Instantly-opening cached Explorer context menu that is fully customizable: themes, layout, colors, animations, rules, and custom commands.
-// @version         1.1.0
+// @version         1.1.1
 // @include         explorer.exe
 // @architecture    x86-64
 // @compilerOptions -lole32 -lshlwapi -luuid -lcomctl32 -ladvapi32 -lgdi32 -luxtheme -lversion -ld3d11 -ld2d1 -ldwrite -ldcomp
@@ -101,6 +101,12 @@ or use the in-menu settings browser.
 - Native fallback menus apply the configured submenu delay through the system
   `MenuShowDelay` value while the menu is open (restored on close); Windows
   has no per-menu delay API.
+- Context-menu handlers run inside Explorer, so a faulty third-party shell
+  extension can crash it. The background pre-build and menu population guard
+  against this: a handler that faults is skipped, the affected actions fall
+  back to the classic menu, and the log lists the handler modules that were
+  loaded at the time. The offending extension should still be disabled (for
+  example with ShellExView).
 
 ## Feedback
 
@@ -14691,6 +14697,9 @@ struct PendingCapture {
     uint64_t sourceStamp = 0;
     bool discoveryDone = false;
     bool menuInitialized = false;
+    // Set when a third-party handler faulted while populating. The context is
+    // abandoned (classic menu) and its objects are leaked instead of released.
+    bool populationFaulted = false;
 };
 
 // Releases every resource a capture owns.
@@ -14698,6 +14707,16 @@ void ReleaseCapture(PendingCapture& capture) {
     if (capture.populatedMenu) {
         DestroyMenu(capture.populatedMenu);
         capture.populatedMenu = nullptr;
+    }
+    if (capture.populationFaulted) {
+        // A third-party handler faulted inside the context objects. Calling
+        // Release would re-enter it, so the references are deliberately
+        // leaked.
+        capture.contextMenu3 = nullptr;
+        capture.contextMenu2 = nullptr;
+        capture.obj = nullptr;
+        capture.populated = false;
+        return;
     }
     if (capture.contextMenu3) {
         capture.contextMenu3->Release();
@@ -15684,6 +15703,91 @@ void InitializeMenuRecursive(PendingCapture& capture, HMENU menu, UINT position)
     }
 }
 
+// Population is where third-party shell extensions run: a faulty handler can
+// fault the whole process. These guards catch that and let the caller abandon
+// the context, so the affected menu falls back to the classic one instead of
+// taking Explorer down. The guarded functions must stay free of objects that
+// need unwinding: SEH cannot be mixed with them. SEH is MSVC syntax; the
+// MinGW test build calls through unguarded.
+#ifdef _MSC_VER
+#define CMO_POPULATION_SEH 1
+#endif
+
+bool GuardedReplayInto(PendingCapture& capture, HMENU menu,
+                       DWORD& exceptionCode) {
+#ifdef CMO_POPULATION_SEH
+    __try {
+        ReplayInto(capture.obj, menu, capture.indexMenu, capture.idCmdFirst,
+                   capture.idCmdLast, capture.flags);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        exceptionCode = GetExceptionCode();
+        return false;
+    }
+#else
+    (void)exceptionCode;
+    ReplayInto(capture.obj, menu, capture.indexMenu, capture.idCmdFirst,
+               capture.idCmdLast, capture.flags);
+    return true;
+#endif
+}
+
+bool GuardedWarmReplay(IContextMenu* menu, HMENU hmenu, UINT idCmdFirst,
+                       UINT idCmdLast, UINT flags, DWORD& exceptionCode) {
+#ifdef CMO_POPULATION_SEH
+    __try {
+        ReplayInto(menu, hmenu, 0, idCmdFirst, idCmdLast, flags);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        exceptionCode = GetExceptionCode();
+        return false;
+    }
+#else
+    (void)exceptionCode;
+    ReplayInto(menu, hmenu, 0, idCmdFirst, idCmdLast, flags);
+    return true;
+#endif
+}
+
+bool GuardedInitializeMenus(PendingCapture& capture, HMENU menu,
+                            DWORD& exceptionCode) {
+#ifdef CMO_POPULATION_SEH
+    __try {
+        InitializeMenuRecursive(capture, menu, 0);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        exceptionCode = GetExceptionCode();
+        return false;
+    }
+#else
+    (void)exceptionCode;
+    InitializeMenuRecursive(capture, menu, 0);
+    return true;
+#endif
+}
+
+// Names the handler modules loaded while a population faulted, so the log
+// points at the offending extension.
+void LogPopulationFault(const wchar_t* where, DWORD exceptionCode,
+                        const std::vector<std::wstring>& modules) {
+    // A faulting handler is retried on the next open; keep the log readable.
+    static std::atomic<int> logged{0};
+    if (logged.fetch_add(1) >= 3) {
+        return;
+    }
+    std::wstring joined;
+    for (const std::wstring& module : modules) {
+        if (!joined.empty()) {
+            joined += L", ";
+        }
+        joined += module;
+    }
+    Wh_Log(L"Population faulted (0x%08X) in %s; using the classic menu. "
+           L"Handlers loaded: %s",
+           exceptionCode, where,
+           joined.empty() ? L"(none tracked)" : joined.c_str());
+}
+
 // Debug dump of a native menu: labels, ids, offsets and bitmap sentinels.
 // Run with Debug logging after the menu closes, when dynamic submenus have
 // been populated.
@@ -15916,7 +16020,14 @@ void DiscoverIntoCache(PendingCapture& capture, const ContextSignature& signatur
 
     // Initialize like a real host, then rebuild for dynamic labels/children.
     if (!capture.menuInitialized) {
-        InitializeMenuRecursive(capture, capture.populatedMenu, 0);
+        DWORD exceptionCode = 0;
+        if (!GuardedInitializeMenus(capture, capture.populatedMenu,
+                                    exceptionCode)) {
+            capture.populationFaulted = true;
+            LogPopulationFault(L"submenu initialization", exceptionCode,
+                               capture.handlerModules);
+            return;
+        }
         capture.menuInitialized = true;
     }
     MenuModel model = BuildModelFromHMenu(capture.populatedMenu, capture.idCmdFirst,
@@ -17286,7 +17397,7 @@ bool EnsureContextPopulated(PendingCapture& capture) {
     if (capture.populated) {
         return true;
     }
-    if (!capture.obj) {
+    if (!capture.obj || capture.populationFaulted) {
         return false;
     }
 
@@ -17300,8 +17411,18 @@ bool EnsureContextPopulated(PendingCapture& capture) {
     // Extensions may attach bitmaps with SetMenuItemBitmaps during population;
     // start a fresh recording so lookups match this menu.
     ClearRecordedItemBitmaps();
-    ReplayInto(capture.obj, menu, capture.indexMenu, capture.idCmdFirst, capture.idCmdLast,
-               capture.flags);
+    DWORD exceptionCode = 0;
+    if (!GuardedReplayInto(capture, menu, exceptionCode)) {
+        // A third-party handler faulted during population. Abandon the
+        // context so the classic menu is used: re-entering the handler (a
+        // retry, Release or menu messages) is unsafe.
+        DestroyMenu(menu);
+        capture.populationFaulted = true;
+        LogPopulationFault(L"menu population", exceptionCode,
+                           DiffModules(modulesBefore,
+                                       SnapshotLoadedModules()));
+        return false;
+    }
 
     capture.populatedMenu = menu;
     capture.populated = true;
@@ -17341,7 +17462,14 @@ InvokeResult InvokeExtensionItem(const MenuItem& item, const InvocationContext& 
     // Submenus are populated lazily; initialize them so items nested in a
     // submenu (e.g. "Give access to" children) can be resolved.
     if (!capture.menuInitialized) {
-        InitializeMenuRecursive(capture, capture.populatedMenu, 0);
+        DWORD exceptionCode = 0;
+        if (!GuardedInitializeMenus(capture, capture.populatedMenu,
+                                    exceptionCode)) {
+            capture.populationFaulted = true;
+            LogPopulationFault(L"submenu initialization", exceptionCode,
+                               capture.handlerModules);
+            return InvokeResult::FallbackNative;
+        }
         capture.menuInitialized = true;
     }
 
@@ -18301,7 +18429,15 @@ InvokeResult InvokeItem(const MenuItem& item, const InvocationContext& ctx,
                 return InvokeResult::FallbackNative;
             }
             if (!capture.menuInitialized) {
-                InitializeMenuRecursive(capture, capture.populatedMenu, 0);
+                DWORD exceptionCode = 0;
+                if (!GuardedInitializeMenus(capture, capture.populatedMenu,
+                                            exceptionCode)) {
+                    capture.populationFaulted = true;
+                    LogPopulationFault(L"submenu initialization",
+                                       exceptionCode,
+                                       capture.handlerModules);
+                    return InvokeResult::FallbackNative;
+                }
                 capture.menuInitialized = true;
             }
             // The cached offset comes from the discovery-time menu layout,
@@ -19318,7 +19454,14 @@ std::optional<uint32_t> ShowNativeReplay(PendingCapture& capture, HWND owner, PO
     // before showing it or placeholders (such as the New submenu's) would be
     // displayed and their invocation would fail.
     if (!capture.menuInitialized) {
-        InitializeMenuRecursive(capture, capture.populatedMenu, 0);
+        DWORD exceptionCode = 0;
+        if (!GuardedInitializeMenus(capture, capture.populatedMenu,
+                                    exceptionCode)) {
+            capture.populationFaulted = true;
+            LogPopulationFault(L"submenu initialization", exceptionCode,
+                               capture.handlerModules);
+            return std::nullopt;
+        }
         capture.menuInitialized = true;
     }
     DumpMenuTree(capture.populatedMenu, capture.idCmdFirst, 0);
@@ -19755,7 +19898,19 @@ private:
         HMENU offscreen = CreatePopupMenu();
         if (offscreen) {
             ClearRecordedItemBitmaps();
-            ReplayInto(menu, offscreen, 0, 1, 0x7FFF, CMF_NORMAL);
+            DWORD exceptionCode = 0;
+            if (!GuardedWarmReplay(menu, offscreen, 1, 0x7FFF, CMF_NORMAL,
+                                   exceptionCode)) {
+                // A faulty handler must not take Explorer down; skip this
+                // context and leave it to the classic menu.
+                LogPopulationFault(L"warm-up", exceptionCode,
+                                   DiffModules(modulesBefore,
+                                               SnapshotLoadedModules()));
+                DestroyMenu(offscreen);
+                // Deliberately no Release: a faulted handler is unsafe to
+                // re-enter.
+                return;
+            }
             MenuModel model = BuildModelFromHMenu(offscreen, 1, signature, menu);
             ClearRecordedItemBitmaps();
             DestroyMenu(offscreen);

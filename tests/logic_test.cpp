@@ -750,6 +750,19 @@ int main() {
     CHECK(!cmo::SendShortcutAllowed(true, true, false, false, true, false));
     CHECK(!cmo::SendShortcutAllowed(true, true, false, false, false, true));
 
+    // Direct verb invocations act on the selection, or on the current folder
+    // for background menus; multi-selections stay with the shell.
+    {
+        cmo::InvocationContext ctx{};
+        ctx.directory = L"C:\\folder";
+        ctx.paths = {L"C:\\a.txt"};
+        CHECK(cmo::DirectVerbTargetPath(ctx) == L"C:\\a.txt");
+        ctx.paths.clear();
+        CHECK(cmo::DirectVerbTargetPath(ctx) == L"C:\\folder");
+        ctx.paths = {L"C:\\a.txt", L"C:\\b.txt"};
+        CHECK(cmo::DirectVerbTargetPath(ctx).empty());
+    }
+
     // A faulted capture is abandoned: its references are leaked instead of
     // being released (Release would re-enter the crashed handler).
     {

@@ -17478,11 +17478,19 @@ InvokeResult InvokeExtensionItem(const MenuItem& item, const InvocationContext& 
     // previous versions" hitting Properties).
     if (auto nativeOffset = FindNativeOffsetInMenu(
             capture.populatedMenu, capture.idCmdFirst, ctx.liveContext, item)) {
+        if (g_settings->debugLogging) {
+            Wh_Log(L"Live match '%s' -> offset %u", item.label.c_str(),
+                   *nativeOffset);
+        }
         MenuItem offsetItem = item;
         offsetItem.canonicalVerb.clear();
         offsetItem.verbOffset = *nativeOffset;
         if (InvokeContextItem(ctx.liveContext, offsetItem, ctx)) {
             return InvokeResult::Handled;
+        }
+        if (g_settings->debugLogging) {
+            Wh_Log(L"Live match invoke failed for '%s' (offset %u)",
+                   item.label.c_str(), *nativeOffset);
         }
     }
     if (!item.canonicalVerb.empty() &&
@@ -18041,8 +18049,23 @@ bool VerbNeedsBrowserSite(const std::wstring& verb) {
     return EqualsIgnoreCase(verb, L"opennewtab");
 }
 
+// The item a direct verb invocation acts on: the single selected path, or
+// the current folder for background menus. Background verbs are registered
+// for folders, so ShellExecuteEx resolves them there (and the folder verb of
+// the same name performs the same action).
+std::wstring DirectVerbTargetPath(const InvocationContext& ctx) {
+    if (ctx.paths.size() == 1) {
+        return ctx.paths.front();
+    }
+    if (ctx.paths.empty()) {
+        return ctx.directory;
+    }
+    return std::wstring();
+}
+
 bool TryInvokeVerbDirect(const MenuItem& item, const InvocationContext& ctx) {
-    if (ctx.paths.size() != 1 || item.canonicalVerb.empty() ||
+    const std::wstring target = DirectVerbTargetPath(ctx);
+    if (target.empty() || item.canonicalVerb.empty() ||
         VerbNeedsBrowserSite(item.canonicalVerb)) {
         return false;
     }
@@ -18051,7 +18074,7 @@ bool TryInvokeVerbDirect(const MenuItem& item, const InvocationContext& ctx) {
     info.fMask = SEE_MASK_FLAG_NO_UI;
     info.hwnd = ctx.owner;
     info.lpVerb = item.canonicalVerb.c_str();
-    info.lpFile = ctx.paths.front().c_str();
+    info.lpFile = target.c_str();
     info.nShow = SW_SHOWNORMAL;
     return ShellExecuteExW(&info) != FALSE;
 }

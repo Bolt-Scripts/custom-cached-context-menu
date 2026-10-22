@@ -97,7 +97,8 @@ or use the in-menu settings browser.
 - Nav-pane menus are cached per tree node for the session and refresh after
   use, so the first open of each node pays the shell's population cost.
 - Core menu labels are English; cached extension labels come from the shell
-  and are localized.
+  and are localized. Labels that embed the selected file's name (for example
+  "Extract to \"<name>\"") are re-rendered with the current name.
 - Native fallback menus apply the configured submenu delay through the system
   `MenuShowDelay` value while the menu is open (restored on close); Windows
   has no per-menu delay API.
@@ -13844,7 +13845,7 @@ MenuModel MergeCoreWithCached(const MenuModel& core, const MenuModel& cached) {
 namespace cmo {
 
 constexpr uint32_t kCacheMagic = 0x434F4D4F;  // "COMO"
-constexpr uint32_t kCacheVersion = 15;
+constexpr uint32_t kCacheVersion = 16;
 constexpr uint32_t kMaxCacheEntries = 1024;
 constexpr uint32_t kMaxModelItems = 4096;
 constexpr uint32_t kMaxMenuDepth = 16;
@@ -16002,7 +16003,87 @@ void CaptureOwnerDrawIcons(PendingCapture& capture, std::vector<MenuItem>& items
     }
 }
 
-void DiscoverIntoCache(PendingCapture& capture, const ContextSignature& signature) {
+// Stands in for the selected file's name in cached labels.
+constexpr wchar_t kDynamicNamePlaceholder = L'\x01';
+
+// File name without its last extension ("archive.zip" -> "archive").
+std::wstring FileNameStem(const std::wstring& path) {
+    std::wstring name = path;
+    const size_t slash = name.find_last_of(L"\\/");
+    if (slash != std::wstring::npos) {
+        name.erase(0, slash + 1);
+    }
+    const size_t dot = name.find_last_of(L'.');
+    if (dot != std::wstring::npos && dot > 0) {
+        name.resize(dot);
+    }
+    return name;
+}
+
+// Replaces the selected item's name inside quoted label segments with a
+// placeholder. A model cached per extension type would otherwise keep one
+// file's name (for example NanaZip's "Extract to \"<name>\"") and be stale
+// for every other file of the same type.
+std::wstring TemplateDynamicLabel(const std::wstring& label,
+                                  const std::wstring& name) {
+    if (name.size() < 2 || label.empty()) {
+        return label;
+    }
+    std::wstring result;
+    result.reserve(label.size());
+    bool inQuotes = false;
+    for (size_t i = 0; i < label.size();) {
+        if (label[i] == L'"') {
+            inQuotes = !inQuotes;
+            result += L'"';
+            ++i;
+            continue;
+        }
+        if (inQuotes && i + name.size() <= label.size() &&
+            _wcsnicmp(label.c_str() + i, name.c_str(), name.size()) == 0) {
+            result += kDynamicNamePlaceholder;
+            i += name.size();
+            continue;
+        }
+        result += label[i];
+        ++i;
+    }
+    return result;
+}
+
+// Resolves those placeholders with the current selection's name.
+std::wstring ResolveDynamicLabel(const std::wstring& label,
+                                 const std::wstring& name) {
+    std::wstring result;
+    result.reserve(label.size() + name.size());
+    for (const wchar_t c : label) {
+        if (c == kDynamicNamePlaceholder) {
+            result += name;
+        } else {
+            result += c;
+        }
+    }
+    return result;
+}
+
+void TemplateDynamicLabels(std::vector<MenuItem>& items,
+                           const std::wstring& name) {
+    for (MenuItem& item : items) {
+        item.label = TemplateDynamicLabel(item.label, name);
+        TemplateDynamicLabels(item.children, name);
+    }
+}
+
+void ResolveDynamicLabels(std::vector<MenuItem>& items,
+                          const std::wstring& name) {
+    for (MenuItem& item : items) {
+        item.label = ResolveDynamicLabel(item.label, name);
+        ResolveDynamicLabels(item.children, name);
+    }
+}
+
+void DiscoverIntoCache(PendingCapture& capture, const ContextSignature& signature,
+                       const std::vector<std::wstring>& paths) {
     if (capture.discoveryDone || !capture.obj) {
         return;
     }
@@ -16045,6 +16126,14 @@ void DiscoverIntoCache(PendingCapture& capture, const ContextSignature& signatur
            static_cast<unsigned long long>(GetTickCount64() - start));
     if (g_settings->debugLogging) {
         DumpModelItems(model.items, 0);
+    }
+    if (signature.scope != Scope::NavPane &&
+        signature.shape == Shape::Single && paths.size() == 1) {
+        // Labels that embed the selected file's name would be stale for every
+        // other file of the same type; store templates and resolve them with
+        // the current name at open. Nav-pane models are shown as-is without
+        // that resolution step.
+        TemplateDynamicLabels(model.items, FileNameStem(paths.front()));
     }
     // Warm the render-ready layout for the custom menu while we are already
     // paying discovery cost, so the next open is a cache hit. The prebuild
@@ -20318,11 +20407,19 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
             // refreshed after the menu closes.
             if (!cached && !capture.discoveryDone) {
                 if (g_settings->debugLogging) Wh_Log(L"Populating before showing the menu");
-                DiscoverIntoCache(capture, signature);
+                DiscoverIntoCache(capture, signature, paths);
                 cached = g_cache.Find(signature);
                 needsDiscovery = !cached || (cached->flags & kModelWarmup);
             }
 
+            if (cached) {
+                // A cached model may hold label templates from another file
+                // of the same type; resolve them with the current name.
+                ResolveDynamicLabels(cached->items,
+                                     paths.size() == 1
+                                         ? FileNameStem(paths.front())
+                                         : std::wstring());
+            }
             model = cached
                         ? MergeCoreWithCached(BuildCoreModel(scope, paths, shape),
                                               *cached)
@@ -20458,7 +20555,7 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
             Wh_Log(L"Menu creation failed; using the native menu");
             ShowNativeReplay(capture, owner, pt);
             if (needsDiscovery && !capture.discoveryDone) {
-                DiscoverIntoCache(capture, signature);
+                DiscoverIntoCache(capture, signature, paths);
             }
             break;
         }
@@ -20516,7 +20613,7 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
         // Warm-up entries are provisional: refresh them from the real context
         // now that the menu has closed. Live entries never populate again.
         if (needsDiscovery && !capture.discoveryDone) {
-            DiscoverIntoCache(capture, signature);
+            DiscoverIntoCache(capture, signature, paths);
         }
         break;
     }

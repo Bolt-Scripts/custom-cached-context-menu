@@ -750,6 +750,34 @@ int main() {
     CHECK(!cmo::SendShortcutAllowed(true, true, false, false, true, false));
     CHECK(!cmo::SendShortcutAllowed(true, true, false, false, false, true));
 
+    // Dynamic extension labels (NanaZip's "Extract to "<name>"") are stored
+    // as templates so a model cached per extension does not keep one file's
+    // name; the label is resolved with the current name at open.
+    {
+        const std::wstring templated =
+            cmo::TemplateDynamicLabel(L"Extract to \"myfile\"", L"myfile");
+        CHECK(templated == L"Extract to \"\x01\"");
+        CHECK(cmo::ResolveDynamicLabel(templated, L"other") ==
+              L"Extract to \"other\"");
+        // The name outside quotes, or a short name inside an unrelated label,
+        // is left untouched.
+        CHECK(cmo::TemplateDynamicLabel(L"Extract myfile", L"myfile") ==
+              L"Extract myfile");
+        CHECK(cmo::TemplateDynamicLabel(L"Make archive", L"arc") ==
+              L"Make archive");
+        // Suffixes after the name survive templating and resolving.
+        CHECK(cmo::TemplateDynamicLabel(L"Add to \"myfile.zip.7z\"", L"myfile") ==
+              L"Add to \"\x01.zip.7z\"");
+        CHECK(cmo::ResolveDynamicLabel(L"Add to \"\x01.zip.7z\"", L"other") ==
+              L"Add to \"other.zip.7z\"");
+        // The NanaZip-style trailing backslash before the closing quote.
+        CHECK(cmo::TemplateDynamicLabel(L"Extract to \"myfile\\\"", L"myfile") ==
+              L"Extract to \"\x01\\\"");
+        CHECK(cmo::FileNameStem(L"C:\\a\\FMA120_1.1.7.5.zip") ==
+              L"FMA120_1.1.7.5");
+        CHECK(cmo::FileNameStem(L"C:\\a\\archive") == L"archive");
+    }
+
     // Direct verb invocations act on the selection, or on the current folder
     // for background menus; multi-selections stay with the shell.
     {

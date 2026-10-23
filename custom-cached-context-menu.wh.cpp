@@ -61,6 +61,7 @@ and discovers extension items in the background, so repeated opens are instant.
 | Theme | Custom (menu.ini) | Loads the appearance from `<mod storage>\themes\<name>.ini` (created from the bundled preset on first use). `menu.ini` is never modified by theme selection. |
 | Show classic menu item | on | Adds a "Show classic menu" entry at the bottom of the menu. |
 | Top action bar | off | Moves Cut, Copy, Paste, Rename and Delete into an icon bar on the side of the menu nearest the cursor, like the Windows 11 menu. Custom menu mode only. |
+| Background pre-build | on | Warms common menus at startup so their first open is instant. Off keeps the stock menu's exposure: handlers load only for menus that open, and each first open builds on demand. |
 | Warm-up extensions | common list | Comma-separated file types pre-built at Explorer startup. |
 | Warm-up delay | 5 s | Delay before background warm-up starts. |
 | Clear cache | off | Turn on to delete cached models; they rebuild on next use. |
@@ -186,6 +187,9 @@ MIT
 - clearCache: false
   $name: Clear cache
   $description: Turn on to delete the cached menu models; they rebuild on next use.
+- warmup: true
+  $name: Background pre-build
+  $description: Warms common menus shortly after Explorer starts so their first open is instant. Turning it off skips loading every registered context-menu handler at startup (the stock menu's exposure), which avoids crashes from faulty third-party extensions; the first open of each context then builds on demand, like the stock menu.
 - warmupExtensions: ".txt, .pdf, .zip, .rar, .7z, .jpg, .png, .mp4, .mp3, .docx, .xlsx, .exe, .lnk"
   $name: Warm-up extensions
   $description: Comma-separated file types whose menus are pre-built at Explorer startup.
@@ -276,6 +280,7 @@ struct Settings {
     bool showMoreOptionsItem = true;
     bool topBar = false;
     int submenuDelayMs = 150;
+    bool warmup = true;
     int warmupDelaySeconds = 5;
     bool clearCache = false;
     bool debugLogging = false;
@@ -407,6 +412,7 @@ void LoadSettings() {
     next.showMoreOptionsItem = Wh_GetIntSetting(L"showMoreOptionsItem") != 0;
     next.topBar = Wh_GetIntSetting(L"topBar") != 0;
     next.submenuDelayMs = Wh_GetIntSetting(L"submenuDelayMs");
+    next.warmup = Wh_GetIntSetting(L"warmup") != 0;
     next.warmupDelaySeconds = Wh_GetIntSetting(L"warmupDelaySeconds");
     next.clearCache = Wh_GetIntSetting(L"clearCache") != 0;
     next.debugLogging = Wh_GetIntSetting(L"debugLogging") != 0;
@@ -19668,6 +19674,12 @@ int WarmupJitterMs(uint32_t seed) {
 class Warmup {
 public:
     void Start() {
+        // The pre-build loads every registered context-menu handler; a faulty
+        // third-party handler can crash Explorer there. Turning it off keeps
+        // the stock menu's exposure (handlers load only for menus that open).
+        if (!g_settings->warmup) {
+            return;
+        }
         std::lock_guard<std::mutex> lock(lifecycleMutex_);
         if (thread_ || g_unloading.load()) {
             return;
@@ -20952,6 +20964,12 @@ void Wh_ModSettingsChanged() {
     Wh_Log(L"Custom Cached Context Menu settings changed");
     cmo::LoadSettings();
     cmo::g_hotkeyHost.SettingsChanged();
+
+    if (cmo::g_settings->warmup) {
+        cmo::g_warmup.Start();  // no-op while it is already running
+    } else {
+        cmo::g_warmup.Stop();
+    }
 
     if (cmo::g_settings->themeIndex != cmo::g_lastAppliedTheme) {
         cmo::g_themeStore.ApplySelectedTheme(cmo::g_settings->themeIndex);

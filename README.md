@@ -78,6 +78,7 @@ native menu. **Show classic menu** does the same from the menu itself.
 | Settings hotkey | empty | Optional global hotkey that opens the settings menu (for example `Ctrl+Alt+M`). Empty disables it. |
 | Debug logging | off | Logs timings and diagnostics. |
 | Clear cache | off | Turn on to delete cached models; they rebuild on next use. |
+| Background pre-build | on | Warms common menus at startup so their first open is instant. Off keeps the stock menu's exposure: handlers load only for menus that open, and each first open builds on demand. |
 | Warm-up extensions | common list | Comma-separated file types whose menus are pre-built at Explorer startup. |
 | Warm-up delay | 5 s | Seconds to wait after Explorer starts before warming the cache. |
 

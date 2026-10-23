@@ -103,11 +103,9 @@ or use the in-menu settings browser.
   `MenuShowDelay` value while the menu is open (restored on close); Windows
   has no per-menu delay API.
 - Context-menu handlers run inside Explorer, so a faulty third-party shell
-  extension can crash it. The background pre-build and menu population guard
-  against this: a handler that faults is skipped, the affected actions fall
-  back to the classic menu, and the log lists the handler modules that were
-  loaded at the time. The offending extension should still be disabled (for
-  example with ShellExView).
+  extension can crash it (the background pre-build loads every registered
+  handler). If Explorer crashes when a menu opens, disable the offending
+  extension, for example with ShellExView.
 
 ## Feedback
 
@@ -13290,6 +13288,8 @@ inline HotkeyHost g_hotkeyHost;
 // Defined after OwnerSubclass; removes every window subclass this DLL
 // installed so comctl32 cannot call into unloaded code.
 void RemoveOwnerSubclasses();
+// Defined after the recording map; releases its heap on unload.
+void ReleaseRecordedItemBitmaps();
 
 LRESULT CALLBACK ControlWindowProc(HWND hwnd, UINT msg, WPARAM wParam,
                                    LPARAM lParam) {
@@ -13298,6 +13298,7 @@ LRESULT CALLBACK ControlWindowProc(HWND hwnd, UINT msg, WPARAM wParam,
         // Captures belong to the thread that parked them; release them here,
         // on that thread, while the shell objects are still valid.
         ReleasePendingCapturesForCurrentThread();
+        ReleaseRecordedItemBitmaps();
         if (g_menuSession) {
             g_menuSession->done = true;
             PostThreadMessageW(GetCurrentThreadId(), WM_NULL, 0, 0);
@@ -14698,9 +14699,6 @@ struct PendingCapture {
     uint64_t sourceStamp = 0;
     bool discoveryDone = false;
     bool menuInitialized = false;
-    // Set when a third-party handler faulted while populating. The context is
-    // abandoned (classic menu) and its objects are leaked instead of released.
-    bool populationFaulted = false;
 };
 
 // Releases every resource a capture owns.
@@ -14708,16 +14706,6 @@ void ReleaseCapture(PendingCapture& capture) {
     if (capture.populatedMenu) {
         DestroyMenu(capture.populatedMenu);
         capture.populatedMenu = nullptr;
-    }
-    if (capture.populationFaulted) {
-        // A third-party handler faulted inside the context objects. Calling
-        // Release would re-enter it, so the references are deliberately
-        // leaked.
-        capture.contextMenu3 = nullptr;
-        capture.contextMenu2 = nullptr;
-        capture.obj = nullptr;
-        capture.populated = false;
-        return;
     }
     if (capture.contextMenu3) {
         capture.contextMenu3->Release();
@@ -15046,6 +15034,13 @@ uint32_t MapExtensionMenuState(UINT state) {
 // population happens on the thread that owns the menu.
 thread_local std::unordered_map<uintptr_t, std::unordered_map<UINT, HBITMAP>>
     g_recordedItemBitmaps;
+
+// Explorer's UI threads outlive the mod, so the thread-local container's
+// destructor never runs; release its heap explicitly.
+void ReleaseRecordedItemBitmaps() {
+    std::unordered_map<uintptr_t, std::unordered_map<UINT, HBITMAP>>()
+        .swap(g_recordedItemBitmaps);
+}
 
 void ClearRecordedItemBitmaps() {
     g_recordedItemBitmaps.clear();
@@ -15704,94 +15699,6 @@ void InitializeMenuRecursive(PendingCapture& capture, HMENU menu, UINT position)
     }
 }
 
-// Population is where third-party shell extensions run: a faulty handler can
-// fault the whole process. These guards catch that and let the caller abandon
-// the context, so the affected menu falls back to the classic one instead of
-// taking Explorer down. The guarded functions must stay free of objects that
-// need unwinding: SEH cannot be mixed with them. SEH is MSVC syntax; the
-// MinGW test build calls through unguarded.
-#ifdef _MSC_VER
-#define CMO_POPULATION_SEH 1
-#endif
-
-bool GuardedReplayInto(PendingCapture& capture, HMENU menu,
-                       DWORD& exceptionCode) {
-#ifdef CMO_POPULATION_SEH
-    __try {
-        ReplayInto(capture.obj, menu, capture.indexMenu, capture.idCmdFirst,
-                   capture.idCmdLast, capture.flags);
-        return true;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        exceptionCode = GetExceptionCode();
-        return false;
-    }
-#else
-    (void)exceptionCode;
-    ReplayInto(capture.obj, menu, capture.indexMenu, capture.idCmdFirst,
-               capture.idCmdLast, capture.flags);
-    return true;
-#endif
-}
-
-bool GuardedWarmReplay(IContextMenu* menu, HMENU hmenu, UINT idCmdFirst,
-                       UINT idCmdLast, UINT flags, DWORD& exceptionCode) {
-#ifdef CMO_POPULATION_SEH
-    __try {
-        ReplayInto(menu, hmenu, 0, idCmdFirst, idCmdLast, flags);
-        return true;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        exceptionCode = GetExceptionCode();
-        return false;
-    }
-#else
-    (void)exceptionCode;
-    ReplayInto(menu, hmenu, 0, idCmdFirst, idCmdLast, flags);
-    return true;
-#endif
-}
-
-bool GuardedInitializeMenus(PendingCapture& capture, HMENU menu,
-                            DWORD& exceptionCode) {
-#ifdef CMO_POPULATION_SEH
-    __try {
-        InitializeMenuRecursive(capture, menu, 0);
-        return true;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        exceptionCode = GetExceptionCode();
-        return false;
-    }
-#else
-    (void)exceptionCode;
-    InitializeMenuRecursive(capture, menu, 0);
-    return true;
-#endif
-}
-
-// Names the handler modules loaded while a population faulted, so the log
-// points at the offending extension.
-void LogPopulationFault(const wchar_t* where, DWORD exceptionCode,
-                        const std::vector<std::wstring>& modules) {
-    // A faulting handler is retried on the next open; keep the log readable.
-    static std::atomic<int> logged{0};
-    if (logged.fetch_add(1) >= 3) {
-        return;
-    }
-    std::wstring joined;
-    for (const std::wstring& module : modules) {
-        if (!joined.empty()) {
-            joined += L", ";
-        }
-        joined += module;
-    }
-    Wh_Log(L"Population faulted (0x%08X) in %s; using the classic menu. "
-           L"Handlers loaded: %s",
-           exceptionCode, where,
-           joined.empty() ? L"(none tracked)" : joined.c_str());
-}
-
-// Debug dump of a native menu: labels, ids, offsets and bitmap sentinels.
-// Run with Debug logging after the menu closes, when dynamic submenus have
-// been populated.
 void DumpMenuTree(HMENU menu, UINT idCmdFirst, int depth) {
     if (!g_settings->debugLogging || !menu) {
         return;
@@ -16026,29 +15933,53 @@ std::wstring FileNameStem(const std::wstring& path) {
 // for every other file of the same type.
 std::wstring TemplateDynamicLabel(const std::wstring& label,
                                   const std::wstring& name) {
-    if (name.size() < 2 || label.empty()) {
+    if (name.empty() || label.empty()) {
         return label;
     }
     std::wstring result;
     result.reserve(label.size());
     bool inQuotes = false;
+    bool segmentStart = false;
     for (size_t i = 0; i < label.size();) {
         if (label[i] == L'"') {
             inQuotes = !inQuotes;
             result += L'"';
             ++i;
+            // Only the start of a quoted segment holds the dynamic name
+            // (archive tools render "Extract to \"<name>\""); a name that
+            // merely appears inside text must not match.
+            segmentStart = inQuotes;
             continue;
         }
-        if (inQuotes && i + name.size() <= label.size() &&
+        if (inQuotes && segmentStart && i + name.size() <= label.size() &&
             _wcsnicmp(label.c_str() + i, name.c_str(), name.size()) == 0) {
             result += kDynamicNamePlaceholder;
             i += name.size();
+            segmentStart = false;
             continue;
         }
+        segmentStart = false;
         result += label[i];
         ++i;
     }
     return result;
+}
+
+// The name dynamic labels embed: the stem for files, the full name for
+// folders (folder names are not "name.ext", and the folder cache is shared
+// between folders).
+std::wstring DynamicLabelName(Scope scope, const std::wstring& path) {
+    if (path.empty()) {
+        return std::wstring();
+    }
+    if (scope == Scope::Files) {
+        return FileNameStem(path);
+    }
+    if (scope == Scope::Folders) {
+        const size_t slash = path.find_last_of(L"\\/");
+        return slash == std::wstring::npos ? path : path.substr(slash + 1);
+    }
+    return std::wstring();
 }
 
 // Resolves those placeholders with the current selection's name.
@@ -16101,14 +16032,7 @@ void DiscoverIntoCache(PendingCapture& capture, const ContextSignature& signatur
 
     // Initialize like a real host, then rebuild for dynamic labels/children.
     if (!capture.menuInitialized) {
-        DWORD exceptionCode = 0;
-        if (!GuardedInitializeMenus(capture, capture.populatedMenu,
-                                    exceptionCode)) {
-            capture.populationFaulted = true;
-            LogPopulationFault(L"submenu initialization", exceptionCode,
-                               capture.handlerModules);
-            return;
-        }
+        InitializeMenuRecursive(capture, capture.populatedMenu, 0);
         capture.menuInitialized = true;
     }
     MenuModel model = BuildModelFromHMenu(capture.populatedMenu, capture.idCmdFirst,
@@ -16133,7 +16057,8 @@ void DiscoverIntoCache(PendingCapture& capture, const ContextSignature& signatur
         // other file of the same type; store templates and resolve them with
         // the current name at open. Nav-pane models are shown as-is without
         // that resolution step.
-        TemplateDynamicLabels(model.items, FileNameStem(paths.front()));
+        TemplateDynamicLabels(model.items,
+                              DynamicLabelName(signature.scope, paths.front()));
     }
     // Warm the render-ready layout for the custom menu while we are already
     // paying discovery cost, so the next open is a cache hit. The prebuild
@@ -17486,7 +17411,7 @@ bool EnsureContextPopulated(PendingCapture& capture) {
     if (capture.populated) {
         return true;
     }
-    if (!capture.obj || capture.populationFaulted) {
+    if (!capture.obj) {
         return false;
     }
 
@@ -17500,18 +17425,8 @@ bool EnsureContextPopulated(PendingCapture& capture) {
     // Extensions may attach bitmaps with SetMenuItemBitmaps during population;
     // start a fresh recording so lookups match this menu.
     ClearRecordedItemBitmaps();
-    DWORD exceptionCode = 0;
-    if (!GuardedReplayInto(capture, menu, exceptionCode)) {
-        // A third-party handler faulted during population. Abandon the
-        // context so the classic menu is used: re-entering the handler (a
-        // retry, Release or menu messages) is unsafe.
-        DestroyMenu(menu);
-        capture.populationFaulted = true;
-        LogPopulationFault(L"menu population", exceptionCode,
-                           DiffModules(modulesBefore,
-                                       SnapshotLoadedModules()));
-        return false;
-    }
+    ReplayInto(capture.obj, menu, capture.indexMenu, capture.idCmdFirst,
+               capture.idCmdLast, capture.flags);
 
     capture.populatedMenu = menu;
     capture.populated = true;
@@ -17551,14 +17466,7 @@ InvokeResult InvokeExtensionItem(const MenuItem& item, const InvocationContext& 
     // Submenus are populated lazily; initialize them so items nested in a
     // submenu (e.g. "Give access to" children) can be resolved.
     if (!capture.menuInitialized) {
-        DWORD exceptionCode = 0;
-        if (!GuardedInitializeMenus(capture, capture.populatedMenu,
-                                    exceptionCode)) {
-            capture.populationFaulted = true;
-            LogPopulationFault(L"submenu initialization", exceptionCode,
-                               capture.handlerModules);
-            return InvokeResult::FallbackNative;
-        }
+        InitializeMenuRecursive(capture, capture.populatedMenu, 0);
         capture.menuInitialized = true;
     }
 
@@ -18152,10 +18060,74 @@ std::wstring DirectVerbTargetPath(const InvocationContext& ctx) {
     return std::wstring();
 }
 
+// Reads a shell verb's command line (the default value of its "command" key).
+std::wstring ReadShellVerbCommand(const std::wstring& keyPath) {
+    HKEY key = nullptr;
+    if (RegOpenKeyExW(HKEY_CLASSES_ROOT, keyPath.c_str(), 0, KEY_QUERY_VALUE,
+                      &key) != ERROR_SUCCESS) {
+        return std::wstring();
+    }
+    wchar_t buffer[1024] = {};
+    DWORD size = sizeof(buffer) - sizeof(wchar_t);
+    DWORD type = 0;
+    std::wstring command;
+    if (RegQueryValueExW(key, nullptr, nullptr, &type,
+                         reinterpret_cast<BYTE*>(buffer), &size) ==
+            ERROR_SUCCESS &&
+        (type == REG_SZ || type == REG_EXPAND_SZ)) {
+        command.assign(buffer, size / sizeof(wchar_t));
+        while (!command.empty() &&
+               (command.back() == L'\0' || command.back() == L' ')) {
+            command.pop_back();
+        }
+    }
+    RegCloseKey(key);
+    return command;
+}
+
+// %1, %V, %W, %L and %D all mean the folder for these registrations;
+// normalize them so the same command with different placeholders matches.
+std::wstring NormalizeVerbCommand(const std::wstring& command) {
+    std::wstring result;
+    result.reserve(command.size());
+    for (size_t i = 0; i < command.size();) {
+        if (command[i] == L'%' && i + 1 < command.size()) {
+            const wchar_t c = static_cast<wchar_t>(towlower(command[i + 1]));
+            if (c == L'1' || c == L'v' || c == L'w' || c == L'l' ||
+                c == L'd') {
+                result += L"%x";
+                i += 2;
+                continue;
+            }
+        }
+        result += command[i];
+        ++i;
+    }
+    return result;
+}
+
+// Background items are registered under Directory\\Background\\shell, while
+// the direct path invokes the folder verb (Directory\\shell). That is only
+// safe when both registrations run the same command; otherwise the deferred
+// population resolves the background item itself.
+bool BackgroundVerbMatchesFolderVerb(const std::wstring& verb) {
+    const std::wstring folderCommand =
+        ReadShellVerbCommand(L"Directory\\shell\\" + verb + L"\\command");
+    const std::wstring backgroundCommand = ReadShellVerbCommand(
+        L"Directory\\Background\\shell\\" + verb + L"\\command");
+    return !folderCommand.empty() && !backgroundCommand.empty() &&
+           _wcsicmp(NormalizeVerbCommand(folderCommand).c_str(),
+                    NormalizeVerbCommand(backgroundCommand).c_str()) == 0;
+}
+
 bool TryInvokeVerbDirect(const MenuItem& item, const InvocationContext& ctx) {
     const std::wstring target = DirectVerbTargetPath(ctx);
     if (target.empty() || item.canonicalVerb.empty() ||
         VerbNeedsBrowserSite(item.canonicalVerb)) {
+        return false;
+    }
+    if (ctx.paths.empty() &&
+        !BackgroundVerbMatchesFolderVerb(item.canonicalVerb)) {
         return false;
     }
     SHELLEXECUTEINFOW info = {};
@@ -18541,15 +18513,7 @@ InvokeResult InvokeItem(const MenuItem& item, const InvocationContext& ctx,
                 return InvokeResult::FallbackNative;
             }
             if (!capture.menuInitialized) {
-                DWORD exceptionCode = 0;
-                if (!GuardedInitializeMenus(capture, capture.populatedMenu,
-                                            exceptionCode)) {
-                    capture.populationFaulted = true;
-                    LogPopulationFault(L"submenu initialization",
-                                       exceptionCode,
-                                       capture.handlerModules);
-                    return InvokeResult::FallbackNative;
-                }
+                InitializeMenuRecursive(capture, capture.populatedMenu, 0);
                 capture.menuInitialized = true;
             }
             // The cached offset comes from the discovery-time menu layout,
@@ -19501,7 +19465,7 @@ public:
                 RemoveWindowSubclass(hwnd, &OwnerSubclass::Proc, kOwnerSubclassId);
             }
         }
-        g_subclassOwners.clear();
+        std::vector<HWND>().swap(g_subclassOwners);
     }
 
 private:
@@ -19566,14 +19530,7 @@ std::optional<uint32_t> ShowNativeReplay(PendingCapture& capture, HWND owner, PO
     // before showing it or placeholders (such as the New submenu's) would be
     // displayed and their invocation would fail.
     if (!capture.menuInitialized) {
-        DWORD exceptionCode = 0;
-        if (!GuardedInitializeMenus(capture, capture.populatedMenu,
-                                    exceptionCode)) {
-            capture.populationFaulted = true;
-            LogPopulationFault(L"submenu initialization", exceptionCode,
-                               capture.handlerModules);
-            return std::nullopt;
-        }
+        InitializeMenuRecursive(capture, capture.populatedMenu, 0);
         capture.menuInitialized = true;
     }
     DumpMenuTree(capture.populatedMenu, capture.idCmdFirst, 0);
@@ -20010,22 +19967,16 @@ private:
         HMENU offscreen = CreatePopupMenu();
         if (offscreen) {
             ClearRecordedItemBitmaps();
-            DWORD exceptionCode = 0;
-            if (!GuardedWarmReplay(menu, offscreen, 1, 0x7FFF, CMF_NORMAL,
-                                   exceptionCode)) {
-                // A faulty handler must not take Explorer down; skip this
-                // context and leave it to the classic menu.
-                LogPopulationFault(L"warm-up", exceptionCode,
-                                   DiffModules(modulesBefore,
-                                               SnapshotLoadedModules()));
-                DestroyMenu(offscreen);
-                // Deliberately no Release: a faulted handler is unsafe to
-                // re-enter.
-                return;
-            }
+            ReplayInto(menu, offscreen, 0, 1, 0x7FFF, CMF_NORMAL);
             MenuModel model = BuildModelFromHMenu(offscreen, 1, signature, menu);
             ClearRecordedItemBitmaps();
             DestroyMenu(offscreen);
+            // The scratch file's name is not the real one; store templates so
+            // the provisional model does not show "<storage>\\warmup" names.
+            if (!model.items.empty() && signature.shape == Shape::Single) {
+                TemplateDynamicLabels(model.items,
+                                      DynamicLabelName(signature.scope, path));
+            }
             if (!model.items.empty()) {
                 ApplyRegistryIcons(model.items, signature);
                 model.handlerModules =
@@ -20415,10 +20366,11 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
             if (cached) {
                 // A cached model may hold label templates from another file
                 // of the same type; resolve them with the current name.
-                ResolveDynamicLabels(cached->items,
-                                     paths.size() == 1
-                                         ? FileNameStem(paths.front())
-                                         : std::wstring());
+                ResolveDynamicLabels(
+                    cached->items,
+                    paths.size() == 1
+                        ? DynamicLabelName(scope, paths.front())
+                        : std::wstring());
             }
             model = cached
                         ? MergeCoreWithCached(BuildCoreModel(scope, paths, shape),

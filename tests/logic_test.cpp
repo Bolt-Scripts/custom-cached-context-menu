@@ -752,19 +752,25 @@ int main() {
 
     // Dynamic extension labels (NanaZip's "Extract to "<name>"") are stored
     // as templates so a model cached per extension does not keep one file's
-    // name; the label is resolved with the current name at open.
+    // name; the label is resolved with the current name at open. Only the
+    // start of a quoted segment is a dynamic name.
     {
         const std::wstring templated =
             cmo::TemplateDynamicLabel(L"Extract to \"myfile\"", L"myfile");
         CHECK(templated == L"Extract to \"\x01\"");
         CHECK(cmo::ResolveDynamicLabel(templated, L"other") ==
               L"Extract to \"other\"");
-        // The name outside quotes, or a short name inside an unrelated label,
-        // is left untouched.
+        // Names that are not at the start of a quoted segment stay untouched.
         CHECK(cmo::TemplateDynamicLabel(L"Extract myfile", L"myfile") ==
               L"Extract myfile");
         CHECK(cmo::TemplateDynamicLabel(L"Make archive", L"arc") ==
               L"Make archive");
+        CHECK(cmo::TemplateDynamicLabel(L"Open with \"Visual Studio Code\"",
+                                        L"Code") ==
+              L"Open with \"Visual Studio Code\"");
+        // Only the first occurrence in a segment is templated ("7z.zip").
+        CHECK(cmo::TemplateDynamicLabel(L"Add to \"7z.7z\"", L"7z") ==
+              L"Add to \"\x01.7z\"");
         // Suffixes after the name survive templating and resolving.
         CHECK(cmo::TemplateDynamicLabel(L"Add to \"myfile.zip.7z\"", L"myfile") ==
               L"Add to \"\x01.zip.7z\"");
@@ -776,6 +782,22 @@ int main() {
         CHECK(cmo::FileNameStem(L"C:\\a\\FMA120_1.1.7.5.zip") ==
               L"FMA120_1.1.7.5");
         CHECK(cmo::FileNameStem(L"C:\\a\\archive") == L"archive");
+        // Files use the stem; folders keep their full name (a folder called
+        // "v1.2" must not become "v1"); other scopes embed no name.
+        CHECK(cmo::DynamicLabelName(cmo::Scope::Files,
+                                    L"C:\\a\\FMA120_1.1.7.5.zip") ==
+              L"FMA120_1.1.7.5");
+        CHECK(cmo::DynamicLabelName(cmo::Scope::Folders, L"C:\\a\\v1.2") ==
+              L"v1.2");
+        CHECK(cmo::DynamicLabelName(cmo::Scope::Folders, L"C:\\a\\Photos") ==
+              L"Photos");
+        CHECK(cmo::DynamicLabelName(cmo::Scope::Background, L"C:\\a").empty());
+        CHECK(cmo::DynamicLabelName(cmo::Scope::NavPane, L"C:\\a").empty());
+        // Folder and background commands differ only by their placeholder.
+        CHECK(cmo::NormalizeVerbCommand(L"\"C:\\x.exe\" \"%1\"") ==
+              cmo::NormalizeVerbCommand(L"\"C:\\x.exe\" \"%V\""));
+        CHECK(cmo::NormalizeVerbCommand(L"\"C:\\x.exe\" \"%1\"") !=
+              cmo::NormalizeVerbCommand(L"\"C:\\y.exe\" \"%1\""));
     }
 
     // Direct verb invocations act on the selection, or on the current folder
@@ -789,16 +811,6 @@ int main() {
         CHECK(cmo::DirectVerbTargetPath(ctx) == L"C:\\folder");
         ctx.paths = {L"C:\\a.txt", L"C:\\b.txt"};
         CHECK(cmo::DirectVerbTargetPath(ctx).empty());
-    }
-
-    // A faulted capture is abandoned: its references are leaked instead of
-    // being released (Release would re-enter the crashed handler).
-    {
-        cmo::PendingCapture capture{};
-        capture.obj = reinterpret_cast<IContextMenu*>(0x1);
-        capture.populationFaulted = true;
-        cmo::ReleaseCapture(capture);
-        CHECK(capture.obj == nullptr);
     }
 
     // Delete flags: Shift deletes permanently; recycling follows the Recycle

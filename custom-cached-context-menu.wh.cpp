@@ -189,7 +189,7 @@ MIT
   $description: Turn on to delete the cached menu models; they rebuild on next use.
 - warmup: true
   $name: Background pre-build
-  $description: Warms common menus shortly after Explorer starts so their first open is instant. Turning it off skips loading every registered context-menu handler at startup (the stock menu's exposure), which avoids crashes from faulty third-party extensions; the first open of each context then builds on demand, like the stock menu.
+  $description: Warms common menus shortly after Explorer starts so their first open is instant. Turning it off skips loading every registered context-menu handler at startup (the stock menu's exposure), which avoids startup crashes from faulty third-party extensions; the first open of each context then builds on demand, like the stock menu. A handler that would crash the stock menu still crashes.
 - warmupExtensions: ".txt, .pdf, .zip, .rar, .7z, .jpg, .png, .mp4, .mp3, .docx, .xlsx, .exe, .lnk"
   $name: Warm-up extensions
   $description: Comma-separated file types whose menus are pre-built at Explorer startup.

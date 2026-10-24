@@ -776,6 +776,15 @@ int main() {
               L"Add to \"\x01.zip.7z\"");
         CHECK(cmo::ResolveDynamicLabel(L"Add to \"\x01.zip.7z\"", L"other") ==
               L"Add to \"other.zip.7z\"");
+        // A short stem must not match the start of a longer quoted word, but
+        // a real name followed by a boundary (quote, dot, backslash) matches.
+        CHECK(cmo::TemplateDynamicLabel(L"Edit with \"Visual Studio\"",
+                                        L"Vis") ==
+              L"Edit with \"Visual Studio\"");
+        CHECK(cmo::TemplateDynamicLabel(L"Add to \"Archive\"", L"a") ==
+              L"Add to \"Archive\"");
+        CHECK(cmo::TemplateDynamicLabel(L"Add to \"a.7z\"", L"a") ==
+              L"Add to \"\x01.7z\"");
         // The NanaZip-style trailing backslash before the closing quote.
         CHECK(cmo::TemplateDynamicLabel(L"Extract to \"myfile\\\"", L"myfile") ==
               L"Extract to \"\x01\\\"");
@@ -798,6 +807,9 @@ int main() {
               cmo::NormalizeVerbCommand(L"\"C:\\x.exe\" \"%V\""));
         CHECK(cmo::NormalizeVerbCommand(L"\"C:\\x.exe\" \"%1\"") !=
               cmo::NormalizeVerbCommand(L"\"C:\\y.exe\" \"%1\""));
+        // %W is the working directory, so it must not match the item verbs.
+        CHECK(cmo::NormalizeVerbCommand(L"\"C:\\x.exe\" \"%1\"") !=
+              cmo::NormalizeVerbCommand(L"\"C:\\x.exe\" \"%W\""));
     }
 
     // Direct verb invocations act on the selection, or on the current folder

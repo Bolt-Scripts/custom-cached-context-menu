@@ -1111,8 +1111,8 @@ void LogShellNewProbe(const wchar_t* ext) {
     }
 }
 
-// Builds the template list once. Warm-up prebuilds it; a first open can build
-// it synchronously as a one-time fallback.
+// Builds the template list once. The warm-up thread or the invalidation
+// thread prepares it, so the open path never pays for the registry walk.
 void EnsureNewTemplates() {
     if (g_newTemplatesReady.load(std::memory_order_acquire)) {
         return;
@@ -15959,10 +15959,18 @@ std::wstring TemplateDynamicLabel(const std::wstring& label,
         }
         if (inQuotes && segmentStart && i + name.size() <= label.size() &&
             _wcsnicmp(label.c_str() + i, name.c_str(), name.size()) == 0) {
-            result += kDynamicNamePlaceholder;
-            i += name.size();
-            segmentStart = false;
-            continue;
+            // Only a complete name: a short stem must not match the start of
+            // a longer quoted word ("Vis" in "Visual Studio").
+            const size_t end = i + name.size();
+            const bool boundary = end == label.size() ||
+                                  label[end] == L'"' || label[end] == L'.' ||
+                                  label[end] == L'\\';
+            if (boundary) {
+                result += kDynamicNamePlaceholder;
+                i = end;
+                segmentStart = false;
+                continue;
+            }
         }
         segmentStart = false;
         result += label[i];
@@ -18091,16 +18099,16 @@ std::wstring ReadShellVerbCommand(const std::wstring& keyPath) {
     return command;
 }
 
-// %1, %V, %W, %L and %D all mean the folder for these registrations;
-// normalize them so the same command with different placeholders matches.
+// %1, %V, %L and %D all mean the folder for these registrations; normalize
+// them so the same command with different placeholders matches. %W is the
+// working directory instead, so a pair using it is not equivalent.
 std::wstring NormalizeVerbCommand(const std::wstring& command) {
     std::wstring result;
     result.reserve(command.size());
     for (size_t i = 0; i < command.size();) {
         if (command[i] == L'%' && i + 1 < command.size()) {
             const wchar_t c = static_cast<wchar_t>(towlower(command[i + 1]));
-            if (c == L'1' || c == L'v' || c == L'w' || c == L'l' ||
-                c == L'd') {
+            if (c == L'1' || c == L'v' || c == L'l' || c == L'd') {
                 result += L"%x";
                 i += 2;
                 continue;
@@ -20163,11 +20171,21 @@ private:
         if (!g_unloading.load()) {
             g_warmup.Stop();
             g_warmup.Start();
+            if (!g_settings->warmup) {
+                // With no warm-up thread, rebuild the Send to entries here;
+                // this runs off the UI thread.
+                RebuildSendToChildren();
+            }
         }
         Wh_Log(L"%s; cache invalidated", reason);
     }
 
     void Run() {
+        // The New submenu is built from these templates. This thread always
+        // runs, unlike the warm-up, so the list is ready even when the
+        // background pre-build is off.
+        EnsureNewTemplates();
+
         uint64_t registryFingerprint = ComputeRegistryFingerprint();
         ULONGLONG lastCheck = GetTickCount64();
 

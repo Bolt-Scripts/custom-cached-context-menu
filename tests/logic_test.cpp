@@ -807,6 +807,9 @@ int main() {
               cmo::NormalizeVerbCommand(L"\"C:\\x.exe\" \"%V\""));
         CHECK(cmo::NormalizeVerbCommand(L"\"C:\\x.exe\" \"%1\"") !=
               cmo::NormalizeVerbCommand(L"\"C:\\y.exe\" \"%1\""));
+        // A command using the working directory is never treated as safe.
+        CHECK(cmo::UsesWorkingDirectory(L"\"C:\\x.exe\" \"%W\""));
+        CHECK(!cmo::UsesWorkingDirectory(L"\"C:\\x.exe\" \"%1\""));
         // %W is the working directory, so it must not match the item verbs.
         CHECK(cmo::NormalizeVerbCommand(L"\"C:\\x.exe\" \"%1\"") !=
               cmo::NormalizeVerbCommand(L"\"C:\\x.exe\" \"%W\""));

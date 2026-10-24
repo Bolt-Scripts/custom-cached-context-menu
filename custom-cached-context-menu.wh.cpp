@@ -18120,6 +18120,13 @@ std::wstring NormalizeVerbCommand(const std::wstring& command) {
     return result;
 }
 
+// A command that uses the working directory cannot be compared across the
+// folder and background registrations: ShellExecuteEx runs the former without
+// lpDirectory, so %W would not be the current folder.
+bool UsesWorkingDirectory(const std::wstring& command) {
+    return StrStrIW(command.c_str(), L"%W") != nullptr;
+}
+
 // Background items are registered under Directory\\Background\\shell, while
 // the direct path invokes the folder verb (Directory\\shell). That is only
 // safe when both registrations run the same command; otherwise the deferred
@@ -18129,8 +18136,12 @@ bool BackgroundVerbMatchesFolderVerb(const std::wstring& verb) {
         ReadShellVerbCommand(L"Directory\\shell\\" + verb + L"\\command");
     const std::wstring backgroundCommand = ReadShellVerbCommand(
         L"Directory\\Background\\shell\\" + verb + L"\\command");
-    return !folderCommand.empty() && !backgroundCommand.empty() &&
-           _wcsicmp(NormalizeVerbCommand(folderCommand).c_str(),
+    if (folderCommand.empty() || backgroundCommand.empty() ||
+        UsesWorkingDirectory(folderCommand) ||
+        UsesWorkingDirectory(backgroundCommand)) {
+        return false;
+    }
+    return _wcsicmp(NormalizeVerbCommand(folderCommand).c_str(),
                     NormalizeVerbCommand(backgroundCommand).c_str()) == 0;
 }
 

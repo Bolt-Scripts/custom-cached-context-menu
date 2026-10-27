@@ -370,6 +370,16 @@ static void TestLocalizationBatch2() {
     CHECK(cmo::TranslateForTesting(L"uz", L"New") == L"Yangi");
 }
 
+static void TestLocalizationBatch3() {
+    CHECK(cmo::TranslateForTesting(L"ru", L"New") == L"Создать");
+    CHECK(cmo::TranslateForTesting(L"uk", L"New") == L"Створити");
+    CHECK(cmo::TranslateForTesting(L"el", L"New") == L"Νέο");
+    CHECK(cmo::TranslateForTesting(L"ar", L"New") == L"جديد");
+    CHECK(cmo::TranslateForTesting(L"fa", L"New") == L"جدید");
+    CHECK(cmo::FindLanguage(L"ar-SA")->rtl);
+    CHECK(cmo::FindLanguage(L"fa-IR")->rtl);
+}
+
 int main() {
     TestLocalizationCore();
     TestLocalizationMenu();
@@ -379,6 +389,7 @@ int main() {
     TestLocalizationRtlLayout();
     TestLocalizationBatch1();
     TestLocalizationBatch2();
+    TestLocalizationBatch3();
 
     // The Windhawk metadata blocks must stay balanced: an unclosed readme
     // block makes the app show "Mod details are missing".

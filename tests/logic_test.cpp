@@ -134,8 +134,56 @@ static void TestLocalizationCore() {
     CHECK(cmo::Tr(L"Open") == L"Open");
 }
 
+static void TestLocalizationMenu() {
+    cmo::SelectLanguage(L"fr-FR");
+    CHECK(cmo::Tr(L"Paste") == L"Coller");
+
+    auto model = cmo::BuildCoreMenuForTesting(
+        cmo::Scope::Folders, {L"C:\\folder"}, cmo::Shape::Single);
+    auto paste = cmo::FindItemByLabel(model, L"Coller");
+    CHECK(paste != nullptr);
+    if (paste) {
+        CHECK(paste->canonicalLabel == L"Paste");
+        CHECK(cmo::EffectiveLabel(*paste) == L"Coller");
+    }
+
+    auto desktop = cmo::BuildCoreMenuForTesting(
+        cmo::Scope::Desktop, {}, cmo::Shape::Single);
+    CHECK(cmo::FindItemByLabel(desktop, L"Nouveau") != nullptr);
+    CHECK(cmo::FindItemByLabel(desktop, L"Paramètres d'affichage") != nullptr);
+    CHECK(cmo::FindItemByLabel(desktop, L"Personnaliser") != nullptr);
+    CHECK(cmo::FindItemByRole(desktop, cmo::BuiltinRole::New) != nullptr);
+
+    auto englishPaste = cmo::FindItemByLabel(model, L"Coller");
+    CHECK(englishPaste != nullptr);
+    if (englishPaste) {
+        cmo::PredicateExpr expr;
+        std::wstring error;
+        CHECK(cmo::ParsePredicateExpr(L"label:\"Paste\"", expr, error));
+        cmo::ItemContext ctx{};
+        ctx.scope = cmo::Scope::Folders;
+        CHECK(cmo::PredicateExprMatches(expr, *englishPaste, ctx));
+
+        cmo::RulesConfig config;
+        cmo::ItemOverride override;
+        override.match = expr;
+        override.hasLabel = true;
+        override.label = L"Renamed";
+        config.overrides.push_back(override);
+        cmo::ApplyItemOverrides(model.items, config, ctx);
+        auto renamed = cmo::FindItemByLabel(model, L"Coller");
+        CHECK(renamed != nullptr);
+        if (renamed) {
+            CHECK(renamed->displayLabel == L"Renamed");
+        }
+    }
+
+    cmo::SelectLanguage(L"en");
+}
+
 int main() {
     TestLocalizationCore();
+    TestLocalizationMenu();
 
     // The Windhawk metadata blocks must stay balanced: an unclosed readme
     // block makes the app show "Mod details are missing".
@@ -244,7 +292,7 @@ int main() {
     bool multiCutEnabled = false;
     bool multiRenameDisabled = false;
     for (const cmo::MenuItem& item : multi.items) {
-        if (item.label == L"Open 3 items") {
+        if (item.label == L"Open") {
             foundOpenItems = true;
         }
         if (item.label == L"Cut" && !(item.flags & cmo::kModelDisabled)) {

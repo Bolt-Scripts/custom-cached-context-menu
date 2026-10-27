@@ -104,6 +104,108 @@ MenuModel BuildCoreFileModel(const std::vector<std::wstring>& paths, Shape shape
     return BuildCoreModel(Scope::Files, paths, shape);
 }
 
+MenuModel BuildCoreMenuForTesting(Scope scope,
+                                  const std::vector<std::wstring>& paths,
+                                  Shape shape) {
+    return BuildCoreModel(scope, paths, shape);
+}
+
+MenuItem MakeCommandForTesting(const wchar_t* label) {
+    MenuItem item{};
+    item.id = 9000;
+    item.kind = ItemKind::Command;
+    item.action = ActionKind::ShellVerb;
+    item.label = label;
+    item.canonicalLabel = label;
+    return item;
+}
+
+MenuItem MakeSubmenuForTesting(const wchar_t* label) {
+    MenuItem item{};
+    item.id = 9001;
+    item.kind = ItemKind::Submenu;
+    item.action = ActionKind::Submenu;
+    item.label = label;
+    item.canonicalLabel = label;
+    return item;
+}
+
+MenuItem* FindItemByLabelInItem(MenuItem& item, const wchar_t* label) {
+    if (_wcsicmp(item.label.c_str(), label) == 0) {
+        return &item;
+    }
+    for (MenuItem& child : item.children) {
+        if (MenuItem* found = FindItemByLabelInItem(child, label)) {
+            return found;
+        }
+    }
+    return nullptr;
+}
+
+MenuItem* FindItemByLabel(const std::vector<MenuItem>& items,
+                          const wchar_t* label) {
+    for (const MenuItem& item : items) {
+        if (_wcsicmp(item.label.c_str(), label) == 0) {
+            return const_cast<MenuItem*>(&item);
+        }
+        if (MenuItem* found = FindItemByLabel(item.children, label)) {
+            return found;
+        }
+    }
+    return nullptr;
+}
+
+MenuItem* FindItemByLabel(const MenuModel& model, const wchar_t* label) {
+    return FindItemByLabel(model.items, label);
+}
+
+MenuItem* FindItemByRole(const std::vector<MenuItem>& items, BuiltinRole role) {
+    for (const MenuItem& item : items) {
+        if (item.builtinRole == role) {
+            return const_cast<MenuItem*>(&item);
+        }
+        if (MenuItem* found = FindItemByRole(item.children, role)) {
+            return found;
+        }
+    }
+    return nullptr;
+}
+
+MenuItem* FindItemByRole(const MenuModel& model, BuiltinRole role) {
+    return FindItemByRole(model.items, role);
+}
+
+size_t CountItemsByLabel(const std::vector<MenuItem>& items,
+                         const wchar_t* label) {
+    size_t count = 0;
+    for (const MenuItem& item : items) {
+        if (_wcsicmp(item.label.c_str(), label) == 0) {
+            ++count;
+        }
+        count += CountItemsByLabel(item.children, label);
+    }
+    return count;
+}
+
+size_t CountItemsByLabel(const MenuModel& model, const wchar_t* label) {
+    return CountItemsByLabel(model.items, label);
+}
+
+size_t CountItemsByRole(const std::vector<MenuItem>& items, BuiltinRole role) {
+    size_t count = 0;
+    for (const MenuItem& item : items) {
+        if (item.builtinRole == role) {
+            ++count;
+        }
+        count += CountItemsByRole(item.children, role);
+    }
+    return count;
+}
+
+size_t CountItemsByRole(const MenuModel& model, BuiltinRole role) {
+    return CountItemsByRole(model.items, role);
+}
+
 // Compatibility wrapper; the open path uses the prebuilt list directly.
 std::wstring ResolveRegistryIconByLabel(const ContextSignature& signature,
                                         const std::wstring& label) {

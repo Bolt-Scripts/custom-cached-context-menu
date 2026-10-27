@@ -18,3 +18,7 @@ assets/theme screenshots/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Python bytecode from the localization generator tests
+__pycache__/
+*.pyc

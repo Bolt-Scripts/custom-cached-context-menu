@@ -994,11 +994,25 @@ struct ControlSpec {
     std::vector<std::wstring> options;  // enums
 };
 
+enum class BuiltinRole : uint8_t {
+    None,
+    New,
+    SendTo,
+    View,
+    SortBy,
+    GroupBy,
+    MoreOptions,
+    Fallback,
+};
+
 struct MenuItem {
     uint32_t id = 0;
     ItemKind kind = ItemKind::Command;
     ActionKind action = ActionKind::ViewAction;
     std::wstring label;
+    // English label used by rules/overrides after label becomes presentational.
+    std::wstring canonicalLabel;
+    BuiltinRole builtinRole = BuiltinRole::None;
     std::wstring canonicalVerb;
     uint32_t viewAction = static_cast<uint32_t>(ViewAction::None);
     uint32_t verbOffset = 0;
@@ -1039,6 +1053,31 @@ struct MenuModel {
     std::vector<std::wstring> handlerModules;
     uint64_t sourceStamp = 0;
 };
+
+bool LabelsMatchIgnoreCase(const std::wstring& left, const std::wstring& right);
+
+inline const std::wstring& EffectiveLabel(const MenuItem& item) {
+    return item.displayLabel.empty() ? item.label : item.displayLabel;
+}
+
+inline bool ItemMatchesLabelToken(const MenuItem& item,
+                                  const std::wstring& token) {
+    if (LabelsMatchIgnoreCase(item.label, token)) {
+        return true;
+    }
+    return !item.canonicalLabel.empty() &&
+           LabelsMatchIgnoreCase(item.canonicalLabel, token);
+}
+
+inline bool ItemMatchesAnyLabelToken(
+    const MenuItem& item, const std::vector<std::wstring>& tokens) {
+    for (const std::wstring& token : tokens) {
+        if (ItemMatchesLabelToken(item, token)) {
+            return true;
+        }
+    }
+    return false;
+}
 
 void FlattenIdsInto(const std::vector<MenuItem>& items, std::vector<uint32_t>& out) {
     for (const MenuItem& item : items) {
@@ -1210,7 +1249,7 @@ std::wstring ResolveVerbAlias(const std::wstring& token) {
 bool IsBuiltinExtra(const MenuItem& item,
                     const std::vector<std::wstring>& windowsItems) {
     for (const std::wstring& token : windowsItems) {
-        if (LabelsMatchIgnoreCase(item.label, token) ||
+        if (ItemMatchesLabelToken(item, token) ||
             EqualsIgnoreCase(item.canonicalVerb, token) ||
             EqualsIgnoreCase(item.canonicalVerb, ResolveVerbAlias(token))) {
             return true;
@@ -1544,7 +1583,8 @@ void EnsureNewTemplates() {
     if (!hasZip) {
         NewTemplate zip;
         zip.kind = NewTemplate::Kind::Data;
-        zip.displayName = L"Compressed (zipped) Folder";
+        zip.displayName = Tr(L"Compressed (zipped) Folder",
+                              L"Compressed (zipped) Folder");
         zip.extension = L".zip";
         zip.data = {0x50, 0x4B, 0x05, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
@@ -1578,7 +1618,7 @@ void EnsureNewTemplates() {
         }
         NewTemplate tmpl;
         tmpl.kind = builtin.kind;
-        tmpl.displayName = builtin.displayName;
+        tmpl.displayName = Tr(builtin.displayName, builtin.displayName);
         tmpl.extension = builtin.extension;
         if (builtin.data) {
             tmpl.data.assign(builtin.data, builtin.data + strlen(builtin.data));
@@ -1594,11 +1634,11 @@ void EnsureNewTemplates() {
     std::vector<NewTemplate> built;
     NewTemplate folder;
     folder.kind = NewTemplate::Kind::Folder;
-    folder.displayName = L"Folder";
+    folder.displayName = Tr(L"Folder", L"Folder");
     built.push_back(std::move(folder));
     NewTemplate shortcut;
     shortcut.kind = NewTemplate::Kind::Shortcut;
-    shortcut.displayName = L"Shortcut";
+    shortcut.displayName = Tr(L"Shortcut", L"Shortcut");
     shortcut.command = ExpandEnv(shortcutCommand);
     built.push_back(std::move(shortcut));
     for (NewTemplate& tmpl : filtered) {
@@ -4085,8 +4125,13 @@ bool PredicateMatches(const Predicate& pred, const MenuItem& item,
     switch (pred.field) {
         case PredicateField::Label: {
             const std::wstring label = NormalizeMenuLabel(item.label);
+            const std::wstring canonical =
+                item.canonicalLabel.empty()
+                    ? std::wstring()
+                    : NormalizeMenuLabel(item.canonicalLabel);
             for (const std::wstring& value : pred.values) {
-                if (GlobMatches(value, label)) {
+                if (GlobMatches(value, label) ||
+                    (!canonical.empty() && GlobMatches(value, canonical))) {
                     return true;
                 }
             }
@@ -5002,7 +5047,7 @@ bool IsThirdPartyItem(const MenuItem& item) {
 bool MatchesAnyToken(const MenuItem& item,
                      const std::vector<std::wstring>& tokens) {
     for (const std::wstring& token : tokens) {
-        if (LabelsMatchIgnoreCase(item.label, token) ||
+        if (ItemMatchesLabelToken(item, token) ||
             EqualsIgnoreCase(item.canonicalVerb, token) ||
             EqualsIgnoreCase(item.canonicalVerb, ResolveVerbAlias(token))) {
             return true;
@@ -5087,7 +5132,13 @@ void ReorganizeAdvancedItems(std::vector<MenuItem>& items,
     submenu.id = 0xF000;
     submenu.kind = ItemKind::Submenu;
     submenu.action = ActionKind::Submenu;
-    submenu.label = options.label;
+    submenu.canonicalLabel = L"More options";
+    submenu.label =
+        options.label.empty() || _wcsicmp(options.label.c_str(),
+                                          L"More options") == 0
+            ? Tr(L"More options", L"More options")
+            : options.label;
+    submenu.builtinRole = BuiltinRole::MoreOptions;
     submenu.iconRef = L"@glyph:E712";
     submenu.children = std::move(advanced);
 
@@ -13861,12 +13912,16 @@ MenuModel BuildCoreModel(Scope scope, const std::vector<std::wstring>& paths, Sh
     model.sig = ContextSignature{scope, typeKey, shape, Variant::Normal};
 
     uint32_t nextId = 1;
+    auto translateLabel = [](const std::wstring& text) {
+        return Tr(text.c_str(), text.c_str());
+    };
     auto makeCommand = [&](std::wstring label, std::wstring verb, uint32_t flags,
                            std::wstring iconRef = L"") {
         MenuItem item{};
         item.id = nextId++;
         item.kind = ItemKind::Command;
-        item.label = std::move(label);
+        item.canonicalLabel = label;
+        item.label = translateLabel(label);
         item.canonicalVerb = std::move(verb);
         item.action = ActionKind::ShellVerb;
         item.flags = flags;
@@ -13879,7 +13934,8 @@ MenuModel BuildCoreModel(Scope scope, const std::vector<std::wstring>& paths, Sh
         MenuItem item{};
         item.id = nextId++;
         item.kind = ItemKind::Command;
-        item.label = std::move(label);
+        item.canonicalLabel = label;
+        item.label = translateLabel(label);
         item.canonicalVerb = std::move(dedupVerb);
         item.action = ActionKind::ViewAction;
         item.viewAction = static_cast<uint32_t>(action);
@@ -13910,7 +13966,8 @@ MenuModel BuildCoreModel(Scope scope, const std::vector<std::wstring>& paths, Sh
         item.id = nextId++;
         item.kind = ItemKind::Submenu;
         item.action = ActionKind::Submenu;
-        item.label = std::move(label);
+        item.canonicalLabel = label;
+        item.label = translateLabel(label);
         model.items.push_back(std::move(item));
         return model.items.back();
     };
@@ -13919,16 +13976,19 @@ MenuModel BuildCoreModel(Scope scope, const std::vector<std::wstring>& paths, Sh
         item.id = nextId++;
         item.kind = ItemKind::Command;
         item.action = ActionKind::Fallback;
-        item.label = L"Show classic menu";
+        item.canonicalLabel = L"Show classic menu";
+        item.label = Tr(L"Show classic menu", L"Show classic menu");
+        item.builtinRole = BuiltinRole::Fallback;
         model.items.push_back(std::move(item));
     };
 
     const bool multi = shape == Shape::Multi;
     const uint32_t multiDisabled = multi ? kModelDisabled : kModelNone;
-    const std::wstring openLabel = FormatMultiLabel(L"Open", paths.size());
+    const std::wstring openLabel = L"Open";
 
     if (scope == Scope::Background || scope == Scope::Desktop) {
         MenuItem& viewMenu = addSubmenu(L"View");
+        viewMenu.builtinRole = BuiltinRole::View;
         viewMenu.iconRef = L"@glyph:E890";
         viewMenu.children.push_back(makeViewAction(L"Extra large icons", L"viewxlarge",
                                                    ViewAction::ViewExtraLargeIcons,
@@ -13966,12 +14026,14 @@ MenuModel BuildCoreModel(Scope scope, const std::vector<std::wstring>& paths, Sh
                                                    ViewAction::AlignToGrid, kModelNone));
 
         MenuItem& sortMenu = addSubmenu(L"Sort by");
+        sortMenu.builtinRole = BuiltinRole::SortBy;
         sortMenu.iconRef = L"@glyph:E8CB";
         for (uint32_t i = 0; i < kShellPropertyKeyCount; ++i) {
             MenuItem sortItem{};
             sortItem.id = nextId++;
             sortItem.kind = ItemKind::Command;
-            sortItem.label = kShellPropertyLabels[i];
+            sortItem.canonicalLabel = kShellPropertyLabels[i];
+            sortItem.label = translateLabel(kShellPropertyLabels[i]);
             sortItem.action = ActionKind::SortBy;
             sortItem.sortIndex = i;
             sortItem.sortAscending = true;
@@ -13987,19 +14049,23 @@ MenuModel BuildCoreModel(Scope scope, const std::vector<std::wstring>& paths, Sh
             MenuItem directionItem{};
             directionItem.id = nextId++;
             directionItem.kind = ItemKind::Command;
-            directionItem.label = ascending ? L"Ascending" : L"Descending";
+            directionItem.canonicalLabel =
+                ascending ? L"Ascending" : L"Descending";
+            directionItem.label = translateLabel(directionItem.canonicalLabel);
             directionItem.action = ActionKind::SortDirection;
             directionItem.sortAscending = ascending;
             sortMenu.children.push_back(std::move(directionItem));
         }
 
         MenuItem& groupMenu = addSubmenu(L"Group by");
+        groupMenu.builtinRole = BuiltinRole::GroupBy;
         groupMenu.iconRef = L"@glyph:E902";
         {
             MenuItem noneItem{};
             noneItem.id = nextId++;
             noneItem.kind = ItemKind::Command;
-            noneItem.label = L"(None)";
+            noneItem.canonicalLabel = L"(None)";
+            noneItem.label = translateLabel(noneItem.canonicalLabel);
             noneItem.action = ActionKind::GroupBy;
             noneItem.sortIndex = kGroupNoneIndex;
             groupMenu.children.push_back(std::move(noneItem));
@@ -14008,7 +14074,8 @@ MenuModel BuildCoreModel(Scope scope, const std::vector<std::wstring>& paths, Sh
             MenuItem groupItem{};
             groupItem.id = nextId++;
             groupItem.kind = ItemKind::Command;
-            groupItem.label = kShellPropertyLabels[i];
+            groupItem.canonicalLabel = kShellPropertyLabels[i];
+            groupItem.label = translateLabel(kShellPropertyLabels[i]);
             groupItem.action = ActionKind::GroupBy;
             groupItem.sortIndex = i;
             groupMenu.children.push_back(std::move(groupItem));
@@ -14023,7 +14090,9 @@ MenuModel BuildCoreModel(Scope scope, const std::vector<std::wstring>& paths, Sh
             MenuItem directionItem{};
             directionItem.id = nextId++;
             directionItem.kind = ItemKind::Command;
-            directionItem.label = ascending ? L"Ascending" : L"Descending";
+            directionItem.canonicalLabel =
+                ascending ? L"Ascending" : L"Descending";
+            directionItem.label = translateLabel(directionItem.canonicalLabel);
             directionItem.action = ActionKind::GroupDirection;
             directionItem.sortAscending = ascending;
             groupMenu.children.push_back(std::move(directionItem));
@@ -14036,6 +14105,7 @@ MenuModel BuildCoreModel(Scope scope, const std::vector<std::wstring>& paths, Sh
         addCommand(L"Paste shortcut", L"pastelink");
         addSeparator();
         MenuItem& newMenu = addSubmenu(L"New");
+        newMenu.builtinRole = BuiltinRole::New;
         BuildNewMenuChildren(newMenu.children, nextId);
         if (scope == Scope::Desktop) {
             addSeparator();
@@ -14080,7 +14150,8 @@ MenuModel BuildCoreModel(Scope scope, const std::vector<std::wstring>& paths, Sh
     addCommand(L"Delete", L"delete", kModelNone, L"@glyph:E74D");
     addSeparator();
     addCommand(L"Create shortcut", L"createshortcut", multiDisabled);
-    addSubmenu(L"Send to");
+    MenuItem& sendTo = addSubmenu(L"Send to");
+    sendTo.builtinRole = BuiltinRole::SendTo;
     addCommand(L"Copy as path", L"copyaspath");
     addSeparator();
     addCommand(L"Properties", L"properties", kModelNone, L"@glyph:E713");
@@ -20834,7 +20905,8 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
             if (item.canonicalVerb == L"paste" && !clipboardHadData) {
                 item.flags |= kModelDisabled;
             }
-            if (item.kind == ItemKind::Submenu && item.label == L"Send to" &&
+            if (item.kind == ItemKind::Submenu &&
+                item.builtinRole == BuiltinRole::SendTo &&
                 item.children.empty()) {
                 item.children = GetSendToChildren();
             }
@@ -20868,7 +20940,7 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
             std::vector<MenuItem>* container = &model.items;
             for (MenuItem& item : model.items) {
                 if (item.kind == ItemKind::Submenu &&
-                    item.label == g_settings->advancedSubmenuLabel) {
+                    item.builtinRole == BuiltinRole::MoreOptions) {
                     container = &item.children;
                     break;
                 }

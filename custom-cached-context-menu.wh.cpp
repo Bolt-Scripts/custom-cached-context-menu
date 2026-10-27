@@ -10,6 +10,10 @@
 // @author          BOLT
 // @github          https://github.com/Bolt-Scripts
 // [CMO:WindhawkMetadata]
+// @name:az Xüsusi Keşlənmiş Kontekst Menyu
+// @description:az Tam fərdiləşdirilə bilən keşlənmiş Explorer kontekst menyusunu dərhal açır: mövzular, tərtibat, rənglər, animasiyalar, qaydalar və fərdi əmrlər.
+// @name:cs Vlastní kontextová nabídka uložená v mezipaměti
+// @description:cs Okamžité otevření kontextové nabídky Explorer uložené v mezipaměti, která je plně přizpůsobitelná: motivy, rozvržení, barvy, animace, pravidla a vlastní příkazy.
 // @name:da Brugerdefineret cache-kontekstmenu
 // @description:da Øjeblikkelig åbning af cachelagret Explorer kontekstmenu, der kan tilpasses fuldt ud: temaer, layout, farver, animationer, regler og brugerdefinerede kommandoer.
 // @name:de-DE Benutzerdefiniertes zwischengespeichertes Kontextmenü
@@ -18,18 +22,30 @@
 // @description:es-ES Menú contextual Explorer en caché de apertura instantánea y totalmente personalizable: temas, diseño, colores, animaciones, reglas y comandos personalizados.
 // @name:fr-FR Menu contextuel mis en cache
 // @description:fr-FR Menu contextuel de l'Explorateur mis en cache et personnalisable : thèmes, disposition, couleurs, animations, règles et commandes personnalisées.
+// @name:hr Prilagođeni kontekstni izbornik u predmemoriji
+// @description:hr Trenutačno otvarajući predmemorirani Explorer kontekstni izbornik koji je potpuno prilagodljiv: teme, izgled, boje, animacije, pravila i prilagođene naredbe.
+// @name:hu Egyéni gyorsítótárazott helyi menü
+// @description:hu Azonnal megnyíló gyorsítótárazott Explorer helyi menü, amely teljesen testreszabható: témák, elrendezés, színek, animációk, szabályok és egyéni parancsok.
 // @name:it-IT Menu contestuale memorizzato nella cache personalizzato
 // @description:it-IT Menu contestuale Explorer memorizzato nella cache ad apertura immediata, completamente personalizzabile: temi, layout, colori, animazioni, regole e comandi personalizzati.
 // @name:nb Tilpasset bufret kontekstmeny
 // @description:nb Umiddelbar åpning av bufret Explorer kontekstmeny som er fullt tilpassbar: temaer, layout, farger, animasjoner, regler og egendefinerte kommandoer.
 // @name:nl-NL Aangepast contextmenu in cache
 // @description:nl-NL Direct te openen in het cachegeheugen opgeslagen Explorer-contextmenu dat volledig aanpasbaar is: thema's, lay-out, kleuren, animaties, regels en aangepaste opdrachten.
+// @name:pl-PL Niestandardowe menu kontekstowe buforowane
+// @description:pl-PL Natychmiast otwierające się menu kontekstowe Explorer z pamięci podręcznej, które można w pełni dostosować: motywy, układ, kolory, animacje, reguły i niestandardowe polecenia.
 // @name:pt-BR Menu de contexto em cache personalizado
 // @description:pt-BR Menu de contexto Explorer em cache de abertura instantânea e totalmente personalizável: temas, layout, cores, animações, regras e comandos personalizados.
 // @name:pt-PT Menu de contexto em cache personalizado
 // @description:pt-PT Menu de contexto Explorer em cache de abertura instantânea e totalmente personalizável: temas, layout, cores, animações, regras e comandos personalizados.
+// @name:ro Meniu contextual personalizat în cache
+// @description:ro Meniul contextual Explorer care se deschide instantaneu în cache, care este complet personalizabil: teme, aspect, culori, animații, reguli și comenzi personalizate.
 // @name:sv Anpassad cachad kontextmeny
 // @description:sv Omedelbart öppnande cachad Explorer-kontextmeny som är helt anpassningsbar: teman, layout, färger, animationer, regler och anpassade kommandon.
+// @name:tr-TR Özel Önbelleğe Alınmış İçerik Menüsü
+// @description:tr-TR Tamamen özelleştirilebilir, anında açılan önbelleğe alınmış Explorer içerik menüsü: temalar, düzen, renkler, animasyonlar, kurallar ve özel komutlar.
+// @name:uz Maxsus keshlangan kontekst menyusi
+// @description:uz To'liq sozlanishi mumkin bo'lgan keshlangan Explorer kontekst menyusi darhol ochiladi: mavzular, tartib, ranglar, animatsiyalar, qoidalar va maxsus buyruqlar.
 // [/CMO:WindhawkMetadata]
 // ==/WindhawkMod==
 
@@ -145,27 +161,43 @@ MIT
 /*
 - theme: "Custom (menu.ini)"
   $name: Theme
+  $name:az: Mövzu
+  $name:cs: téma
   $name:da: Tema
   $name:de-DE: Thema
   $name:es-ES: Tema
   $name:fr-FR: Thème
+  $name:hr: Tema
+  $name:hu: téma
   $name:it-IT: Tema
   $name:nb: Tema
   $name:nl-NL: Thema
+  $name:pl-PL: Motyw
   $name:pt-BR: Tema
   $name:pt-PT: Tema
+  $name:ro: Temă
   $name:sv: Tema
+  $name:tr-TR: Tema
+  $name:uz: Mavzu
   $description: Loads the appearance from <storage>\themes\<name>.ini (created from the bundled preset on first use). menu.ini is never modified.
+  $description:az: Görünüşü <storage>\themes\<name>.ini-dən yükləyir (ilk istifadədə yığılmış ilkin təyinatdan yaradılmışdır). menu.ini heç vaxt dəyişdirilmir.
+  $description:cs: Načte vzhled ze <storage>\themes\<name>.ini (vytvořený z přibalené předvolby při prvním použití). menu.ini se nikdy nemění.
   $description:da: Indlæser udseendet fra <storage>\themes\<name>.ini (oprettet fra den medfølgende forudindstilling ved første brug). menu.ini ændres aldrig.
   $description:de-DE: Lädt das Erscheinungsbild von <storage>\themes\<name>.ini (erstellt aus der gebündelten Voreinstellung bei der ersten Verwendung). menu.ini wird nie verändert.
   $description:es-ES: Carga la apariencia de <storage>\themes\<name>.ini (creada a partir del ajuste preestablecido incluido en el primer uso). menu.ini nunca se modifica.
   $description:fr-FR: Charge l'apparence de <storage>\themes\<name>.ini (créée à partir du préréglage fourni lors de la première utilisation). menu.ini n’est jamais modifié.
+  $description:hr: Učitava izgled iz <storage>\themes\<name>.ini (stvoren iz unaprijed postavljenih postavki pri prvoj upotrebi). menu.ini se nikada ne mijenja.
+  $description:hu: Betölti a <storage>\themes\<name>.ini megjelenését (az első használatkor a mellékelt előbeállításból készült). A menu.ini-t soha nem módosítják.
   $description:it-IT: Carica l'aspetto da <storage>\themes\<name>.ini (creato dal preset in bundle al primo utilizzo). menu.ini non viene mai modificato.
   $description:nb: Laster inn utseendet fra <storage>\themes\<name>.ini (opprettet fra den medfølgende forhåndsinnstillingen ved første gangs bruk). menu.ini endres aldri.
   $description:nl-NL: Laadt het uiterlijk uit <storage>\themes\<name>.ini (gemaakt op basis van de gebundelde voorinstelling bij het eerste gebruik). menu.ini wordt nooit gewijzigd.
+  $description:pl-PL: Ładuje wygląd z <storage>\themes\<name>.ini (utworzony na podstawie dołączonego zestawu wstępnego przy pierwszym użyciu). menu.ini nigdy nie jest modyfikowany.
   $description:pt-BR: Carrega a aparência de <storage>\themes\<name>.ini (criada a partir da predefinição incluída no primeiro uso). menu.ini nunca é modificado.
   $description:pt-PT: Carrega o aspeto de <storage>\themes\<name>.ini (criado a partir da predefinição incluída na primeira utilização). menu.ini nunca é modificado.
+  $description:ro: Încarcă aspectul de la <storage>\themes\<name>.ini (creat din presetarea pachetului la prima utilizare). menu.ini nu este niciodată modificat.
   $description:sv: Laddar utseendet från <storage>\themes\<name>.ini (skapat från den medföljande förinställningen vid första användningen). menu.ini modifieras aldrig.
+  $description:tr-TR: Görünümü <storage>\themes\<name>.ini'den yükler (ilk kullanımda birlikte verilen ön ayardan oluşturulur). menu.ini asla değiştirilmez.
+  $description:uz: <storage>\themes\<name>.ini dan ko'rinishni yuklaydi (birinchi foydalanishda yig'ilgan oldindan o'rnatilgandan yaratilgan). menu.ini hech qachon o'zgartirilmaydi.
   $options:
   - Custom (menu.ini): Custom (menu.ini)
   - Windows 11 Dark: Windows 11 Dark
@@ -184,6 +216,42 @@ MIT
   - Tokyo Night: Tokyo Night
   - AMOLED Black: AMOLED Black
   - High Contrast: High Contrast
+  $options:az:
+  - Custom (menu.ini): Fərdi (menu.ini)
+  - Windows 11 Dark: Windows 11 Qaranlıq
+  - Windows 11 Light: Windows 11 İşıq
+  - Windows 10 Dark: Windows 10 Qaranlıq
+  - Windows 10 Light: Windows 10 İşıq
+  - Nord: Nord
+  - Dracula: Dracula
+  - Solarized Dark: Solarized Dark
+  - Gruvbox Dark: Gruvbox Dark
+  - One Dark: One Dark
+  - Cyberpunk: Cyberpunk
+  - Synthwave: Synthwave
+  - Terminal Green: Terminal Green
+  - Amber CRT: Amber CRT
+  - Tokyo Night: Tokyo Night
+  - AMOLED Black: AMOLED Black
+  - High Contrast: Yüksək Kontrast
+  $options:cs:
+  - Custom (menu.ini): Vlastní (menu.ini)
+  - Windows 11 Dark: Windows 11 Tmavý
+  - Windows 11 Light: Světlo Windows 11
+  - Windows 10 Dark: Windows 10 Tmavý
+  - Windows 10 Light: Světlo Windows 10
+  - Nord: Nord
+  - Dracula: Dracula
+  - Solarized Dark: Solarized Dark
+  - Gruvbox Dark: Gruvbox Dark
+  - One Dark: One Dark
+  - Cyberpunk: Cyberpunk
+  - Synthwave: Synthwave
+  - Terminal Green: Terminal Green
+  - Amber CRT: Amber CRT
+  - Tokyo Night: Tokyo Night
+  - AMOLED Black: AMOLED Black
+  - High Contrast: Vysoký kontrast
   $options:da:
   - Custom (menu.ini): Brugerdefineret (menu.ini)
   - Windows 11 Dark: Windows 11 Mørk
@@ -256,6 +324,42 @@ MIT
   - Tokyo Night: Tokyo Night
   - AMOLED Black: AMOLED Black
   - High Contrast: Contraste élevé
+  $options:hr:
+  - Custom (menu.ini): Prilagođeno (menu.ini)
+  - Windows 11 Dark: Windows 11 Tamno
+  - Windows 11 Light: Windows 11 Svjetlo
+  - Windows 10 Dark: Windows 10 Tamno
+  - Windows 10 Light: Windows 10 Svjetlo
+  - Nord: Nord
+  - Dracula: Dracula
+  - Solarized Dark: Solarized Dark
+  - Gruvbox Dark: Gruvbox Dark
+  - One Dark: One Dark
+  - Cyberpunk: Cyberpunk
+  - Synthwave: Synthwave
+  - Terminal Green: Terminal Green
+  - Amber CRT: Amber CRT
+  - Tokyo Night: Tokyo Night
+  - AMOLED Black: AMOLED Black
+  - High Contrast: Visoki kontrast
+  $options:hu:
+  - Custom (menu.ini): Egyéni (menu.ini)
+  - Windows 11 Dark: Windows 11 Sötét
+  - Windows 11 Light: Windows 11 lámpa
+  - Windows 10 Dark: Windows 10 Sötét
+  - Windows 10 Light: Windows 10 lámpa
+  - Nord: Nord
+  - Dracula: Dracula
+  - Solarized Dark: Solarized Dark
+  - Gruvbox Dark: Gruvbox Dark
+  - One Dark: One Dark
+  - Cyberpunk: Cyberpunk
+  - Synthwave: Synthwave
+  - Terminal Green: Terminal Green
+  - Amber CRT: Amber CRT
+  - Tokyo Night: Tokyo Night
+  - AMOLED Black: AMOLED Black
+  - High Contrast: Magas kontraszt
   $options:it-IT:
   - Custom (menu.ini): Personalizzato (menu.ini)
   - Windows 11 Dark: Windows 11 Scuro
@@ -310,6 +414,24 @@ MIT
   - Tokyo Night: Tokyo Night
   - AMOLED Black: AMOLED Black
   - High Contrast: Hoog contrast
+  $options:pl-PL:
+  - Custom (menu.ini): Niestandardowe (menu.ini)
+  - Windows 11 Dark: Windows 11 Ciemny
+  - Windows 11 Light: Światło Windows 11
+  - Windows 10 Dark: Windows 10 Ciemny
+  - Windows 10 Light: Światło Windows 10
+  - Nord: Nord
+  - Dracula: Dracula
+  - Solarized Dark: Solarized Dark
+  - Gruvbox Dark: Gruvbox Dark
+  - One Dark: One Dark
+  - Cyberpunk: Cyberpunk
+  - Synthwave: Synthwave
+  - Terminal Green: Terminal Green
+  - Amber CRT: Amber CRT
+  - Tokyo Night: Tokyo Night
+  - AMOLED Black: AMOLED Black
+  - High Contrast: Wysoki kontrast
   $options:pt-BR:
   - Custom (menu.ini): Personalizado (menu.ini)
   - Windows 11 Dark: Windows 11 Escuro
@@ -346,6 +468,24 @@ MIT
   - Tokyo Night: Tokyo Night
   - AMOLED Black: AMOLED Black
   - High Contrast: Alto contraste
+  $options:ro:
+  - Custom (menu.ini): Personalizat (menu.ini)
+  - Windows 11 Dark: Windows 11 Întunecat
+  - Windows 11 Light: Windows 11 Lumină
+  - Windows 10 Dark: Windows 10 Întunecat
+  - Windows 10 Light: Windows 10 Lumină
+  - Nord: Nord
+  - Dracula: Dracula
+  - Solarized Dark: Solarized Dark
+  - Gruvbox Dark: Gruvbox Dark
+  - One Dark: One Dark
+  - Cyberpunk: Cyberpunk
+  - Synthwave: Synthwave
+  - Terminal Green: Terminal Green
+  - Amber CRT: Amber CRT
+  - Tokyo Night: Tokyo Night
+  - AMOLED Black: AMOLED Black
+  - High Contrast: Contrast ridicat
   $options:sv:
   - Custom (menu.ini): Anpassad (menu.ini)
   - Windows 11 Dark: Windows 11 Mörk
@@ -364,32 +504,90 @@ MIT
   - Tokyo Night: Tokyo Night
   - AMOLED Black: AMOLED Black
   - High Contrast: Hög kontrast
+  $options:tr-TR:
+  - Custom (menu.ini): Özel (menu.ini)
+  - Windows 11 Dark: Windows 11 Koyu
+  - Windows 11 Light: Windows 11 Işık
+  - Windows 10 Dark: Windows 10 Koyu
+  - Windows 10 Light: Windows 10 Işık
+  - Nord: Nord
+  - Dracula: Dracula
+  - Solarized Dark: Solarized Dark
+  - Gruvbox Dark: Gruvbox Dark
+  - One Dark: One Dark
+  - Cyberpunk: Cyberpunk
+  - Synthwave: Synthwave
+  - Terminal Green: Terminal Green
+  - Amber CRT: Amber CRT
+  - Tokyo Night: Tokyo Night
+  - AMOLED Black: AMOLED Black
+  - High Contrast: Yüksek Kontrast
+  $options:uz:
+  - Custom (menu.ini): Maxsus (menu.ini)
+  - Windows 11 Dark: Windows 11 To'q
+  - Windows 11 Light: Windows 11 yorug'lik
+  - Windows 10 Dark: Windows 10 To'q
+  - Windows 10 Light: Windows 10 yorug'lik
+  - Nord: Nord
+  - Dracula: Dracula
+  - Solarized Dark: Solarized Dark
+  - Gruvbox Dark: Gruvbox Dark
+  - One Dark: One Dark
+  - Cyberpunk: Cyberpunk
+  - Synthwave: Synthwave
+  - Terminal Green: Terminal Green
+  - Amber CRT: Amber CRT
+  - Tokyo Night: Tokyo Night
+  - AMOLED Black: AMOLED Black
+  - High Contrast: Yuqori kontrast
 - menuMode: "custom"
   $name: Menu mode
+  $name:az: Menyu rejimi
+  $name:cs: Režim nabídky
   $name:da: Menutilstand
   $name:de-DE: Menümodus
   $name:es-ES: Modo menú
   $name:fr-FR: Mode du menu
+  $name:hr: Način izbornika
+  $name:hu: Menü mód
   $name:it-IT: Modalità menù
   $name:nb: Menymodus
   $name:nl-NL: Menumodus
+  $name:pl-PL: Tryb menu
   $name:pt-BR: Modo de menu
   $name:pt-PT: Modo de menu
+  $name:ro: Modul meniu
   $name:sv: Menyläge
+  $name:tr-TR: Menü modu
+  $name:uz: Menyu rejimi
   $description: Custom draws the self-rendered menu and falls back to the classic menu after repeated failures. Classic always uses the owner-drawn menu.
+  $description:az: Xüsusi öz-özünə göstərilən menyunu çəkir və təkrarlanan uğursuzluqlardan sonra klassik menyuya qayıdır. Klassik həmişə sahibi tərəfindən tərtib edilmiş menyudan istifadə edir.
+  $description:cs: Vlastní vykreslí samovykreslované menu a po opakovaných selháních se vrátí ke klasickému menu. Classic vždy používá menu nakreslené majitelem.
   $description:da: Custom tegner den selvgengivne menu og falder tilbage til den klassiske menu efter gentagne fejl. Classic bruger altid den ejertegnede menu.
   $description:de-DE: Custom zeichnet das selbst gerenderte Menü und greift nach wiederholten Fehlern auf das klassische Menü zurück. Classic verwendet immer das vom Eigentümer erstellte Menü.
   $description:es-ES: Custom dibuja el menú auto-renderizado y vuelve al menú clásico después de repetidos fallos. Classic siempre usa el menú elaborado por el propietario.
   $description:fr-FR: Custom dessine le menu auto-rendu et revient au menu classique après des échecs répétés. Classic utilise toujours le menu dessiné par le propriétaire.
+  $description:hr: Prilagođeno crta jelovnik koji je sam prikazao i vraća se na klasični jelovnik nakon ponovljenih neuspjeha. Classic uvijek koristi jelovnik koji je izradio vlasnik.
+  $description:hu: Az Egyéni megrajzolja a saját készítésű menüt, és ismételt meghibásodások után visszatér a klasszikus menühöz. A Classic mindig a tulajdonos által készített menüt használja.
   $description:it-IT: Custom disegna il menu self-renderizzato e torna al menu classico dopo ripetuti fallimenti. Classic utilizza sempre il menu disegnato dal proprietario.
   $description:nb: Custom tegner den selvgjengitte menyen og faller tilbake til den klassiske menyen etter gjentatte feil. Classic bruker alltid den eiertegnede menyen.
   $description:nl-NL: Custom tekent het zelf weergegeven menu en valt na herhaalde mislukkingen terug naar het klassieke menu. Classic gebruikt altijd het door de eigenaar getekende menu.
+  $description:pl-PL: Niestandardowe rysuje samodzielnie renderowane menu i powraca do klasycznego menu po powtarzających się niepowodzeniach. Klasyczny zawsze korzysta z menu rysowanego przez właściciela.
   $description:pt-BR: Custom desenha o menu auto-renderizado e volta ao menu clássico após falhas repetidas. Classic sempre usa o menu desenhado pelo proprietário.
   $description:pt-PT: Custom desenha o menu auto-renderizado e volta ao menu clássico após falhas repetidas. O Classic utiliza sempre o menu desenhado pelo proprietário.
+  $description:ro: Personalizat desenează meniul auto-redat și revine la meniul clasic după eșecuri repetate. Classic folosește întotdeauna meniul desenat de proprietar.
   $description:sv: Custom ritar den självrenderade menyn och faller tillbaka till den klassiska menyn efter upprepade misslyckanden. Classic använder alltid den ägarritade menyn.
+  $description:tr-TR: Özel, kendi kendine oluşturulan menüyü çizer ve tekrarlanan hatalardan sonra klasik menüye geri döner. Classic her zaman sahibinin çizdiği menüyü kullanır.
+  $description:uz: Maxsus o'z-o'zidan ko'rsatilgan menyuni chizadi va takroriy nosozliklardan so'ng klassik menyuga qaytadi. Klassik har doim egasi tomonidan tuzilgan menyudan foydalanadi.
   $options:
   - custom: Custom (recommended)
   - classic: Classic owner-drawn
+  $options:az:
+  - custom: Fərdi (tövsiyə olunur)
+  - classic: Klassik sahibi tərəfindən çəkilmişdir
+  $options:cs:
+  - custom: Vlastní (doporučeno)
+  - classic: Klasický vlastníkem kreslený
   $options:da:
   - custom: Brugerdefineret (anbefales)
   - classic: Klassisk ejertegnet
@@ -402,6 +600,12 @@ MIT
   $options:fr-FR:
   - custom: Personnalisé (recommandé)
   - classic: Classique (dessiné par le système)
+  $options:hr:
+  - custom: Prilagođeno (preporučeno)
+  - classic: Klasična vlasnička izrada
+  $options:hu:
+  - custom: Egyéni (ajánlott)
+  - classic: Klasszikus, tulajdonos által rajzolt
   $options:it-IT:
   - custom: Personalizzato (consigliato)
   - classic: Classico disegnato dal proprietario
@@ -411,40 +615,144 @@ MIT
   $options:nl-NL:
   - custom: Aangepast (aanbevolen)
   - classic: Klassiek door de eigenaar getekend
+  $options:pl-PL:
+  - custom: Niestandardowe (zalecane)
+  - classic: Klasyczny, narysowany przez właściciela
   $options:pt-BR:
   - custom: Personalizado (recomendado)
   - classic: Clássico desenhado pelo proprietário
   $options:pt-PT:
   - custom: Personalizado (recomendado)
   - classic: Clássico desenhado pelo proprietário
+  $options:ro:
+  - custom: Personalizat (recomandat)
+  - classic: Clasic desenat de proprietar
   $options:sv:
   - custom: Anpassad (rekommenderas)
   - classic: Klassisk ägartecknad
+  $options:tr-TR:
+  - custom: Özel (önerilen)
+  - classic: Klasik sahibi tarafından çizilmiş
+  $options:uz:
+  - custom: Maxsus (tavsiya etiladi)
+  - classic: Klassik egasi tomonidan chizilgan
 - language: auto
   $name: Language
+  $name:az: Dil
+  $name:cs: Jazyk
   $name:da: Sprog
   $name:de-DE: Sprache
   $name:es-ES: Idioma
   $name:fr-FR: Langue
+  $name:hr: Jezik
+  $name:hu: Nyelv
   $name:it-IT: Lingua
   $name:nb: Språk
   $name:nl-NL: Taal
+  $name:pl-PL: Język
   $name:pt-BR: Idioma
   $name:pt-PT: Idioma
+  $name:ro: Limba
   $name:sv: Språk
+  $name:tr-TR: Dil
+  $name:uz: Til
   $description: Language for the menu and the in-menu settings. Automatic follows the Windows display language and falls back to English when it is not one of the supported languages; this page itself follows Windhawk's language setting.
+  $description:az: Menyu və menyudaxili parametrlər üçün dil. Avtomatik Windows ekran dilini izləyir və dəstəklənən dillərdən biri olmadıqda ingilis dilinə qayıdır; bu səhifənin özü Windhawk-nin dil parametrlərinə uyğundur.
+  $description:cs: Jazyk pro nabídku a nastavení v nabídce. Automaticky se řídí jazykem zobrazení Windows a vrátí se zpět na angličtinu, pokud není jedním z podporovaných jazyků; tato stránka sama o sobě sleduje nastavení jazyka Windhawk.
   $description:da: Sprog for menuen og indstillingerne i menuen. Automatisk følger Windows-skærmsproget og falder tilbage til engelsk, når det ikke er et af de understøttede sprog; selve denne side følger Windhawk's sprogindstilling.
   $description:de-DE: Sprache für das Menü und die Einstellungen im Menü. Automatisch folgt der Windows-Anzeigesprache und greift auf Englisch zurück, wenn es keine der unterstützten Sprachen ist; Diese Seite selbst folgt der Spracheinstellung von Windhawk.
   $description:es-ES: Idioma del menú y la configuración en el menú. Automático sigue el idioma de visualización de Windows y vuelve al inglés cuando no es uno de los idiomas admitidos; esta página en sí sigue la configuración de idioma de Windhawk.
   $description:fr-FR: Langue du menu et des paramètres du menu. Automatique suit la langue d'affichage de Windows et revient à l'anglais lorsqu'il ne s'agit pas d'une des langues prises en charge ; cette page elle-même suit les paramètres de langue du Windhawk.
+  $description:hr: Jezik za izbornik i postavke unutar izbornika. Automatski prati jezik prikaza sustava Windows i vraća se na engleski kada to nije jedan od podržanih jezika; sama ova stranica slijedi jezične postavke Windhawk-a.
+  $description:hu: A menü nyelve és a menün belüli beállítások. Az Automatic a Windows megjelenítési nyelvét követi, és visszavált angolra, ha az nem tartozik a támogatott nyelvek közé; ez az oldal maga a Windhawk nyelvi beállítását követi.
   $description:it-IT: Lingua del menu e impostazioni del menu. Automatico segue la lingua di visualizzazione di Windows e torna all'inglese quando non è una delle lingue supportate; questa pagina stessa segue l'impostazione della lingua di Windhawk.
   $description:nb: Språk for menyen og innstillingene i menyen. Automatisk følger visningsspråket i Windows og faller tilbake til engelsk når det ikke er et av de støttede språkene; selve denne siden følger Windhawks språkinnstilling.
   $description:nl-NL: Taal voor het menu en de instellingen in het menu. Automatisch volgt de Windows-weergavetaal en valt terug op Engels als dit niet een van de ondersteunde talen is; deze pagina zelf volgt de taalinstelling van Windhawk.
+  $description:pl-PL: Język menu i ustawień w menu. Tryb automatyczny podąża za językiem wyświetlania systemu Windows i powraca do języka angielskiego, jeśli nie jest on jednym z obsługiwanych języków; ta strona sama w sobie jest zgodna z ustawieniami językowymi Windhawk.
   $description:pt-BR: Idioma do menu e configurações do menu. Automático segue o idioma de exibição do Windows e volta para o inglês quando não é um dos idiomas suportados; esta página segue a configuração de idioma do Windhawk.
   $description:pt-PT: Idioma do menu e definições do menu. Automático segue o idioma de visualização do Windows e volta ao inglês quando não é um dos idiomas suportados; esta página segue a configuração de idioma do Windhawk.
+  $description:ro: Limba pentru meniu și setările din meniu. Automatic urmează limba de afișare Windows și revine la engleză atunci când aceasta nu este una dintre limbile acceptate; această pagină în sine urmează setarea de limbă a lui Windhawk.
   $description:sv: Språk för menyn och inställningarna i menyn. Automatisk följer Windows visningsspråk och faller tillbaka till engelska när det inte är ett av de språk som stöds; denna sida själv följer Windhawks språkinställning.
+  $description:tr-TR: Menü dili ve menü içi ayarlar. Otomatik, Windows görüntüleme dilini izler ve desteklenen dillerden biri olmadığında İngilizce'ye geri döner; bu sayfanın kendisi Windhawk'nin dil ayarını takip eder.
+  $description:uz: Menyu va menyu ichidagi sozlamalar uchun til. Avtomatik Windows displey tiliga amal qiladi va qo'llab-quvvatlanadigan tillardan biri bo'lmaganda ingliz tiliga qaytadi; bu sahifaning o'zi Windhawk til sozlamalariga amal qiladi.
   $options:
   - auto: Automatic (match Windows)
+  - ar: العربية
+  - az: Azərbaycanca
+  - bn: বাংলা
+  - cs: Čeština
+  - da: Dansk
+  - de: Deutsch
+  - el: Ελληνικά
+  - en: English
+  - es: Español
+  - fa: فارسی
+  - fr: Français
+  - hi: हिन्दी
+  - hr: Hrvatski
+  - ht: Kreyòl ayisyen
+  - hu: Magyar
+  - id: Bahasa Indonesia
+  - it: Italiano
+  - ja: 日本語
+  - ko: 한국어
+  - nb: Norsk bokmål
+  - nl: Nederlands
+  - or: ଓଡ଼ିଆ
+  - pl: Polski
+  - pt-BR: Português (Brasil)
+  - pt-PT: Português (Portugal)
+  - ro: Română
+  - ru: Русский
+  - sv: Svenska
+  - ta: தமிழ்
+  - th: ไทย
+  - tr: Türkçe
+  - uk: Українська
+  - uz: Oʻzbekcha
+  - vi: Tiếng Việt
+  - zh-CN: 简体中文
+  - zh-TW: 繁體中文
+  $options:az:
+  - auto: Avtomatik (Windows uyğun)
+  - ar: العربية
+  - az: Azərbaycanca
+  - bn: বাংলা
+  - cs: Čeština
+  - da: Dansk
+  - de: Deutsch
+  - el: Ελληνικά
+  - en: English
+  - es: Español
+  - fa: فارسی
+  - fr: Français
+  - hi: हिन्दी
+  - hr: Hrvatski
+  - ht: Kreyòl ayisyen
+  - hu: Magyar
+  - id: Bahasa Indonesia
+  - it: Italiano
+  - ja: 日本語
+  - ko: 한국어
+  - nb: Norsk bokmål
+  - nl: Nederlands
+  - or: ଓଡ଼ିଆ
+  - pl: Polski
+  - pt-BR: Português (Brasil)
+  - pt-PT: Português (Portugal)
+  - ro: Română
+  - ru: Русский
+  - sv: Svenska
+  - ta: தமிழ்
+  - th: ไทย
+  - tr: Türkçe
+  - uk: Українська
+  - uz: Oʻzbekcha
+  - vi: Tiếng Việt
+  - zh-CN: 简体中文
+  - zh-TW: 繁體中文
+  $options:cs:
+  - auto: Automaticky (shoda se systémem Windows)
   - ar: العربية
   - az: Azərbaycanca
   - bn: বাংলা
@@ -633,6 +941,82 @@ MIT
   - vi: Tiếng Việt
   - zh-CN: 简体中文
   - zh-TW: 繁體中文
+  $options:hr:
+  - auto: Automatski (odgovara Windowsima)
+  - ar: العربية
+  - az: Azərbaycanca
+  - bn: বাংলা
+  - cs: Čeština
+  - da: Dansk
+  - de: Deutsch
+  - el: Ελληνικά
+  - en: English
+  - es: Español
+  - fa: فارسی
+  - fr: Français
+  - hi: हिन्दी
+  - hr: Hrvatski
+  - ht: Kreyòl ayisyen
+  - hu: Magyar
+  - id: Bahasa Indonesia
+  - it: Italiano
+  - ja: 日本語
+  - ko: 한국어
+  - nb: Norsk bokmål
+  - nl: Nederlands
+  - or: ଓଡ଼ିଆ
+  - pl: Polski
+  - pt-BR: Português (Brasil)
+  - pt-PT: Português (Portugal)
+  - ro: Română
+  - ru: Русский
+  - sv: Svenska
+  - ta: தமிழ்
+  - th: ไทย
+  - tr: Türkçe
+  - uk: Українська
+  - uz: Oʻzbekcha
+  - vi: Tiếng Việt
+  - zh-CN: 简体中文
+  - zh-TW: 繁體中文
+  $options:hu:
+  - auto: Automatikus (egyezik a Windows rendszerrel)
+  - ar: العربية
+  - az: Azərbaycanca
+  - bn: বাংলা
+  - cs: Čeština
+  - da: Dansk
+  - de: Deutsch
+  - el: Ελληνικά
+  - en: English
+  - es: Español
+  - fa: فارسی
+  - fr: Français
+  - hi: हिन्दी
+  - hr: Hrvatski
+  - ht: Kreyòl ayisyen
+  - hu: Magyar
+  - id: Bahasa Indonesia
+  - it: Italiano
+  - ja: 日本語
+  - ko: 한국어
+  - nb: Norsk bokmål
+  - nl: Nederlands
+  - or: ଓଡ଼ିଆ
+  - pl: Polski
+  - pt-BR: Português (Brasil)
+  - pt-PT: Português (Portugal)
+  - ro: Română
+  - ru: Русский
+  - sv: Svenska
+  - ta: தமிழ்
+  - th: ไทย
+  - tr: Türkçe
+  - uk: Українська
+  - uz: Oʻzbekcha
+  - vi: Tiếng Việt
+  - zh-CN: 简体中文
+  - zh-TW: 繁體中文
   $options:it-IT:
   - auto: Automatico (corrisponde a Windows)
   - ar: العربية
@@ -747,6 +1131,44 @@ MIT
   - vi: Tiếng Việt
   - zh-CN: 简体中文
   - zh-TW: 繁體中文
+  $options:pl-PL:
+  - auto: Automatyczny (dopasowany do systemu Windows)
+  - ar: العربية
+  - az: Azərbaycanca
+  - bn: বাংলা
+  - cs: Čeština
+  - da: Dansk
+  - de: Deutsch
+  - el: Ελληνικά
+  - en: English
+  - es: Español
+  - fa: فارسی
+  - fr: Français
+  - hi: हिन्दी
+  - hr: Hrvatski
+  - ht: Kreyòl ayisyen
+  - hu: Magyar
+  - id: Bahasa Indonesia
+  - it: Italiano
+  - ja: 日本語
+  - ko: 한국어
+  - nb: Norsk bokmål
+  - nl: Nederlands
+  - or: ଓଡ଼ିଆ
+  - pl: Polski
+  - pt-BR: Português (Brasil)
+  - pt-PT: Português (Portugal)
+  - ro: Română
+  - ru: Русский
+  - sv: Svenska
+  - ta: தமிழ்
+  - th: ไทย
+  - tr: Türkçe
+  - uk: Українська
+  - uz: Oʻzbekcha
+  - vi: Tiếng Việt
+  - zh-CN: 简体中文
+  - zh-TW: 繁體中文
   $options:pt-BR:
   - auto: Automático (corresponde ao Windows)
   - ar: العربية
@@ -823,6 +1245,44 @@ MIT
   - vi: Tiếng Việt
   - zh-CN: 简体中文
   - zh-TW: 繁體中文
+  $options:ro:
+  - auto: Automat (se potrivește cu Windows)
+  - ar: العربية
+  - az: Azərbaycanca
+  - bn: বাংলা
+  - cs: Čeština
+  - da: Dansk
+  - de: Deutsch
+  - el: Ελληνικά
+  - en: English
+  - es: Español
+  - fa: فارسی
+  - fr: Français
+  - hi: हिन्दी
+  - hr: Hrvatski
+  - ht: Kreyòl ayisyen
+  - hu: Magyar
+  - id: Bahasa Indonesia
+  - it: Italiano
+  - ja: 日本語
+  - ko: 한국어
+  - nb: Norsk bokmål
+  - nl: Nederlands
+  - or: ଓଡ଼ିଆ
+  - pl: Polski
+  - pt-BR: Português (Brasil)
+  - pt-PT: Português (Portugal)
+  - ro: Română
+  - ru: Русский
+  - sv: Svenska
+  - ta: தமிழ்
+  - th: ไทย
+  - tr: Türkçe
+  - uk: Українська
+  - uz: Oʻzbekcha
+  - vi: Tiếng Việt
+  - zh-CN: 简体中文
+  - zh-TW: 繁體中文
   $options:sv:
   - auto: Automatisk (matcha Windows)
   - ar: العربية
@@ -861,374 +1321,706 @@ MIT
   - vi: Tiếng Việt
   - zh-CN: 简体中文
   - zh-TW: 繁體中文
+  $options:tr-TR:
+  - auto: Otomatik (Windows'la eşleş)
+  - ar: العربية
+  - az: Azərbaycanca
+  - bn: বাংলা
+  - cs: Čeština
+  - da: Dansk
+  - de: Deutsch
+  - el: Ελληνικά
+  - en: English
+  - es: Español
+  - fa: فارسی
+  - fr: Français
+  - hi: हिन्दी
+  - hr: Hrvatski
+  - ht: Kreyòl ayisyen
+  - hu: Magyar
+  - id: Bahasa Indonesia
+  - it: Italiano
+  - ja: 日本語
+  - ko: 한국어
+  - nb: Norsk bokmål
+  - nl: Nederlands
+  - or: ଓଡ଼ିଆ
+  - pl: Polski
+  - pt-BR: Português (Brasil)
+  - pt-PT: Português (Portugal)
+  - ro: Română
+  - ru: Русский
+  - sv: Svenska
+  - ta: தமிழ்
+  - th: ไทย
+  - tr: Türkçe
+  - uk: Українська
+  - uz: Oʻzbekcha
+  - vi: Tiếng Việt
+  - zh-CN: 简体中文
+  - zh-TW: 繁體中文
+  $options:uz:
+  - auto: Avtomatik (Windows mos)
+  - ar: العربية
+  - az: Azərbaycanca
+  - bn: বাংলা
+  - cs: Čeština
+  - da: Dansk
+  - de: Deutsch
+  - el: Ελληνικά
+  - en: English
+  - es: Español
+  - fa: فارسی
+  - fr: Français
+  - hi: हिन्दी
+  - hr: Hrvatski
+  - ht: Kreyòl ayisyen
+  - hu: Magyar
+  - id: Bahasa Indonesia
+  - it: Italiano
+  - ja: 日本語
+  - ko: 한국어
+  - nb: Norsk bokmål
+  - nl: Nederlands
+  - or: ଓଡ଼ିଆ
+  - pl: Polski
+  - pt-BR: Português (Brasil)
+  - pt-PT: Português (Portugal)
+  - ro: Română
+  - ru: Русский
+  - sv: Svenska
+  - ta: தமிழ்
+  - th: ไทย
+  - tr: Türkçe
+  - uk: Українська
+  - uz: Oʻzbekcha
+  - vi: Tiếng Việt
+  - zh-CN: 简体中文
+  - zh-TW: 繁體中文
 - enableShiftBypass: true
   $name: Bypass keys
+  $name:az: Bypass açarları
+  $name:cs: Obejít klíče
   $name:da: Bypass nøgler
   $name:de-DE: Schlüssel umgehen
   $name:es-ES: Claves de derivación
   $name:fr-FR: Touches de contournement
+  $name:hr: Premosni ključevi
+  $name:hu: Kulcsok megkerülése
   $name:it-IT: Chiavi di bypass
   $name:nb: Omgå nøkler
   $name:nl-NL: Sleutels omzeilen
+  $name:pl-PL: Omiń klucze
   $name:pt-BR: Ignorar chaves
   $name:pt-PT: Ignorar chaves
+  $name:ro: Tastele de ocolire
   $name:sv: Bypass nycklar
+  $name:tr-TR: Anahtarları atla
+  $name:uz: Bypass kalitlari
   $description: Hold Shift while right-clicking to bypass the mod and get the stock classic menu, or Ctrl for the untouched native menu.
+  $description:az: Modu yan keçmək və stok klassik menyusunu və ya toxunulmamış yerli menyu üçün Ctrl əldə etmək üçün sağ klikləyərkən Shift düyməsini basıb saxlayın.
+  $description:cs: Podržením Shift a kliknutím pravým tlačítkem myši obcházíte mod a získáte klasické menu, nebo Ctrl pro nedotčené nativní menu.
   $description:da: Hold Shift nede, mens du højreklikker for at omgå mod'et og få den klassiske menu, eller Ctrl for den uberørte native menu.
   $description:de-DE: Halten Sie Shift gedrückt, während Sie mit der rechten Maustaste klicken, um den Mod zu umgehen und das klassische Standardmenü zu erhalten, oder Ctrl für das unberührte native Menü.
   $description:es-ES: Mantenga presionado Shift mientras hace clic derecho para omitir el mod y obtener el menú clásico estándar, o Ctrl para el menú nativo intacto.
   $description:fr-FR: Maintenez Shift tout en cliquant avec le bouton droit pour contourner le mod et obtenir le menu classique d'origine, ou Ctrl pour le menu natif intact.
+  $description:hr: Držite Shift dok desnom tipkom miša kliknete kako biste zaobišli mod i dobili standardni klasični izbornik ili Ctrl za netaknuti izvorni izbornik.
+  $description:hu: Tartsa lenyomva a Shift billentyűt, miközben a jobb gombbal kattint a mod megkerüléséhez, és elérheti a normál klasszikus menüt, vagy a Ctrl gombot az érintetlen natív menühöz.
   $description:it-IT: Tieni premuto Shift mentre fai clic con il pulsante destro del mouse per bypassare la mod e ottenere il menu classico di serie o Ctrl per il menu nativo intatto.
   $description:nb: Hold Shift mens du høyreklikker for å omgå moden og få den klassiske menyen, eller Ctrl for den uberørte native-menyen.
   $description:nl-NL: Houd Shift vast terwijl je met de rechtermuisknop klikt om de mod te omzeilen en het standaard klassieke menu te krijgen, of Ctrl voor het onaangeroerde oorspronkelijke menu.
+  $description:pl-PL: Przytrzymaj Shift podczas klikania prawym przyciskiem myszy, aby ominąć mod i uzyskać standardowe menu klasyczne, lub Ctrl, aby uzyskać niezmienione menu natywne.
   $description:pt-BR: Segure Shift enquanto clica com o botão direito para ignorar o mod e obter o menu clássico de estoque, ou Ctrl para o menu nativo intocado.
   $description:pt-PT: Segure Shift enquanto clica com o botão direito do rato para ignorar o mod e obter o menu clássico de stock, ou Ctrl para o menu nativo intocado.
+  $description:ro: Țineți apăsat Shift în timp ce faceți clic dreapta pentru a ocoli modul și a obține meniul clasic stoc sau Ctrl pentru meniul nativ neatins.
   $description:sv: Håll Shift medan du högerklickar för att kringgå modden och få den klassiska menyn, eller Ctrl för den orörda inbyggda menyn.
+  $description:tr-TR: Modu atlayıp standart klasik menüyü almak için sağ tıklarken Shift'yi basılı tutun veya el değmemiş yerel menü için Ctrl'yi basılı tutun.
+  $description:uz: Modni chetlab o'tish va birja klassik menyusini olish uchun sichqonchaning o'ng tugmachasini bosgan holda Shift-ni yoki tegilmagan mahalliy menyu uchun Ctrl-ni ushlab turing.
 - instantMenuFade: true
   $name: Instant menu open
+  $name:az: Ani menyu açıqdır
+  $name:cs: Otevřená okamžitá nabídka
   $name:da: Øjeblikkelig menu åben
   $name:de-DE: Sofortiges Menü geöffnet
   $name:es-ES: Menú instantáneo abierto
   $name:fr-FR: Ouverture instantanée du menu
+  $name:hr: Otvoren instant izbornik
+  $name:hu: Azonnali menü megnyitása
   $name:it-IT: Menu istantaneo aperto
   $name:nb: Øyeblikkelig meny åpen
   $name:nl-NL: Instantmenu geopend
+  $name:pl-PL: Menu natychmiastowe otwarte
   $name:pt-BR: Menu instantâneo aberto
   $name:pt-PT: Menu instantâneo aberto
+  $name:ro: Meniu instantaneu deschis
   $name:sv: Instant-menyn öppen
+  $name:tr-TR: Anlık menü açık
+  $name:uz: Tezkor menyu ochiladi
   $description: Shows native fallback menus (classic mode, fallbacks) without the system open animation, via TPM_NOANIMATION.
+  $description:az: TPM_NOANIMATION vasitəsilə sistem açıq animasiyası olmadan yerli ehtiyat menyularını (klassik rejim, ehtiyatlar) göstərir.
+  $description:cs: Zobrazuje nativní záložní nabídky (klasický režim, záložní) bez animace otevřeného systému prostřednictvím TPM_NOANIMATION.
   $description:da: Viser native reservemenuer (klassisk tilstand, fallbacks) uden systemets åbne animation via TPM_NOANIMATION.
   $description:de-DE: Zeigt native Fallback-Menüs (klassischer Modus, Fallbacks) ohne die Systemöffnungsanimation über TPM_NOANIMATION an.
   $description:es-ES: Muestra menús de respaldo nativos (modo clásico, respaldos) sin la animación de apertura del sistema, a través de TPM_NOANIMATION.
   $description:fr-FR: Affiche les menus de secours natifs (mode classique, secours) sans l'animation d'ouverture du système, via TPM_NOANIMATION.
+  $description:hr: Prikazuje izvorne rezervne izbornike (klasični način rada, rezervne opcije) bez animacije otvaranja sustava, putem TPM_NOANIMATION.
+  $description:hu: Megjeleníti a natív tartalék menüket (klasszikus mód, tartalék menük) a rendszer megnyitása nélkül, a TPM_NOANIMATION-n keresztül.
   $description:it-IT: Mostra i menu di fallback nativi (modalità classica, fallback) senza l'animazione di apertura del sistema, tramite TPM_NOANIMATION.
   $description:nb: Viser native reservemenyer (klassisk modus, fallbacks) uten systemets åpen animasjon, via TPM_NOANIMATION.
   $description:nl-NL: Toont native fallback-menu's (klassieke modus, fallbacks) zonder de open animatie van het systeem, via TPM_NOANIMATION.
+  $description:pl-PL: Pokazuje natywne menu awaryjne (tryb klasyczny, awaryjne) bez animacji otwierania systemu, poprzez TPM_NOANIMATION.
   $description:pt-BR: Mostra menus alternativos nativos (modo clássico, substitutos) sem a animação de abertura do sistema, via TPM_NOANIMATION.
   $description:pt-PT: Mostra menus alternativos nativos (modo clássico, substitutos) sem a animação de abertura do sistema, através de TPM_NOANIMATION.
+  $description:ro: Afișează meniuri de rezervă native (modul clasic, alternative) fără animația deschisă a sistemului, prin TPM_NOANIMATION.
   $description:sv: Visar inbyggda reservmenyer (klassiskt läge, fallbacks) utan systemets öppna animering, via TPM_NOANIMATION.
+  $description:tr-TR: TPM_NOANIMATION aracılığıyla sistem açma animasyonu olmadan yerel geri dönüş menülerini (klasik mod, geri dönüşler) gösterir.
+  $description:uz: TPM_NOANIMATION orqali tizimning ochiq animatsiyasisiz mahalliy zaxira menyularni (klassik rejim, zaxiralar) ko'rsatadi.
 - showMoreOptionsItem: true
   $name: Show classic menu item
+  $name:az: Klassik menyu elementini göstərin
+  $name:cs: Zobrazit klasickou položku nabídky
   $name:da: Vis klassisk menupunkt
   $name:de-DE: Klassischen Menüpunkt anzeigen
   $name:es-ES: Mostrar elemento de menú clásico
   $name:fr-FR: Afficher l'élément du menu classique
+  $name:hr: Prikaži klasičnu stavku izbornika
+  $name:hu: Klasszikus menüelem megjelenítése
   $name:it-IT: Mostra la voce di menu classica
   $name:nb: Vis klassisk menyelement
   $name:nl-NL: Klassiek menu-item weergeven
+  $name:pl-PL: Pokaż klasyczny element menu
   $name:pt-BR: Mostrar item de menu clássico
   $name:pt-PT: Mostrar item de menu clássico
+  $name:ro: Afișează elementul de meniu clasic
   $name:sv: Visa klassiska menyalternativ
+  $name:tr-TR: Klasik menü öğesini göster
+  $name:uz: Klassik menyu elementini ko'rsatish
   $description: Add a "Show classic menu" entry at the bottom of the replacement menu.
+  $description:az: Əvəzedici menyunun altındakı "Klassik menyunu göstər" girişini əlavə edin.
+  $description:cs: Do spodní části náhradní nabídky přidejte položku „Zobrazit klasickou nabídku“.
   $description:da: Tilføj en "Vis klassisk menu"-post nederst i erstatningsmenuen.
   $description:de-DE: Fügen Sie unten im Ersatzmenü den Eintrag „Klassisches Menü anzeigen“ hinzu.
   $description:es-ES: Agregue una entrada "Mostrar menú clásico" en la parte inferior del menú de reemplazo.
   $description:fr-FR: Ajoutez une entrée "Afficher le menu classique" en bas du menu de remplacement.
+  $description:hr: Dodajte unos "Prikaži klasični izbornik" na dnu zamjenskog izbornika.
+  $description:hu: Adjon hozzá egy „Klasszikus menü megjelenítése” bejegyzést a helyettesítő menü aljához.
   $description:it-IT: Aggiungi una voce "Mostra menu classico" nella parte inferiore del menu sostitutivo.
   $description:nb: Legg til en «Vis klassisk meny»-oppføring nederst på erstatningsmenyen.
   $description:nl-NL: Voeg een item 'Klassiek menu weergeven' toe onder aan het vervangingsmenu.
+  $description:pl-PL: Dodaj wpis „Pokaż menu klasyczne” na dole menu zastępczego.
   $description:pt-BR: Adicione uma entrada “Mostrar menu clássico” na parte inferior do menu de substituição.
   $description:pt-PT: Adicione uma entrada “Mostrar menu clássico” na parte inferior do menu de substituição.
+  $description:ro: Adăugați o intrare „Afișați meniul clasic” în partea de jos a meniului de înlocuire.
   $description:sv: Lägg till en "Visa klassisk meny"-post längst ned på ersättningsmenyn.
+  $description:tr-TR: Değiştirme menüsünün altına "Klasik menüyü göster" girişini ekleyin.
+  $description:uz: O'zgartirish menyusining pastki qismida "Klassik menyuni ko'rsatish" yozuvini qo'shing.
 - topBar: false
   $name: Top action bar
+  $name:az: Üst fəaliyyət çubuğu
+  $name:cs: Horní akční lišta
   $name:da: Øverste handlingsbjælke
   $name:de-DE: Obere Aktionsleiste
   $name:es-ES: Barra de acción superior
   $name:fr-FR: Barre d'actions supérieure
+  $name:hr: Gornja akcijska traka
+  $name:hu: Legfelső akciósáv
   $name:it-IT: Barra delle azioni superiore
   $name:nb: Øverste handlingslinje
   $name:nl-NL: Actiebalk bovenaan
+  $name:pl-PL: Górny pasek akcji
   $name:pt-BR: Barra de ação superior
   $name:pt-PT: Barra de ação superior
+  $name:ro: Bara de acțiuni de sus
   $name:sv: Översta åtgärdsfältet
+  $name:tr-TR: Üst işlem çubuğu
+  $name:uz: Yuqori harakatlar paneli
   $description: Moves Cut, Copy, Paste, Rename and Delete into an icon bar on the side of the menu nearest the cursor, like the Windows 11 menu. Custom menu mode only.
+  $description:az: Windows 11 menyusu kimi, kursora ən yaxın menyunun yan tərəfindəki nişanlar çubuğuna Kəs, Kopyalayın, Yapışdırın, Adını dəyişdirin və Silin. Yalnız fərdi menyu rejimi.
+  $description:cs: Přesune Vyjmout, Kopírovat, Vložit, Přejmenovat a Odstranit do lišty ikon na straně nabídky nejblíže kurzoru, jako je nabídka Windows 11. Pouze režim vlastní nabídky.
   $description:da: Flytter Klip, Kopier, Indsæt, Omdøb og Slet til en ikonlinje på siden af menuen nærmest markøren, som Windows 11-menuen. Kun brugerdefineret menutilstand.
   $description:de-DE: Verschiebt Ausschneiden, Kopieren, Einfügen, Umbenennen und Löschen in eine Symbolleiste auf der Seite des Menüs, die dem Cursor am nächsten liegt, wie das Windows 11-Menü. Nur benutzerdefinierter Menümodus.
   $description:es-ES: Mueve Cortar, Copiar, Pegar, Cambiar nombre y Eliminar a una barra de iconos en el lado del menú más cercano al cursor, como el menú Windows 11. Solo modo de menú personalizado.
   $description:fr-FR: Déplace Couper, Copier, Coller, Renommer et Supprimer dans une barre d'icônes sur le côté du menu le plus proche du curseur, comme le menu Windows 11. Mode menu personnalisé uniquement.
+  $description:hr: Premješta Izreži, Kopiraj, Zalijepi, Preimenuj i Izbriši u traku s ikonama na strani izbornika najbližoj pokazivaču, poput Windows 11 izbornika. Samo način prilagođenog izbornika.
+  $description:hu: A kivágást, másolást, beillesztést, átnevezést és törlést a menü kurzorhoz legközelebbi oldalán lévő ikonsávba helyezi, például a Windows 11 menüt. Csak egyéni menü mód.
   $description:it-IT: Sposta Taglia, Copia, Incolla, Rinomina ed Elimina in una barra delle icone sul lato del menu più vicino al cursore, come il menu Windows 11. Solo modalità menu personalizzato.
   $description:nb: Flytter Klipp ut, Kopier, Lim inn, Gi nytt navn og Slett til en ikonlinje på siden av menyen nærmest markøren, som Windows 11-menyen. Kun tilpasset menymodus.
   $description:nl-NL: Verplaatst Knippen, Kopiëren, Plakken, Hernoemen en Verwijderen naar een pictogrammenbalk aan de kant van het menu die zich het dichtst bij de cursor bevindt, zoals het Windows 11-menu. Alleen aangepaste menumodus.
+  $description:pl-PL: Przenosi polecenie Wytnij, Kopiuj, Wklej, Zmień nazwę i Usuń na pasek ikon z boku menu najbliżej kursora, np. menu Windows 11. Tylko tryb menu niestandardowego.
   $description:pt-BR: Move Recortar, Copiar, Colar, Renomear e Excluir em uma barra de ícones na lateral do menu mais próxima do cursor, como o menu Windows 11. Somente modo de menu personalizado.
   $description:pt-PT: Move Recortar, Copiar, Colar, Renomear e Apagar numa barra de ícones na lateral do menu mais próxima do cursor, como o menu Windows 11. Apenas modo de menu personalizado.
+  $description:ro: Mută Cut, Copy, Paste, Redenumire și Delete într-o bară de pictograme pe partea laterală a meniului cea mai apropiată de cursor, cum ar fi meniul Windows 11. Numai modul meniu personalizat.
   $description:sv: Flyttar Klipp ut, Kopiera, Klistra in, Byt namn och Ta bort till en ikonrad på sidan av menyn närmast markören, som Windows 11-menyn. Endast anpassat menyläge.
+  $description:tr-TR: Kes, Kopyala, Yapıştır, Yeniden Adlandır ve Sil'i, Windows 11 menüsü gibi menünün imlece en yakın tarafındaki simge çubuğuna taşır. Yalnızca özel menü modu.
+  $description:uz: Kesish, Nusxalash, joylashtirish, nomini o'zgartirish va o'chirishni Windows 11 menyusi kabi kursorga eng yaqin menyuning yon tomonidagi piktogramma satriga o'tkazadi. Faqat shaxsiy menyu rejimi.
 - submenuDelayMs: 150
   $name: Submenu open delay
+  $name:az: Alt menyunun açılması gecikməsi
+  $name:cs: Zpoždění otevření podnabídky
   $name:da: Undermenu åbningsforsinkelse
   $name:de-DE: Verzögerung beim Öffnen des Untermenüs
   $name:es-ES: Retardo de apertura del submenú
   $name:fr-FR: Délai des sous-menus
+  $name:hr: Odgoda otvaranja podizbornika
+  $name:hu: Az almenü megnyitásának késleltetése
   $name:it-IT: Ritardo apertura sottomenu
   $name:nb: Undermeny åpningsforsinkelse
   $name:nl-NL: Submenu openingsvertraging
+  $name:pl-PL: Opóźnienie otwarcia podmenu
   $name:pt-BR: Atraso na abertura do submenu
   $name:pt-PT: Atraso na abertura do submenu
+  $name:ro: Întârziere deschidere submeniu
   $name:sv: Undermeny öppen fördröjning
+  $name:tr-TR: Alt menü açılma gecikmesi
+  $name:uz: Pastki menyuni ochish kechikishi
   $description: Milliseconds before a hovered submenu opens while the replacement menu is shown. 0 opens instantly; -1 keeps the Windows setting.
+  $description:az: Dəyişdirmə menyusu göstərildiyi halda üzərinə qoyulmuş alt menyunun açılmasından əvvəl millisaniyələr. 0 dərhal açılır; -1 Windows parametrlərini saxlayır.
+  $description:cs: Milisekundy předtím, než se otevře umístěná podnabídka, zatímco je zobrazena nabídka náhrady. 0 se otevře okamžitě; -1 zachová nastavení Windows.
   $description:da: Millisekunder før en undermenu, der svæver over, åbnes, mens erstatningsmenuen vises. 0 åbner øjeblikkeligt; -1 beholder Windows-indstillingen.
   $description:de-DE: Millisekunden, bevor ein schwebendes Untermenü geöffnet wird, während das Ersatzmenü angezeigt wird. 0 öffnet sich sofort; -1 behält die Windows-Einstellung bei.
   $description:es-ES: Milisegundos antes de que se abra un submenú suspendido mientras se muestra el menú de reemplazo. 0 se abre instantáneamente; -1 mantiene la configuración de Windows.
   $description:fr-FR: Millisecondes avant l'ouverture d'un sous-menu survolé pendant que le menu de remplacement est affiché. 0 s'ouvre instantanément ; -1 conserve le paramètre Windows.
+  $description:hr: Milisekunde prije otvaranja podizbornika nad kojim lebdite dok je prikazan zamjenski izbornik. 0 se otvara trenutno; -1 zadržava postavke sustava Windows.
+  $description:hu: Ezredmásodperccel azelőtt, hogy megnyílik egy lebegtetett almenü, miközben a helyettesítő menü látható. 0 azonnal megnyílik; -1 megtartja a Windows beállítást.
   $description:it-IT: Millisecondi prima che si apra un sottomenu al passaggio del mouse mentre viene visualizzato il menu di sostituzione. 0 si apre istantaneamente; -1 mantiene l'impostazione di Windows.
   $description:nb: Millisekunder før en undermeny med sveve åpnes mens erstatningsmenyen vises. 0 åpnes umiddelbart; -1 beholder Windows-innstillingen.
   $description:nl-NL: Milliseconden voordat een zwevend submenu wordt geopend terwijl het vervangingsmenu wordt weergegeven. 0 wordt onmiddellijk geopend; -1 behoudt de Windows-instelling.
+  $description:pl-PL: Milisekundy przed otwarciem podmenu po najechaniu kursorem i wyświetleniu menu zastępczego. 0 otwiera się natychmiast; -1 zachowuje ustawienie systemu Windows.
   $description:pt-BR: Milissegundos antes que um submenu suspenso seja aberto enquanto o menu de substituição é mostrado. 0 abre instantaneamente; -1 mantém a configuração do Windows.
   $description:pt-PT: Milissegundos antes de um submenu suspenso ser aberto enquanto o menu de substituição é apresentado. 0 abre instantaneamente; -1 mantém a configuração do Windows.
+  $description:ro: Milisecunde înainte ca un submeniu plasat cu mouse-ul să se deschidă în timp ce este afișat meniul de înlocuire. 0 se deschide instantaneu; -1 păstrează setarea Windows.
   $description:sv: Millisekunder innan en undermeny med hovring öppnas medan ersättningsmenyn visas. 0 öppnas omedelbart; -1 behåller Windows-inställningen.
+  $description:tr-TR: Değiştirme menüsü gösterilirken fareyle üzerine gelinen bir alt menünün açılmasından milisaniyeler önce. 0 anında açılır; -1 Windows ayarını korur.
+  $description:uz: O'zgartirish menyusi ko'rsatilganda kursorga o'rnatilgan pastki menyu ochilishidan oldin millisekundlar. 0 darhol ochiladi; -1 Windows sozlamalarini saqlaydi.
 - advancedSubmenuWindows: true
   $name: Move Windows extras
+  $name:az: Windows əlavələrini köçürün
+  $name:cs: Přesunout doplňky systému Windows
   $name:da: Flyt Windows ekstramateriale
   $name:de-DE: Verschieben Sie Windows-Extras
   $name:es-ES: Mover extras de Windows
   $name:fr-FR: Déplacer les extras Windows
+  $name:hr: Premjesti Windows dodatke
+  $name:hu: Windows extrák áthelyezése
   $name:it-IT: Sposta gli extra di Windows
   $name:nb: Flytt Windows-ekstrautstyr
   $name:nl-NL: Verplaats Windows-extra's
+  $name:pl-PL: Przenieś dodatki systemu Windows
   $name:pt-BR: Mover extras do Windows
   $name:pt-PT: Mover extras do Windows
+  $name:ro: Mutați extraurile Windows
   $name:sv: Flytta Windows extrafunktioner
+  $name:tr-TR: Windows ekstralarını taşıma
+  $name:uz: Windows qo'shimchalarini ko'chiring
   $description: Move the configured Windows extras into the More options submenu.
+  $description:az: Konfiqurasiya edilmiş Windows əlavələrini Daha çox seçimlər alt menyusuna köçürün.
+  $description:cs: Přesuňte nakonfigurované doplňky systému Windows do podnabídky Další možnosti.
   $description:da: Flyt de konfigurerede Windows-tilbehør til undermenuen Flere indstillinger.
   $description:de-DE: Verschieben Sie die konfigurierten Windows-Extras in das Untermenü Weitere Optionen.
   $description:es-ES: Mueva los extras configurados de Windows al submenú Más opciones.
   $description:fr-FR: Déplacez les extras Windows configurés dans le sous-menu Plus d'options.
+  $description:hr: Premjestite konfigurirane Windows dodatke u podizbornik Više opcija.
+  $description:hu: Helyezze át a konfigurált Windows extrákat a További beállítások almenübe.
   $description:it-IT: Sposta gli extra di Windows configurati nel sottomenu Altre opzioni.
   $description:nb: Flytt det konfigurerte Windows-ekstrautstyret til undermenyen Flere alternativer.
   $description:nl-NL: Verplaats de geconfigureerde Windows-extra's naar het submenu Meer opties.
+  $description:pl-PL: Przenieś skonfigurowane dodatki systemu Windows do podmenu Więcej opcji.
   $description:pt-BR: Mova os extras configurados do Windows para o submenu Mais opções.
   $description:pt-PT: Mova os extras configurados do Windows para o submenu Mais opções.
+  $description:ro: Mutați extrasele Windows configurate în submeniul Mai multe opțiuni.
   $description:sv: Flytta de konfigurerade Windows-tilläggen till undermenyn Fler alternativ.
+  $description:tr-TR: Yapılandırılmış Windows ekstralarını Diğer seçenekler alt menüsüne taşıyın.
+  $description:uz: Sozlangan Windows qo'shimchalarini Qo'shimcha parametrlar pastki menyusiga o'tkazing.
 - advancedSubmenuThirdParty: true
   $name: Move third-party handlers
+  $name:az: Üçüncü tərəf idarəçilərini köçürün
+  $name:cs: Přesunout obslužné nástroje třetích stran
   $name:da: Flyt tredjepartshandlere
   $name:de-DE: Verschieben Sie Drittanbieter-Handler
   $name:es-ES: Mover controladores de terceros
   $name:fr-FR: Déplacer les extensions tierces
+  $name:hr: Premjestite rukovatelje treće strane
+  $name:hu: Harmadik fél kezelőinek áthelyezése
   $name:it-IT: Spostare gestori di terze parti
   $name:nb: Flytt tredjepartsbehandlere
   $name:nl-NL: Verplaats handlers van derden
+  $name:pl-PL: Przenieś programy obsługi stron trzecich
   $name:pt-BR: Mover gerenciadores de terceiros
   $name:pt-PT: Mover gestores de terceiros
+  $name:ro: Mutați handlere terți
   $name:sv: Flytta tredjepartshanterare
+  $name:tr-TR: Üçüncü taraf işleyicileri taşıma
+  $name:uz: Uchinchi tomon ishlov beruvchilarini ko'chiring
   $description: Move third-party shell extension entries into the More options submenu.
+  $description:az: Üçüncü tərəf qabıq genişləndirmə girişlərini Daha çox seçimlər alt menyusuna köçürün.
+  $description:cs: Přesuňte položky rozšíření shellu třetích stran do podnabídky Další možnosti.
   $description:da: Flyt tredjeparts shell-udvidelsesposter til undermenuen Flere muligheder.
   $description:de-DE: Verschieben Sie Shell-Erweiterungseinträge von Drittanbietern in das Untermenü „Weitere Optionen“.
   $description:es-ES: Mueva las entradas de extensión de shell de terceros al submenú Más opciones.
   $description:fr-FR: Déplacez les entrées d’extension de shell tierce dans le sous-menu Plus d’options.
+  $description:hr: Premjestite unose proširenja ljuske treće strane u podizbornik Više opcija.
+  $description:hu: Helyezze át a harmadik féltől származó shell-bővítmények bejegyzéseit a További beállítások almenübe.
   $description:it-IT: Sposta le voci dell'estensione della shell di terze parti nel sottomenu Altre opzioni.
   $description:nb: Flytt oppføringer fra tredjeparts shell-utvidelser til undermenyen Flere alternativer.
   $description:nl-NL: Verplaats shell-extensie-items van derden naar het submenu Meer opties.
+  $description:pl-PL: Przenieś wpisy rozszerzeń powłoki innych firm do podmenu Więcej opcji.
   $description:pt-BR: Mova entradas de extensão de shell de terceiros para o submenu Mais opções.
   $description:pt-PT: Mova as entradas de extensão de shell de terceiros para o submenu Mais opções.
+  $description:ro: Mutați intrările de extensii shell de la terți în submeniul Mai multe opțiuni.
   $description:sv: Flytta tredje parts skaltilläggsposter till undermenyn Fler alternativ.
+  $description:tr-TR: Üçüncü taraf kabuk uzantısı girişlerini Diğer seçenekler alt menüsüne taşıyın.
+  $description:uz: Uchinchi tomon qobiq kengaytmasi yozuvlarini Qo'shimcha parametrlar pastki menyusiga o'tkazing.
 - advancedSubmenuItems: "Windows.ModernShare, pintohomefile, casttodevice, Give access to, PreviousVersions, pintostartscreen, pintohome, openterminal, setdesktopwallpaper"
   $name: Windows items to move
+  $name:az: Hərəkət etmək üçün Windows elementləri
+  $name:cs: Položky systému Windows k přesunutí
   $name:da: Windows-emner at flytte
   $name:de-DE: Zu verschiebende Windows-Elemente
   $name:es-ES: Elementos de Windows para mover
   $name:fr-FR: Éléments Windows à déplacer
+  $name:hr: Windows stavke za premještanje
+  $name:hu: Az áthelyezendő Windows-elemek
   $name:it-IT: Elementi di Windows da spostare
   $name:nb: Windows-elementer å flytte
   $name:nl-NL: Windows-items om te verplaatsen
+  $name:pl-PL: Elementy systemu Windows do przeniesienia
   $name:pt-BR: Itens do Windows para mover
   $name:pt-PT: Itens do Windows para mover
+  $name:ro: Elemente Windows de mutat
   $name:sv: Windows-objekt att flytta
+  $name:tr-TR: Taşınacak Windows öğeleri
+  $name:uz: Ko'chirish uchun Windows elementlari
   $description: Comma-separated labels or verbs of Windows items to move into the submenu. Verbs (for example setdesktopwallpaper) match on every language; labels match the menu's display language. GUID-verb commands also accept the aliases openterminal, editwithphotos, editwithpaint and editwithnotepad.
+  $description:az: Alt menyuya keçmək üçün Windows elementlərinin vergüllə ayrılmış etiketləri və ya felləri. Verbs (məsələn, setdesktopwallpaper) hər dildə uyğun gəlir; etiketlər menyunun ekran dilinə uyğun gəlir. GUID-verb əmrləri həmçinin openterminal, editwithphotos, editwithpaint və editwithnotepad ləqəblərini qəbul edir.
+  $description:cs: Čárkami oddělené popisky nebo slovesa položek Windows pro přesun do podnabídky. Slovesa (například setdesktopwallpaper) se shodují v každém jazyce; štítky odpovídají jazyku zobrazení nabídky. Příkazy GUID-verb také přijímají aliasy openterminal, editwithphotos, editwithpaint a editwithnotepad.
   $description:da: Kommaseparerede etiketter eller verber af Windows-elementer for at flytte ind i undermenuen. Verber (for eksempel setdesktopwallpaper) matcher på alle sprog; etiketter matcher menuens visningssprog. GUID-verb kommandoer accepterer også aliasserne openterminal, editwithphotos, editwithpaint og editwithnotepad.
   $description:de-DE: Durch Kommas getrennte Bezeichnungen oder Verben von Windows-Elementen, die in das Untermenü verschoben werden sollen. Verben (zum Beispiel setdesktopwallpaper) stimmen in jeder Sprache überein; Beschriftungen entsprechen der Anzeigesprache des Menüs. GUID-Verb-Befehle akzeptieren auch die Aliase openterminal, editwithphotos, editwithpaint und editwithnotepad.
   $description:es-ES: Etiquetas o verbos separados por comas de elementos de Windows para pasar al submenú. Los verbos (por ejemplo setdesktopwallpaper) coinciden en todos los idiomas; Las etiquetas coinciden con el idioma de visualización del menú. Los comandos GUID-verb también aceptan los alias openterminal, editwithphotos, editwithpaint y editwithnotepad.
   $description:fr-FR: Étiquettes ou verbes d'éléments Windows séparés par des virgules à déplacer dans le sous-menu. Les verbes (par exemple setdesktopwallpaper) correspondent dans toutes les langues ; les étiquettes correspondent à la langue d’affichage du menu. Les commandes GUID-verb acceptent également les alias openterminal, editwithphotos, editwithpaint et editwithnotepad.
+  $description:hr: Zarezima odvojene oznake ili glagoli Windows stavki za premještanje u podizbornik. Glagoli (na primjer setdesktopwallpaper) odgovaraju na svakom jeziku; oznake odgovaraju jeziku prikaza izbornika. GUID-verb naredbe također prihvaćaju aliase openterminal, editwithphotos, editwithpaint i editwithnotepad.
+  $description:hu: A Windows-elemek vesszővel elválasztott címkéi vagy igék az almenübe való áthelyezéshez. Az igék (például setdesktopwallpaper) minden nyelven megegyeznek; a címkék megegyeznek a menü megjelenítési nyelvével. A GUID-ige parancsai elfogadják az openterminal, editwithphotos, editwithpaint és editwithnotepad álneveket is.
   $description:it-IT: Etichette o verbi separati da virgole degli elementi di Windows per spostarsi nel sottomenu. I verbi (ad esempio setdesktopwallpaper) corrispondono in ogni lingua; le etichette corrispondono alla lingua di visualizzazione del menu. I comandi GUID-verb accettano anche gli alias openterminal, editwithphotos, editwithpaint e editwithnotepad.
   $description:nb: Kommaseparerte etiketter eller verb for Windows-elementer for å flytte inn i undermenyen. Verb (for eksempel setdesktopwallpaper) samsvarer på hvert språk; etiketter samsvarer med menyens visningsspråk. GUID-verbkommandoer godtar også aliasene openterminal, editwithphotos, editwithpaint og editwithnotepad.
   $description:nl-NL: Door komma's gescheiden labels of werkwoorden van Windows-items om naar het submenu te gaan. Werkwoorden (bijvoorbeeld setdesktopwallpaper) komen in elke taal overeen; labels komen overeen met de weergavetaal van het menu. GUID-werkwoordopdrachten accepteren ook de aliassen openterminal, editwithphotos, editwithpaint en editwithnotepad.
+  $description:pl-PL: Oddzielone przecinkami etykiety lub czasowniki elementów systemu Windows, które mają zostać przeniesione do podmenu. Czasowniki (na przykład setdesktopwallpaper) pasują do każdego języka; etykiety odpowiadają językowi wyświetlania menu. Polecenia czasownika GUID akceptują także aliasy openterminal, editwithphotos, editwithpaint i editwithnotepad.
   $description:pt-BR: Rótulos ou verbos separados por vírgula de itens do Windows para mover para o submenu. Verbos (por exemplo setdesktopwallpaper) correspondem em todos os idiomas; os rótulos correspondem ao idioma de exibição do menu. Os comandos de verbo GUID também aceitam os aliases openterminal, editwithphotos, editwithpaint e editwithnotepad.
   $description:pt-PT: Rótulos ou verbos separados por vírgula dos itens do Windows para passar para o submenu. Os verbos (por exemplo setdesktopwallpaper) correspondem em todas as línguas; os rótulos correspondem ao idioma de apresentação do menu. Os comandos de verbo GUID também aceitam os alias openterminal, editwithphotos, editwithpaint e editwithnotepad.
+  $description:ro: Etichete sau verbe separate prin virgulă ale elementelor Windows pentru a muta în submeniu. Verbele (de exemplu setdesktopwallpaper) se potrivesc în fiecare limbă; etichetele se potrivesc cu limba de afișare a meniului. Comenzile GUID-verb acceptă și aliasurile openterminal, editwithphotos, editwithpaint și editwithnotepad.
   $description:sv: Kommaseparerade etiketter eller verb för Windows-objekt för att flytta till undermenyn. Verb (till exempel setdesktopwallpaper) matchar på alla språk; etiketter matchar menyns visningsspråk. GUID-verbkommandon accepterar också aliasen openterminal, editwithphotos, editwithpaint och editwithnotepad.
+  $description:tr-TR: Alt menüye taşınacak Windows öğelerinin virgülle ayrılmış etiketleri veya fiilleri. Fiiller (örneğin setdesktopwallpaper) her dilde eşleşir; etiketler menünün görüntüleme diliyle eşleşir. GUID fiil komutları aynı zamanda openterminal, editwithphotos, editwithpaint ve editwithnotepad takma adlarını da kabul eder.
+  $description:uz: Pastki menyuga o'tish uchun Windows elementlarining vergul bilan ajratilgan yorliqlari yoki fe'llari. Fe'llar (masalan, setdesktopwallpaper) har bir tilda mos keladi; teglar menyuning ekran tiliga mos keladi. GUID-fe'l buyruqlari shuningdek openterminal, editwithphotos, editwithpaint va editwithnotepad taxalluslarini qabul qiladi.
 - advancedSubmenuExclude: ""
   $name: Keep in the main menu
+  $name:az: Əsas menyuda saxlayın
+  $name:cs: Udržujte v hlavní nabídce
   $name:da: Hold i hovedmenuen
   $name:de-DE: Bleiben Sie im Hauptmenü
   $name:es-ES: Mantener en el menú principal
   $name:fr-FR: Conserver dans le menu principal
+  $name:hr: Držite u glavnom izborniku
+  $name:hu: Tartsa a főmenüben
   $name:it-IT: Resta nel menu principale
   $name:nb: Hold deg i hovedmenyen
   $name:nl-NL: Blijf in het hoofdmenu
+  $name:pl-PL: Zachowaj w menu głównym
   $name:pt-BR: Manter no menu principal
   $name:pt-PT: Manter no menu principal
+  $name:ro: Păstrați în meniul principal
   $name:sv: Håll kvar i huvudmenyn
+  $name:tr-TR: Ana menüde tut
+  $name:uz: Asosiy menyuda saqlang
   $description: Comma-separated third-party labels or verbs that stay in the main menu instead of moving into the submenu.
+  $description:az: Vergüllə ayrılmış üçüncü tərəf etiketləri və ya alt menyuya keçmək əvəzinə əsas menyuda qalan fellər.
+  $description:cs: Čárkami oddělené štítky nebo slovesa třetích stran, které zůstávají v hlavní nabídce namísto přesunu do podnabídky.
   $description:da: Kommaseparerede tredjepartsetiketter eller verber, der bliver i hovedmenuen i stedet for at flytte ind i undermenuen.
   $description:de-DE: Durch Kommas getrennte Bezeichnungen oder Verben von Drittanbietern, die im Hauptmenü bleiben, anstatt in das Untermenü zu wechseln.
   $description:es-ES: Etiquetas de terceros o verbos separados por comas que permanecen en el menú principal en lugar de pasar al submenú.
   $description:fr-FR: Étiquettes ou verbes tiers séparés par des virgules qui restent dans le menu principal au lieu de passer dans le sous-menu.
+  $description:hr: Oznake ili glagoli trećih strana odvojeni zarezima koji ostaju u glavnom izborniku umjesto da se pomaknu u podizbornik.
+  $description:hu: Vesszővel elválasztott harmadik féltől származó címkék vagy igék, amelyek a főmenüben maradnak, nem pedig az almenübe.
   $description:it-IT: Etichette o verbi di terze parti separati da virgole che rimangono nel menu principale invece di spostarsi nel sottomenu.
   $description:nb: Kommaseparerte tredjepartsetiketter eller verb som blir værende i hovedmenyen i stedet for å flytte inn i undermenyen.
   $description:nl-NL: Door komma's gescheiden labels of werkwoorden van derden die in het hoofdmenu blijven staan in plaats van naar het submenu te gaan.
+  $description:pl-PL: Oddzielone przecinkami etykiety lub czasowniki innych firm, które pozostają w menu głównym zamiast przechodzić do podmenu.
   $description:pt-BR: Rótulos ou verbos de terceiros separados por vírgula que permanecem no menu principal em vez de passarem para o submenu.
   $description:pt-PT: Rótulos ou verbos de terceiros separados por vírgula que permanecem no menu principal em vez de passarem para o submenu.
+  $description:ro: Etichete sau verbe de la terți, separate prin virgulă, care rămân în meniul principal în loc să fie mutate în submeniu.
   $description:sv: Kommaseparerade etiketter eller verb från tredje part som stannar i huvudmenyn istället för att flytta till undermenyn.
+  $description:tr-TR: Alt menüye gitmek yerine ana menüde kalan virgülle ayrılmış üçüncü taraf etiketleri veya fiiller.
+  $description:uz: Vergul bilan ajratilgan uchinchi tomon yorliqlari yoki pastki menyuga o'tish o'rniga asosiy menyuda qoladigan fe'llar.
 - advancedSubmenuLabel: More options
   $name: More options submenu label
+  $name:az: Daha çox seçim alt menyu etiketi
+  $name:cs: Štítek podnabídky Další možnosti
   $name:da: Flere muligheder undermenuetiket
   $name:de-DE: Beschriftung des Untermenüs „Weitere Optionen“.
   $name:es-ES: Etiqueta del submenú Más opciones
   $name:fr-FR: Libellé du sous-menu Plus d'options
+  $name:hr: Oznaka podizbornika Više opcija
+  $name:hu: További lehetőségek almenü címke
   $name:it-IT: Etichetta del sottomenu Altre opzioni
   $name:nb: Flere alternativer undermenyetikett
   $name:nl-NL: Submenulabel Meer opties
+  $name:pl-PL: Etykieta podmenu więcej opcji
   $name:pt-BR: Etiqueta do submenu Mais opções
   $name:pt-PT: Etiqueta do submenu Mais opções
+  $name:ro: Eticheta submeniului mai multe opțiuni
   $name:sv: Fler alternativ undermenyetikett
+  $name:tr-TR: Daha fazla seçenek alt menü etiketi
+  $name:uz: Ko'proq parametrlar pastki menyusi yorlig'i
   $description: Label of the submenu that collects extra items.
+  $description:az: Əlavə elementləri toplayan alt menyunun etiketi.
+  $description:cs: Štítek podnabídky, která shromažďuje další položky.
   $description:da: Etiket på undermenuen, der samler ekstra elementer.
   $description:de-DE: Bezeichnung des Untermenüs, das zusätzliche Elemente sammelt.
   $description:es-ES: Etiqueta del submenú que recoge elementos extra.
   $description:fr-FR: Étiquette du sous-menu qui collecte les éléments supplémentaires.
+  $description:hr: Oznaka podizbornika koji prikuplja dodatne stavke.
+  $description:hu: Az extra elemeket gyűjtő almenü címkéje.
   $description:it-IT: Etichetta del sottomenu che raccoglie voci extra.
   $description:nb: Etikett på undermenyen som samler ekstra elementer.
   $description:nl-NL: Label van het submenu dat extra items verzamelt.
+  $description:pl-PL: Etykieta podmenu zbierającego dodatkowe pozycje.
   $description:pt-BR: Etiqueta do submenu que coleta itens extras.
   $description:pt-PT: Etiqueta do submenu que recolhe itens extra.
+  $description:ro: Eticheta submeniului care colectează articole suplimentare.
   $description:sv: Etikett för undermenyn som samlar extra objekt.
+  $description:tr-TR: Ekstra öğeleri toplayan alt menünün etiketi.
+  $description:uz: Qo'shimcha elementlarni to'playdigan pastki menyuning yorlig'i.
 - settingsHotkey: ""
   $name: Settings hotkey
+  $name:az: Parametrlər isti düyməsi
+  $name:cs: Klávesová zkratka Nastavení
   $name:da: Indstillinger genvejstast
   $name:de-DE: Hotkey für Einstellungen
   $name:es-ES: Tecla de acceso rápido de configuración
   $name:fr-FR: Raccourci des paramètres
+  $name:hr: Prečac za postavke
+  $name:hu: Beállítások gyorsbillentyű
   $name:it-IT: Tasto di scelta rapida Impostazioni
   $name:nb: Innstillinger hurtigtast
   $name:nl-NL: Sneltoets voor instellingen
+  $name:pl-PL: Skrót do ustawień
   $name:pt-BR: Tecla de atalho de configurações
   $name:pt-PT: Tecla de atalho de definições
+  $name:ro: Tasta rapidă Setări
   $name:sv: Snabbknapp för inställningar
+  $name:tr-TR: Ayarlar kısayol tuşu
+  $name:uz: Sozlamalar tezkor tugmasi
   $description: Optional global hotkey that opens the appearance settings menu (for example Ctrl+Alt+M). Empty disables it.
+  $description:az: Görünüş parametrləri menyusunu açan əlavə qlobal isti düymə (məsələn, Ctrl+Alt+M). Boş onu deaktiv edir.
+  $description:cs: Volitelná globální klávesová zkratka, která otevře nabídku nastavení vzhledu (například Ctrl+Alt+M). Prázdné to deaktivuje.
   $description:da: Valgfri global genvejstast, der åbner menuen for udseendeindstillinger (for eksempel Ctrl+Alt+M). Tom deaktiverer den.
   $description:de-DE: Optionaler globaler Hotkey, der das Menü mit den Darstellungseinstellungen öffnet (z. B. Ctrl+Alt+M). Leer deaktiviert es.
   $description:es-ES: Tecla de acceso rápido global opcional que abre el menú de configuración de apariencia (por ejemplo, Ctrl+Alt+M). Vacío lo desactiva.
   $description:fr-FR: Touche de raccourci globale facultative qui ouvre le menu des paramètres d'apparence (par exemple Ctrl+Alt+M). Vide le désactive.
+  $description:hr: Neobavezna globalna tipka prečaca koja otvara izbornik postavki izgleda (na primjer Ctrl+Alt+M). Prazno ga onemogućuje.
+  $description:hu: Opcionális globális gyorsbillentyű, amely megnyitja a megjelenési beállítások menüt (például Ctrl+Alt+M). Az üres letiltja.
   $description:it-IT: Tasto di scelta rapida globale opzionale che apre il menu delle impostazioni dell'aspetto (ad esempio Ctrl+Alt+M). Vuoto lo disabilita.
   $description:nb: Valgfri global hurtigtast som åpner menyen for utseendeinnstillinger (for eksempel Ctrl+Alt+M). Tom deaktiverer den.
   $description:nl-NL: Optionele algemene sneltoets die het menu met weergave-instellingen opent (bijvoorbeeld Ctrl+Alt+M). Leeg schakelt het uit.
+  $description:pl-PL: Opcjonalny globalny klawisz skrótu otwierający menu ustawień wyglądu (na przykład Ctrl+Alt+M). Pusty wyłącza to.
   $description:pt-BR: Tecla de atalho global opcional que abre o menu de configurações de aparência (por exemplo Ctrl+Alt+M). Vazio o desativa.
   $description:pt-PT: Tecla de atalho global opcional que abre o menu de definições de aparência (por exemplo Ctrl+Alt+M). Vazio desativa-o.
+  $description:ro: Tasta rapidă globală opțională care deschide meniul de setări de aspect (de exemplu Ctrl+Alt+M). Golire îl dezactivează.
   $description:sv: Valfri global snabbtangent som öppnar menyn för utseendeinställningar (till exempel Ctrl+Alt+M). Empty inaktiverar den.
+  $description:tr-TR: Görünüm ayarları menüsünü açan isteğe bağlı genel kısayol tuşu (örneğin Ctrl+Alt+M). Boş bunu devre dışı bırakır.
+  $description:uz: Tashqi ko'rinish sozlamalari menyusini ochadigan ixtiyoriy global tezkor tugma (masalan, Ctrl+Alt+M). Bo'sh uni o'chiradi.
 - debugLogging: false
   $name: Debug logging
+  $name:az: Sazlama girişi
+  $name:cs: Ladění protokolování
   $name:da: Debug logning
   $name:de-DE: Debug-Protokollierung
   $name:es-ES: Registro de depuración
   $name:fr-FR: Journalisation de débogage
+  $name:hr: Zapisivanje otklanjanja pogrešaka
+  $name:hu: Hibakeresési naplózás
   $name:it-IT: Registrazione del debug
   $name:nb: Feilsøk logging
   $name:nl-NL: Foutopsporingslogboekregistratie
+  $name:pl-PL: Rejestrowanie debugowania
   $name:pt-BR: Registro de depuração
   $name:pt-PT: Registo de depuração
+  $name:ro: Jurnal de depanare
   $name:sv: Felsökning av loggning
+  $name:tr-TR: Hata ayıklama günlüğü
+  $name:uz: Nosozliklarni tuzatish jurnali
   $description: Log timing and diagnostics for troubleshooting.
+  $description:az: Problemlərin aradan qaldırılması üçün vaxt və diaqnostika qeydi.
+  $description:cs: Zaznamenejte časování a diagnostiku pro odstraňování problémů.
   $description:da: Log timing og diagnostik til fejlfinding.
   $description:de-DE: Protokollieren Sie Timing und Diagnose zur Fehlerbehebung.
   $description:es-ES: Registre la sincronización y el diagnóstico para la resolución de problemas.
   $description:fr-FR: Enregistrez la synchronisation et les diagnostics pour le dépannage.
+  $description:hr: Vrijeme zapisivanja i dijagnostika za rješavanje problema.
+  $description:hu: Napló időzítés és diagnosztika a hibaelhárításhoz.
   $description:it-IT: Registra tempi e diagnostica per la risoluzione dei problemi.
   $description:nb: Loggtiming og diagnostikk for feilsøking.
   $description:nl-NL: Registreer timing en diagnostiek voor probleemoplossing.
+  $description:pl-PL: Rejestrowanie czasu i diagnostyka w celu rozwiązywania problemów.
   $description:pt-BR: Registro de tempo e diagnóstico para solução de problemas.
   $description:pt-PT: Registo de tempo e diagnóstico para resolução de problemas.
+  $description:ro: Înregistrare sincronizare și diagnosticare pentru depanare.
   $description:sv: Logga timing och diagnostik för felsökning.
+  $description:tr-TR: Sorun giderme için zamanlamayı ve tanılamayı günlüğe kaydedin.
+  $description:uz: Muammolarni bartaraf etish uchun vaqt va diagnostika jurnali.
 - clearCache: false
   $name: Clear cache
+  $name:az: Keşi təmizləyin
+  $name:cs: Vymazat mezipaměť
   $name:da: Ryd cache
   $name:de-DE: Cache leeren
   $name:es-ES: Borrar caché
   $name:fr-FR: Vider le cache
+  $name:hr: Očisti predmemoriju
+  $name:hu: Gyorsítótár törlése
   $name:it-IT: Svuota cache
   $name:nb: Tøm hurtigbufferen
   $name:nl-NL: Cache wissen
+  $name:pl-PL: Wyczyść pamięć podręczną
   $name:pt-BR: Limpar cache
   $name:pt-PT: Limpar cache
+  $name:ro: Goliți memoria cache
   $name:sv: Rensa cache
+  $name:tr-TR: Önbelleği temizle
+  $name:uz: Keshni tozalash
   $description: Turn on to delete the cached menu models; they rebuild on next use.
+  $description:az: Keşlənmiş menyu modellərini silmək üçün yandırın; növbəti istifadədə yenidən qururlar.
+  $description:cs: Zapnutím odstraníte modely nabídek uložené v mezipaměti; při dalším použití obnoví.
   $description:da: Tænd for at slette de cachelagrede menumodeller; de genopbygges ved næste brug.
   $description:de-DE: Aktivieren Sie diese Option, um die zwischengespeicherten Menümodelle zu löschen. Sie bauen sich bei der nächsten Verwendung wieder auf.
   $description:es-ES: Actívelo para eliminar los modelos de menú almacenados en caché; se reconstruyen en el próximo uso.
   $description:fr-FR: Activez pour supprimer les modèles de menu mis en cache ; ils se reconstruisent lors de la prochaine utilisation.
+  $description:hr: Uključite za brisanje predmemoriranih modela izbornika; obnavljaju se prilikom sljedeće upotrebe.
+  $description:hu: Kapcsolja be a gyorsítótárazott menümodellek törléséhez; a következő használatkor újjáépítik.
   $description:it-IT: Attiva per eliminare i modelli di menu memorizzati nella cache; si ricostruiscono al prossimo utilizzo.
   $description:nb: Slå på for å slette de bufrede menymodellene; de bygger om ved neste bruk.
   $description:nl-NL: Schakel dit in om de in de cache opgeslagen menumodellen te verwijderen; ze herbouwen bij het volgende gebruik.
+  $description:pl-PL: Włącz, aby usunąć buforowane modele menu; odbudowują się przy następnym użyciu.
   $description:pt-BR: Ative para excluir os modelos de menu em cache; eles reconstroem no próximo uso.
   $description:pt-PT: Ative para eliminar os modelos de menu em cache; reconstroem no próximo uso.
+  $description:ro: Activați pentru a șterge modelele de meniu stocate în cache; se reconstruiesc la următoarea utilizare.
   $description:sv: Slå på för att radera de cachade menymodellerna; de bygger om vid nästa användning.
+  $description:tr-TR: Önbelleğe alınan menü modellerini silmek için açın; bir sonraki kullanımda yeniden inşa edilirler.
+  $description:uz: Keshlangan menyu modellarini o'chirish uchun yoqing; ular keyingi foydalanishda qayta quradilar.
 - warmup: true
   $name: Background pre-build
+  $name:az: Arxa planın əvvəlcədən qurulması
+  $name:cs: Předběžné sestavení pozadí
   $name:da: Forudbygget baggrund
   $name:de-DE: Hintergrund vorgefertigt
   $name:es-ES: Preconstrucción de fondo
   $name:fr-FR: Préconstruction en arrière-plan
+  $name:hr: Predizgradnja pozadine
+  $name:hu: Háttér előépítés
   $name:it-IT: Pre-costruzione dello sfondo
   $name:nb: Bakgrunn forhåndsbygging
   $name:nl-NL: Achtergrond vooraf gebouwd
+  $name:pl-PL: Wstępna kompilacja tła
   $name:pt-BR: Pré-construção em segundo plano
   $name:pt-PT: Pré-construção em segundo plano
+  $name:ro: Preconstrucție de fundal
   $name:sv: Förbyggd bakgrund
+  $name:tr-TR: Arka planda ön derleme
+  $name:uz: Oldindan yaratilgan fon
   $description: Warms common menus shortly after Explorer starts so their first open is instant. Turning it off skips loading every registered context-menu handler at startup (the stock menu's exposure), which avoids startup crashes from faulty third-party extensions; the first open of each context then builds on demand, like the stock menu. A handler that would crash the stock menu still crashes.
+  $description:az: Explorer başladıqdan qısa müddət sonra ümumi menyuları qızdırır, beləliklə onların ilk açılması ani olur. Onu söndürmək başlanğıcda hər bir qeydiyyatdan keçmiş kontekst-menyu işləyicisini yükləməyi atlayır (birja menyusunun ifşası), bu da səhv üçüncü tərəf uzantılarından başlanğıc qəzalarının qarşısını alır; hər bir kontekstin ilk açılışı sonra fond menyusu kimi tələb əsasında qurulur. Fond menyusunu pozacaq bir işləyici hələ də çökür.
+  $description:cs: Ohřeje běžné nabídky krátce po spuštění Explorer, takže jejich první otevření je okamžité. Vypnutím přeskočíte načítání všech registrovaných obslužných rutin kontextové nabídky při spuštění (zobrazení nabídky akcií), což zabrání zhroucení spouštění z chybných rozšíření třetích stran; první otevření každého kontextu pak staví na požádání, jako je nabídka akcií. Obslužná rutina, která by zhroutila nabídku akcií, stále padá.
   $description:da: Opvarmer almindelige menuer kort efter, at Explorer starter, så deres første åbning er øjeblikkelig. Deaktivering springer over at indlæse alle registrerede kontekstmenuhandlere ved opstart (aktiemenuens eksponering), hvilket undgår startnedbrud fra defekte tredjepartsudvidelser; den første åbning af hver kontekst bygger derefter på efterspørgsel, som aktiemenuen. En handler, der ville gå ned i aktiemenuen, går stadig ned.
   $description:de-DE: Erwärmt allgemeine Menüs kurz nach dem Start von Explorer, sodass sie sofort zum ersten Mal geöffnet werden können. Wenn Sie es deaktivieren, wird das Laden aller registrierten Kontextmenü-Handler beim Start (die Anzeige des Standardmenüs) übersprungen, wodurch Startabstürze durch fehlerhafte Erweiterungen von Drittanbietern vermieden werden. Das erste Öffnen jedes Kontexts baut sich dann bei Bedarf auf, wie das Aktienmenü. Ein Handler, der das Aktienmenü zum Absturz bringen würde, stürzt immer noch ab.
   $description:es-ES: Calienta los menús comunes poco después de que se inicia Explorer para que su primera apertura sea instantánea. Al desactivarlo se omite la carga de todos los controladores de menú contextual registrados al inicio (la exposición del menú de valores), lo que evita fallas de inicio debido a extensiones defectuosas de terceros; la primera apertura de cada contexto se basa en la demanda, como el menú de acciones. Un controlador que bloquearía el menú de valores todavía falla.
   $description:fr-FR: Réchauffe les menus communs peu de temps après le démarrage du Explorer afin que leur première ouverture soit instantanée. Le désactiver ignore le chargement de chaque gestionnaire de menu contextuel enregistré au démarrage (l'exposition du menu stock), ce qui évite les plantages de démarrage dus à des extensions tierces défectueuses ; la première ouverture de chaque contexte se construit ensuite à la demande, comme le menu stock. Un gestionnaire qui ferait planter le menu stock plante toujours.
+  $description:hr: Zagrijava uobičajene izbornike ubrzo nakon pokretanja Explorer tako da je njihovo prvo otvaranje trenutno. Isključivanjem se preskače učitavanje svakog registriranog rukovatelja kontekstnim izbornikom pri pokretanju (izloženost izbornika dionica), čime se izbjegavaju rušenja pri pokretanju zbog neispravnih proširenja trećih strana; prvo otvaranje svakog konteksta zatim se nadograđuje na zahtjev, poput izbornika dionica. Rukovatelj koji bi srušio dionički izbornik i dalje se ruši.
+  $description:hu: Röviddel a Explorer indulása után felmelegíti a gyakori menüket, így azok első megnyitása azonnal megtörténik. A kikapcsolása kihagyja az összes regisztrált helyi menükezelő betöltését indításkor (a készletmenü megjelenítése), ami elkerüli a hibás, külső féltől származó bővítmények indítási összeomlását; az egyes kontextusok első megnyitása azután igény szerint épül fel, mint például a készletmenü. Az a kezelő, amely összeomolná a készletmenüt, továbbra is összeomlik.
   $description:it-IT: Riscalda i menu comuni subito dopo l'avvio di Explorer, quindi la loro prima apertura è immediata. Disattivandolo si salta il caricamento di ogni gestore di menu contestuale registrato all'avvio (l'esposizione del menu Stock), evitando arresti anomali all'avvio dovuti a estensioni di terze parti difettose; la prima apertura di ciascun contesto si basa quindi su richiesta, come il menu delle scorte. Un gestore che causerebbe l'arresto anomalo del menu Stock continua a bloccarsi.
   $description:nb: Varmer opp vanlige menyer kort tid etter at Explorer starter, slik at de åpnes umiddelbart. Hvis du slår den av, hopper du over lasting av alle registrerte kontekstmenybehandlere ved oppstart (aksjemenyens eksponering), noe som unngår oppstartskrasj fra defekte tredjepartsutvidelser; den første åpningen i hver kontekst bygger deretter på etterspørsel, som aksjemenyen. En behandler som ville krasje aksjemenyen krasjer fortsatt.
   $description:nl-NL: Verwarmt algemene menu's kort nadat de Explorer is gestart, zodat ze direct voor het eerst worden geopend. Als u dit uitschakelt, wordt het laden van elke geregistreerde contextmenu-handler bij het opstarten overgeslagen (de weergave van het aandelenmenu), waardoor opstartcrashes door defecte extensies van derden worden vermeden; de eerste opening van elke context bouwt vervolgens voort op aanvraag, zoals het aandelenmenu. Een handler die het aandelenmenu zou laten crashen, crasht nog steeds.
+  $description:pl-PL: Ogrzewa popularne menu wkrótce po uruchomieniu Explorer, dzięki czemu ich pierwsze otwarcie jest natychmiastowe. Wyłączenie tej opcji powoduje pominięcie ładowania każdego zarejestrowanego modułu obsługi menu kontekstowego podczas uruchamiania (ekspozycja menu podstawowego), co pozwala uniknąć awarii uruchamiania spowodowanych wadliwymi rozszerzeniami innych firm; pierwsze otwarcie każdego kontekstu jest następnie tworzone na żądanie, podobnie jak menu akcji. Program obsługi, który spowodowałby awarię menu podstawowego, nadal ulega awarii.
   $description:pt-BR: Aquece menus comuns logo após o início do Explorer, para que sua primeira abertura seja instantânea. Desligá-lo ignora o carregamento de todos os manipuladores de menu de contexto registrados na inicialização (a exposição do menu de ações), o que evita travamentos de inicialização causados ​​por extensões de terceiros defeituosas; a primeira abertura de cada contexto é construída conforme a demanda, como o menu de estoque. Um manipulador que travaria o menu de ações ainda trava.
   $description:pt-PT: Aquece os menus comuns logo após o início do Explorer, para que a sua primeira abertura seja instantânea. Desligá-lo ignora o carregamento de todos os manipuladores de menus de contexto registados no arranque (a exposição do menu de ações), o que evita falhas de arranque causados ​​por extensões de terceiros defeituosas; a primeira abertura de cada contexto é construída consoante a procura, como o menu de stock. Um manipulador que iria bloquear o menu de ações ainda bloqueia.
+  $description:ro: Încălzește meniurile comune la scurt timp după pornirea Explorer, astfel încât prima lor deschidere să fie instantanee. Dezactivarea acesteia omite încărcarea fiecărui handler de meniu contextual înregistrat la pornire (expunerea meniului stoc), ceea ce evită blocările la pornire de la extensiile terțe defecte; prima deschidere a fiecărui context se construiește apoi la cerere, cum ar fi meniul stoc. Un handler care ar bloca meniul stoc încă se blochează.
   $description:sv: Värmer upp vanliga menyer strax efter att Explorer startar så att de öppnas omedelbart. Om du stänger av den hoppar du över alla registrerade kontextmenyhanterare vid start (aktiemenyns exponering), vilket undviker startkrascher från felaktiga tredjepartstillägg; den första öppningen i varje sammanhang bygger sedan på efterfrågan, som aktiemenyn. En hanterare som skulle krascha aktiemenyn kraschar fortfarande.
+  $description:tr-TR: Explorer başladıktan kısa bir süre sonra ortak menüleri ısıtır, böylece ilk açılmaları anında gerçekleşir. Bunu kapatmak, başlangıçta kayıtlı her içerik menüsü işleyicisinin yüklenmesini atlar (stok menüsünün ortaya çıkması), bu da hatalı üçüncü taraf uzantılardan kaynaklanan başlangıç ​​çökmelerini önler; Her bağlamın ilk açılışı, stok menüsü gibi isteğe bağlı olarak oluşturulur. Stok menüsünü çökerten bir işleyici yine de çöküyor.
+  $description:uz: Explorer ishga tushirilgandan so'ng qisqa vaqt ichida umumiy menyularni isitadi, shuning uchun ular bir zumda ochiladi. Uni o'chirib qo'yish ishga tushirilganda ro'yxatdan o'tgan har bir kontekst menyusi ishlovchisini yuklashni o'tkazib yuboradi (birja menyusi ko'rinishi), bu noto'g'ri uchinchi tomon kengaytmalari tufayli ishga tushishning ishdan chiqishini oldini oladi; Har bir kontekstning birinchi ochilishi, so'ngra stok menyusi kabi talab asosida tuziladi. Birja menyusini buzadigan ishlov beruvchi hali ham ishdan chiqadi.
 - warmupExtensions: ".txt, .pdf, .zip, .rar, .7z, .jpg, .png, .mp4, .mp3, .docx, .xlsx, .exe, .lnk"
   $name: Warm-up extensions
+  $name:az: İstiləşmə uzantıları
+  $name:cs: Zahřívací nástavce
   $name:da: Opvarmningsudvidelser
   $name:de-DE: Aufwärmverlängerungen
   $name:es-ES: Extensiones de calentamiento
   $name:fr-FR: Extensions à préchauffer
+  $name:hr: Nastavci za zagrijavanje
+  $name:hu: Bemelegítő hosszabbítások
   $name:it-IT: Estensioni di riscaldamento
   $name:nb: Oppvarmingsforlengelser
   $name:nl-NL: Opwarmextensies
+  $name:pl-PL: Przedłużenia rozgrzewkowe
   $name:pt-BR: Extensões de aquecimento
   $name:pt-PT: Extensões de aquecimento
+  $name:ro: Extensii de încălzire
   $name:sv: Uppvärmningsförlängningar
+  $name:tr-TR: Isınma uzatmaları
+  $name:uz: Isitish kengaytmalari
   $description: Comma-separated file types whose menus are pre-built at Explorer startup.
+  $description:az: Menyuları Explorer başlanğıcında əvvəlcədən qurulmuş vergüllə ayrılmış fayl növləri.
+  $description:cs: Typy souborů oddělených čárkami, jejichž nabídky jsou předem vytvořeny při spuštění Explorer.
   $description:da: Kommaseparerede filtyper, hvis menuer er forudbygget ved opstart af Explorer.
   $description:de-DE: Durch Kommas getrennte Dateitypen, deren Menüs beim Start von Explorer vorgefertigt sind.
   $description:es-ES: Tipos de archivos separados por comas cuyos menús están prediseñados al iniciar Explorer.
   $description:fr-FR: Types de fichiers séparés par des virgules dont les menus sont prédéfinis au démarrage du Explorer.
+  $description:hr: Vrste datoteka odvojenih zarezima čiji su izbornici unaprijed ugrađeni pri pokretanju Explorer.
+  $description:hu: Vesszővel elválasztott fájltípusok, amelyek menüi előre be vannak építve a Explorer indításakor.
   $description:it-IT: Tipi di file separati da virgole i cui menu sono precostruiti all'avvio di Explorer.
   $description:nb: Kommaseparerte filtyper hvis menyer er forhåndsbygd ved oppstart av Explorer.
   $description:nl-NL: Door komma's gescheiden bestandstypen waarvan de menu's vooraf zijn gebouwd bij het opstarten van de Explorer.
+  $description:pl-PL: Typy plików oddzielonych przecinkami, których menu są wstępnie tworzone podczas uruchamiania Explorer.
   $description:pt-BR: Tipos de arquivos separados por vírgula cujos menus são pré-construídos na inicialização do Explorer.
   $description:pt-PT: Tipos de ficheiros separados por vírgula cujos menus são pré-construídos no arranque do Explorer.
+  $description:ro: Tipuri de fișiere separate prin virgulă ale căror meniuri sunt pre-construite la pornirea Explorer.
   $description:sv: Kommaseparerade filtyper vars menyer är förbyggda vid Explorer-start.
+  $description:tr-TR: Menüleri Explorer başlangıcında önceden oluşturulmuş olan virgülle ayrılmış dosya türleri.
+  $description:uz: Menyulari Explorer ishga tushirilganda oldindan tuzilgan vergul bilan ajratilgan fayl turlari.
 - warmupDelaySeconds: 5
   $name: Warm-up delay
+  $name:az: İstiləşmə gecikməsi
+  $name:cs: Zpoždění zahřívání
   $name:da: Opvarmningsforsinkelse
   $name:de-DE: Aufwärmverzögerung
   $name:es-ES: Retraso de calentamiento
   $name:fr-FR: Délai de préchauffage
+  $name:hr: Odgoda zagrijavanja
+  $name:hu: Bemelegítés késleltetése
   $name:it-IT: Ritardo del riscaldamento
   $name:nb: Oppvarmingsforsinkelse
   $name:nl-NL: Opwarmvertraging
+  $name:pl-PL: Opóźnienie nagrzewania
   $name:pt-BR: Atraso no aquecimento
   $name:pt-PT: Atraso no aquecimento
+  $name:ro: Întârziere la încălzire
   $name:sv: Uppvärmningsfördröjning
+  $name:tr-TR: Isınma gecikmesi
+  $name:uz: Isitish kechikishi
   $description: Seconds to wait after Explorer starts before warming the cache.
+  $description:az: Keşi istiləşdirmədən əvvəl Explorer işə salındıqdan sonra gözləmək üçün saniyələr.
+  $description:cs: Sekundy čekání po spuštění Explorer před zahřátím mezipaměti.
   $description:da: Sekunder at vente efter Explorer starter, før cachen opvarmes.
   $description:de-DE: Sekunden, die nach dem Start von Explorer gewartet werden müssen, bevor der Cache aufgewärmt wird.
   $description:es-ES: Segundos de espera después de que se inicie Explorer antes de calentar el caché.
   $description:fr-FR: Quelques secondes à attendre après le démarrage de Explorer avant de réchauffer le cache.
+  $description:hr: Nekoliko sekundi čekanja nakon pokretanja Explorer prije zagrijavanja predmemorije.
+  $description:hu: Másodperceket kell várni a Explorer elindulása után, mielőtt felmelegítené a gyorsítótárat.
   $description:it-IT: Secondi di attesa dopo l'avvio di Explorer prima di riscaldare la cache.
   $description:nb: Sekunder å vente etter at Explorer starter før cachen varmes opp.
   $description:nl-NL: Seconden om te wachten nadat Explorer is gestart voordat de cache wordt opgewarmd.
+  $description:pl-PL: Sekundy oczekiwania po uruchomieniu Explorer przed rozgrzaniem pamięci podręcznej.
   $description:pt-BR: Segundos para esperar após o início do Explorer antes de aquecer o cache.
   $description:pt-PT: Segundos para esperar após o início do Explorer antes de aquecer a cache.
+  $description:ro: Secunde de așteptat după pornirea Explorer înainte de a încălzi memoria cache.
   $description:sv: Sekunder att vänta efter att Explorer startar innan cachen värms upp.
+  $description:tr-TR: Önbelleği ısıtmadan önce Explorer başladıktan sonra beklenecek saniyeler.
+  $description:uz: Keshni isitishdan oldin Explorer ishga tushirilgandan keyin kutish uchun soniyalar.
 */
 // ==/WindhawkModSettings==
 
@@ -1799,9 +2591,9 @@ const LocalizationKey kLocalizationKeys[] = {
 
 const LocalizationLanguage kLocalizationLanguages[] = {
     {L"ar", true, "فتح\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037جديد\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037Nord\037Dracula\037Solarized Dark\037Gruvbox Dark\037One Dark\037Cyberpunk\037Synthwave\037Terminal Green\037Amber CRT\037Tokyo Night\037AMOLED Black\037\037\037\037\037\037\037\037Automatic (match Windows)\037العربية\037Azərbaycanca\037বাংলা\037Čeština\037Dansk\037Deutsch\037Ελληνικά\037English\037Español\037فارسی\037Français\037हिन्दी\037Hrvatski\037Kreyòl ayisyen\037Magyar\037Bahasa Indonesia\037Italiano\037日本語\037한국어\037Norsk bokmål\037Nederlands\037ଓଡ଼ିଆ\037Polski\037Português (Brasil)\037Português (Portugal)\037Română\037Русский\037Svenska\037தமிழ்\037ไทย\037Türkçe\037Українська\037Oʻzbekcha\037Tiếng Việt\037简体中文\037繁體中文"},
-    {L"az", false, "\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037Nord\037Dracula\037Solarized Dark\037Gruvbox Dark\037One Dark\037Cyberpunk\037Synthwave\037Terminal Green\037Amber CRT\037Tokyo Night\037AMOLED Black\037\037\037\037\037\037\037\037Automatic (match Windows)\037العربية\037Azərbaycanca\037বাংলা\037Čeština\037Dansk\037Deutsch\037Ελληνικά\037English\037Español\037فارسی\037Français\037हिन्दी\037Hrvatski\037Kreyòl ayisyen\037Magyar\037Bahasa Indonesia\037Italiano\037日本語\037한국어\037Norsk bokmål\037Nederlands\037ଓଡ଼ିଆ\037Polski\037Português (Brasil)\037Português (Portugal)\037Română\037Русский\037Svenska\037தமிழ்\037ไทย\037Türkçe\037Українська\037Oʻzbekcha\037Tiếng Việt\037简体中文\037繁體中文"},
+    {L"az", false, "Aç\037%s-ni sıfırlayın…\037Sıxılmış (sıxılmış) qovluq\037Qovluq\037Qısayol\037Haqqında\037Nişanları şəbəkəyə uyğunlaşdırın\037Nişanları avtomatik təşkil edin\037Məzmun\037Kopyalayın\037Yol kimi kopyalayın\037Qısayol yaradın\037Kəs\037Defolt (ayarlanmamış)\037Sil\037Təfərrüatlar\037Ekran parametrləri\037Əlavə böyük nişanlar\037Üz\037Qrupla\037Hex\037Böyük nişanlar\037Siyahı\037Orta ölçülü nişanlar\037Menyu parametrləri\037Menyu parametrləri...\037Yeni\037Windhawk-i açın\037Yeni prosesdə açın\037Yeni pəncərədə açın\037menu.ini-i açın\037Mövzu faylını açın\037ilə açın\037Yapıştır\037Qısayolu yapışdırın\037Fərdiləşdirin\037Sürətli girişə bərkidin\037Xüsusiyyətlər\037Yenilə\037Adını dəyişmək\037Açıq animasiyanı təkrarlayın\037Bütün görünüşü sıfırlayın\037Bütün görünüşü sıfırlayın...\037Ölçek seçimləri...\037göndərin\037Ölçü\037Slayd seçimləri...\037Kiçik nişanlar\037Sırala\037Status\037Hədəf\037Mövzu\037Kafel\037küncRadiusundan istifadə edin (ayarlanmamış)\037Baxış\037Windhawk parametrləri...\037Klassik menyunu göstərin\037Daha çox seçim\037Artan\037Azalan\037(Heç biri)\037ad\037Dəyişdirilmə tarixi\037Növ\037Mətn sənədi\037Bitmap şəkli\037Zəngin mətn sənədi\037haqqında\037off\037adət\037default\037Saxlandı\037Yadda saxlamaq alınmadı\037Şrift tapılmadı\037Baza görünüşü\037Yüngül görünüş\037Qaranlıq görünüş\037köhnəlmişdir — animationOpen/Close istifadə edin\037Mövzu: %s — tema faylının redaktə edilməsi\037sxemi %d\037Menyu rejimi\037Fərdi\037Klassik\037Rəng\037Rənglər\037Layout\037Mətn\037Kölgə\037Effektlər\037Animasiya\037Fon\037Sərhəd\037Ayırıcı\037Hover fon\037Basılmış fon\037Mətnin rəngi\037Mətn rəngini deaktiv etdi\037Alt menyu oxu\037Başlıq rəngi\037Künc radiusu\037Künc radiusları\037Sərhəd eni\037Doldurma\037Elementin doldurulması\037Şaquli doldurma\037Element hündürlüyü\037Nişan ölçüsü\037Minimum genişlik\037Maksimum genişlik\037Ayırıcı məsafə\037Marker\037Marker eni\037Marker rəngi\037Şrift\037Şriftin çəkisi\037Şrift üslubu\037Sürətləndirici ekran\037Kölgə ölçüsü\037Kölgə ofseti X\037Kölgə ofseti Y\037Kölgə qeyri-şəffaflığı\037Kölgəni fona uyğunlaşdırın\037Kölgə rəngi\037Kölgə bulanması\037Bulanıq\037Bulanıqlıq gücü\037Overlay effektləri\037Üst-üstə düşmə intensivliyi\037Overlay sürəti\037Overlay ölçüsü\037Overlay çərçivə intervalı\037Açıq halda üst-üstə düşmələri canlandırın\037Açıq animasiya\037Animasiyanı bağlayın\037Açıq müddət\037Müddəti bağlayın\037Animasiya çərçivə intervalı\037Animasiya asanlaşdırılması\037Animasiya anker\037Alt menyuları canlandırın\037Slayd ofseti X\037Slayd ofseti Y\037miqyası\037Doyma / dəyər\037Hue\037Alfa\037Qırmızı\037Yaşıl\037Mavi\037Alfa dəyəri\037Yuxarı sol\037Yuxarı sağ\037Aşağı sağ\037Aşağı sol\037@option:fontWeight:normal\037@option:fontWeight:yarı qalın\037@option:fontWeight:bold\037@option:fontStyle:normal\037@option:fontStyle:italic\037@seçim:marker:nöqtə\037@option:marker:check\037@option:marker:bar\037@option:marker:yox\037@option:showAccelerators:altını çəkin\037@option:showAccelerators:zolaq\037@option:showAccelerators:xam\037@option:animationEasing:xətti\037@option:animationEasing:easeOut\037@option:animationEasing:easeInOut\037@option:animationEasing:geri\037@option:animationEasing:bounce\037@option:animationEasing:elastik\037@option:animationAnchor:kursor\037@option:animationAnchor:center\037@effect:heç biri\037@effect:fade\037@effect:slayd\037@effect:miqyas\037@effect:həll et\037@effect:crt\037@effect:açılır\037@overlay:heç biri\037@overlay:səs-küy\037@overlay:plazma\037@overlay: hue\037@overlay:parıltı\037@overlay:scanlines\037@overlay:vignette\037Dil\037Klassik menyu elementini göstərin\037Üst fəaliyyət çubuğu\037Alt menyu gecikməsi\037Bypass açarları\037Sazlama girişi\037İstiləşmə gecikməsi\037@mövzu:Xüsusi (menu.ini)\037@mövzu:Windows 11 Qaranlıq\037@mövzu:Windows 11 İşıq\037@mövzu:Windows 10 Qaranlıq\037@mövzu:Windows 10 İşıq\037@tema:Yüksək Kontrast\037Xüsusi Keşlənmiş Kontekst Menyu\037Tam fərdiləşdirilə bilən keşlənmiş Explorer kontekst menyusunu dərhal açır: mövzular, tərtibat, rənglər, animasiyalar, qaydalar və fərdi əmrlər.\037Mövzu\037Görünüşü <storage>\\themes\\<name>.ini-dən yükləyir (ilk istifadədə yığılmış ilkin təyinatdan yaradılmışdır). menu.ini heç vaxt dəyişdirilmir.\037Fərdi (menu.ini)\037Windows 11 Qaranlıq\037Windows 11 İşıq\037Windows 10 Qaranlıq\037Windows 10 İşıq\037Nord\037Dracula\037Solarized Dark\037Gruvbox Dark\037One Dark\037Cyberpunk\037Synthwave\037Terminal Green\037Amber CRT\037Tokyo Night\037AMOLED Black\037Yüksək Kontrast\037Menyu rejimi\037Xüsusi öz-özünə göstərilən menyunu çəkir və təkrarlanan uğursuzluqlardan sonra klassik menyuya qayıdır. Klassik həmişə sahibi tərəfindən tərtib edilmiş menyudan istifadə edir.\037Fərdi (tövsiyə olunur)\037Klassik sahibi tərəfindən çəkilmişdir\037Dil\037Menyu və menyudaxili parametrlər üçün dil. Avtomatik Windows ekran dilini izləyir və dəstəklənən dillərdən biri olmadıqda ingilis dilinə qayıdır; bu səhifənin özü Windhawk-nin dil parametrlərinə uyğundur.\037Automatic (match Windows)\037العربية\037Azərbaycanca\037বাংলা\037Čeština\037Dansk\037Deutsch\037Ελληνικά\037English\037Español\037فارسی\037Français\037हिन्दी\037Hrvatski\037Kreyòl ayisyen\037Magyar\037Bahasa Indonesia\037Italiano\037日本語\037한국어\037Norsk bokmål\037Nederlands\037ଓଡ଼ିଆ\037Polski\037Português (Brasil)\037Português (Portugal)\037Română\037Русский\037Svenska\037தமிழ்\037ไทย\037Türkçe\037Українська\037Oʻzbekcha\037Tiếng Việt\037简体中文\037繁體中文\037Bypass açarları\037Modu yan keçmək və stok klassik menyusunu və ya toxunulmamış yerli menyu üçün Ctrl əldə etmək üçün sağ klikləyərkən Shift düyməsini basıb saxlayın.\037Ani menyu açıqdır\037TPM_NOANIMATION vasitəsilə sistem açıq animasiyası olmadan yerli ehtiyat menyularını (klassik rejim, ehtiyatlar) göstərir.\037Klassik menyu elementini göstərin\037Əvəzedici menyunun altındakı \"Klassik menyunu göstər\" girişini əlavə edin.\037Üst fəaliyyət çubuğu\037Windows 11 menyusu kimi, kursora ən yaxın menyunun yan tərəfindəki nişanlar çubuğuna Kəs, Kopyalayın, Yapışdırın, Adını dəyişdirin və Silin. Yalnız fərdi menyu rejimi.\037Alt menyunun açılması gecikməsi\037Dəyişdirmə menyusu göstərildiyi halda üzərinə qoyulmuş alt menyunun açılmasından əvvəl millisaniyələr. 0 dərhal açılır; -1 Windows parametrlərini saxlayır.\037Windows əlavələrini köçürün\037Konfiqurasiya edilmiş Windows əlavələrini Daha çox seçimlər alt menyusuna köçürün.\037Üçüncü tərəf idarəçilərini köçürün\037Üçüncü tərəf qabıq genişləndirmə girişlərini Daha çox seçimlər alt menyusuna köçürün.\037Hərəkət etmək üçün Windows elementləri\037Alt menyuya keçmək üçün Windows elementlərinin vergüllə ayrılmış etiketləri və ya felləri. Verbs (məsələn, setdesktopwallpaper) hər dildə uyğun gəlir; etiketlər menyunun ekran dilinə uyğun gəlir. GUID-verb əmrləri həmçinin openterminal, editwithphotos, editwithpaint və editwithnotepad ləqəblərini qəbul edir.\037Əsas menyuda saxlayın\037Vergüllə ayrılmış üçüncü tərəf etiketləri və ya alt menyuya keçmək əvəzinə əsas menyuda qalan fellər.\037Daha çox seçim alt menyu etiketi\037Əlavə elementləri toplayan alt menyunun etiketi.\037Parametrlər isti düyməsi\037Görünüş parametrləri menyusunu açan əlavə qlobal isti düymə (məsələn, Ctrl+Alt+M). Boş onu deaktiv edir.\037Sazlama girişi\037Problemlərin aradan qaldırılması üçün vaxt və diaqnostika qeydi.\037Keşi təmizləyin\037Keşlənmiş menyu modellərini silmək üçün yandırın; növbəti istifadədə yenidən qururlar.\037Arxa planın əvvəlcədən qurulması\037Explorer başladıqdan qısa müddət sonra ümumi menyuları qızdırır, beləliklə onların ilk açılması ani olur. Onu söndürmək başlanğıcda hər bir qeydiyyatdan keçmiş kontekst-menyu işləyicisini yükləməyi atlayır (birja menyusunun ifşası), bu da səhv üçüncü tərəf uzantılarından başlanğıc qəzalarının qarşısını alır; hər bir kontekstin ilk açılışı sonra fond menyusu kimi tələb əsasında qurulur. Fond menyusunu pozacaq bir işləyici hələ də çökür.\037İstiləşmə uzantıları\037Menyuları Explorer başlanğıcında əvvəlcədən qurulmuş vergüllə ayrılmış fayl növləri.\037İstiləşmə gecikməsi\037Keşi istiləşdirmədən əvvəl Explorer işə salındıqdan sonra gözləmək üçün saniyələr.\037Avtomatik (Windows uyğun)"},
     {L"bn", false, "\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037Nord\037Dracula\037Solarized Dark\037Gruvbox Dark\037One Dark\037Cyberpunk\037Synthwave\037Terminal Green\037Amber CRT\037Tokyo Night\037AMOLED Black\037\037\037\037\037\037\037\037Automatic (match Windows)\037العربية\037Azərbaycanca\037বাংলা\037Čeština\037Dansk\037Deutsch\037Ελληνικά\037English\037Español\037فارسی\037Français\037हिन्दी\037Hrvatski\037Kreyòl ayisyen\037Magyar\037Bahasa Indonesia\037Italiano\037日本語\037한국어\037Norsk bokmål\037Nederlands\037ଓଡ଼ିଆ\037Polski\037Português (Brasil)\037Português (Portugal)\037Română\037Русский\037Svenska\037தமிழ்\037ไทย\037Türkçe\037Українська\037Oʻzbekcha\037Tiếng Việt\037简体中文\037繁體中文"},
-    {L"cs", false, "\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037Nový\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037Nord\037Dracula\037Solarized Dark\037Gruvbox Dark\037One Dark\037Cyberpunk\037Synthwave\037Terminal Green\037Amber CRT\037Tokyo Night\037AMOLED Black\037\037\037\037\037\037\037\037Automatic (match Windows)\037العربية\037Azərbaycanca\037বাংলা\037Čeština\037Dansk\037Deutsch\037Ελληνικά\037English\037Español\037فارسی\037Français\037हिन्दी\037Hrvatski\037Kreyòl ayisyen\037Magyar\037Bahasa Indonesia\037Italiano\037日本語\037한국어\037Norsk bokmål\037Nederlands\037ଓଡ଼ିଆ\037Polski\037Português (Brasil)\037Português (Portugal)\037Română\037Русский\037Svenska\037தமிழ்\037ไทย\037Türkçe\037Українська\037Oʻzbekcha\037Tiếng Việt\037简体中文\037繁體中文"},
+    {L"cs", false, "Otevřít\037Resetovat %s…\037Komprimovaná (zazipovaná) složka\037Složka\037Zkratka\037O\037Zarovnejte ikony do mřížky\037Automatické uspořádání ikon\037Obsah\037Kopírovat\037Kopírovat jako cestu\037Vytvořit zástupce\037Vyjmout\037Výchozí (nenastaveno)\037Smazat\037Podrobnosti\037Nastavení displeje\037Extra velké ikony\037Tvář\037Seskupit podle\037Hex\037Velké ikony\037Seznam\037Střední ikony\037Nastavení menu\037Nastavení menu…\037Nový\037Otevřete Windhawk\037Otevřít v novém procesu\037Otevřít v novém okně\037Otevřete menu.ini\037Otevřete soubor motivu\037Otevřít pomocí\037Vložit\037Vložit zkratku\037Přizpůsobit\037Připnout na Rychlý přístup\037Vlastnosti\037Obnovit\037Přejmenovat\037Přehrajte znovu otevřenou animaci\037Obnovit veškerý vzhled\037Obnovit celý vzhled…\037Možnosti měřítka…\037Odeslat na\037Velikost\037Možnosti snímku…\037Malé ikony\037Seřadit podle\037Stav\037Cíl\037téma\037Dlaždice\037Použít rohový poloměr (nenastaveno)\037Zobrazit\037Nastavení Windhawk…\037Zobrazit klasické menu\037Více možností\037Vzestupně\037Sestupně\037(žádné)\037Jméno\037Datum změny\037Typ\037Textový dokument\037Bitmapový obrázek\037RTF dokument\037na\037vypnuto\037vlastní\037výchozí\037Uloženo\037Uložení se nezdařilo\037Písmo nenalezeno\037Základní vzhled\037Světlý vzhled\037Tmavý vzhled\037zastaralé – použijte animationOpen/Close\037Téma: %s — úprava souboru motivu\037schéma %d\037Režim nabídky\037Vlastní\037Classic\037Barva\037Barvy\037Rozložení\037Text\037Stín\037Efekty\037Animace\037Pozadí\037Hranice\037Separátor\037Vznášející se pozadí\037Lisované pozadí\037Barva textu\037Barva textu zakázána\037Šipka podnabídky\037Barva záhlaví\037Poloměr rohu\037Rohové poloměry\037Šířka okraje\037Vycpávka\037Polstrování položky\037Vertikální polstrování\037Výška položky\037Velikost ikony\037Minimální šířka\037Maximální šířka\037Rozteč oddělovačů\037Marker\037Šířka značky\037Barva fixu\037Písmo\037Tloušťka písma\037Styl písma\037Displej akcelerátoru\037Velikost stínu\037Posun stínu X\037Posun stínu Y\037Neprůhlednost stínů\037Přizpůsobte stín pozadí\037Barva stínu\037Rozostření stínů\037Rozostření\037Síla rozmazání\037Překryvné efekty\037Intenzita překrytí\037Rychlost překrytí\037Velikost překryvu\037Interval překryvného snímku\037Animujte překryvné obrázky při otevření\037Otevřete animaci\037Zavřít animaci\037Otevřená doba trvání\037Zavřít trvání\037Interval snímků animace\037Uvolnění animace\037Animační kotva\037Animovat podnabídky\037Odsazení snímku X\037Odsazení posuvu Y\037Měřítko od\037Sytost / hodnota\037Odstín\037Alfa\037Červená\037Zelená\037Modrá\037Hodnota alfa\037Vlevo nahoře\037Vpravo nahoře\037Vpravo dole\037Vlevo dole\037@option:fontHmotnost:normální\037@option:fontHmotnost:polotučné\037@option:fontHmotnost:tučné\037@option:fontStyle:normal\037@option:fontStyle:kurzíva\037@option:značka:tečka\037@option:marker:check\037@option:marker:bar\037@option:marker:none\037@option:showAccelerators:underline\037@option:showAccelerators:strip\037@option:showAccelerators:raw\037@option:animationEasing:linear\037@option:animationEasing:easeOut\037@option:animationEasing:easeInOut\037@option:animationEasing:back\037@option:animationEasing:bounce\037@option:animationUvolnění:elastické\037@option:animationAnchor:cursor\037@option:animationAnchor:center\037@efekt: žádný\037@efekt:vyblednout\037@efekt: snímek\037@efekt:scale\037@efekt:rozpustit\037@efekt:crt\037@efekt: rozvinout\037@overlay:žádné\037@overlay:šum\037@overlay:plasma\037@overlay:hue\037@overlay:glow\037@overlay:scanlines\037@overlay:vignette\037Jazyk\037Zobrazit klasickou položku nabídky\037Horní akční lišta\037Zpoždění podnabídky\037Obejít klíče\037Ladění protokolování\037Zpoždění zahřívání\037@theme:Vlastní (menu.ini)\037@theme:Windows 11 Tmavý\037@theme:Windows 11 Světlo\037@theme:Windows 10 Tmavý\037@theme:Windows 10 Světlo\037@theme:Vysoký kontrast\037Vlastní kontextová nabídka uložená v mezipaměti\037Okamžité otevření kontextové nabídky Explorer uložené v mezipaměti, která je plně přizpůsobitelná: motivy, rozvržení, barvy, animace, pravidla a vlastní příkazy.\037téma\037Načte vzhled ze <storage>\\themes\\<name>.ini (vytvořený z přibalené předvolby při prvním použití). menu.ini se nikdy nemění.\037Vlastní (menu.ini)\037Windows 11 Tmavý\037Světlo Windows 11\037Windows 10 Tmavý\037Světlo Windows 10\037Nord\037Dracula\037Solarized Dark\037Gruvbox Dark\037One Dark\037Cyberpunk\037Synthwave\037Terminal Green\037Amber CRT\037Tokyo Night\037AMOLED Black\037Vysoký kontrast\037Režim nabídky\037Vlastní vykreslí samovykreslované menu a po opakovaných selháních se vrátí ke klasickému menu. Classic vždy používá menu nakreslené majitelem.\037Vlastní (doporučeno)\037Klasický vlastníkem kreslený\037Jazyk\037Jazyk pro nabídku a nastavení v nabídce. Automaticky se řídí jazykem zobrazení Windows a vrátí se zpět na angličtinu, pokud není jedním z podporovaných jazyků; tato stránka sama o sobě sleduje nastavení jazyka Windhawk.\037Automatic (match Windows)\037العربية\037Azərbaycanca\037বাংলা\037Čeština\037Dansk\037Deutsch\037Ελληνικά\037English\037Español\037فارسی\037Français\037हिन्दी\037Hrvatski\037Kreyòl ayisyen\037Magyar\037Bahasa Indonesia\037Italiano\037日本語\037한국어\037Norsk bokmål\037Nederlands\037ଓଡ଼ିଆ\037Polski\037Português (Brasil)\037Português (Portugal)\037Română\037Русский\037Svenska\037தமிழ்\037ไทย\037Türkçe\037Українська\037Oʻzbekcha\037Tiếng Việt\037简体中文\037繁體中文\037Obejít klíče\037Podržením Shift a kliknutím pravým tlačítkem myši obcházíte mod a získáte klasické menu, nebo Ctrl pro nedotčené nativní menu.\037Otevřená okamžitá nabídka\037Zobrazuje nativní záložní nabídky (klasický režim, záložní) bez animace otevřeného systému prostřednictvím TPM_NOANIMATION.\037Zobrazit klasickou položku nabídky\037Do spodní části náhradní nabídky přidejte položku „Zobrazit klasickou nabídku“.\037Horní akční lišta\037Přesune Vyjmout, Kopírovat, Vložit, Přejmenovat a Odstranit do lišty ikon na straně nabídky nejblíže kurzoru, jako je nabídka Windows 11. Pouze režim vlastní nabídky.\037Zpoždění otevření podnabídky\037Milisekundy předtím, než se otevře umístěná podnabídka, zatímco je zobrazena nabídka náhrady. 0 se otevře okamžitě; -1 zachová nastavení Windows.\037Přesunout doplňky systému Windows\037Přesuňte nakonfigurované doplňky systému Windows do podnabídky Další možnosti.\037Přesunout obslužné nástroje třetích stran\037Přesuňte položky rozšíření shellu třetích stran do podnabídky Další možnosti.\037Položky systému Windows k přesunutí\037Čárkami oddělené popisky nebo slovesa položek Windows pro přesun do podnabídky. Slovesa (například setdesktopwallpaper) se shodují v každém jazyce; štítky odpovídají jazyku zobrazení nabídky. Příkazy GUID-verb také přijímají aliasy openterminal, editwithphotos, editwithpaint a editwithnotepad.\037Udržujte v hlavní nabídce\037Čárkami oddělené štítky nebo slovesa třetích stran, které zůstávají v hlavní nabídce namísto přesunu do podnabídky.\037Štítek podnabídky Další možnosti\037Štítek podnabídky, která shromažďuje další položky.\037Klávesová zkratka Nastavení\037Volitelná globální klávesová zkratka, která otevře nabídku nastavení vzhledu (například Ctrl+Alt+M). Prázdné to deaktivuje.\037Ladění protokolování\037Zaznamenejte časování a diagnostiku pro odstraňování problémů.\037Vymazat mezipaměť\037Zapnutím odstraníte modely nabídek uložené v mezipaměti; při dalším použití obnoví.\037Předběžné sestavení pozadí\037Ohřeje běžné nabídky krátce po spuštění Explorer, takže jejich první otevření je okamžité. Vypnutím přeskočíte načítání všech registrovaných obslužných rutin kontextové nabídky při spuštění (zobrazení nabídky akcií), což zabrání zhroucení spouštění z chybných rozšíření třetích stran; první otevření každého kontextu pak staví na požádání, jako je nabídka akcií. Obslužná rutina, která by zhroutila nabídku akcií, stále padá.\037Zahřívací nástavce\037Typy souborů oddělených čárkami, jejichž nabídky jsou předem vytvořeny při spuštění Explorer.\037Zpoždění zahřívání\037Sekundy čekání po spuštění Explorer před zahřátím mezipaměti.\037Automaticky (shoda se systémem Windows)"},
     {L"da", false, "Åbn\037Nulstil %s...\037Komprimeret (zippet) mappe\037Mappe\037Genvej\037Om\037Juster ikoner til gitter\037Automatisk arrangere ikoner\037Indhold\037Kopier\037Kopiér som sti\037Opret genvej\037Klip\037Standard (frakoblet)\037Slet\037Detaljer\037Skærmindstillinger\037Ekstra store ikoner\037Ansigt\037Grupper efter\037Hex\037Store ikoner\037Liste\037Mellemstore ikoner\037Menuindstillinger\037Menuindstillinger...\037Ny\037Åbn Windhawk\037Åbn i ny proces\037Åbn i nyt vindue\037Åbn menu.ini\037Åbn temafil\037Åbn med\037Indsæt\037Indsæt genvej\037Tilpas\037Fastgør til hurtig adgang\037Egenskaber\037Opdater\037Omdøb\037Gentag åben animation\037Nulstil alt udseende\037Nulstil alt udseende...\037Skaleringsmuligheder...\037Send til\037Størrelse\037Indstillinger for dias...\037Små ikoner\037Sorter efter\037Status\037Mål\037Tema\037Fliser\037Brug cornerRadius (frakoblet)\037Vis\037Windhawk indstillinger...\037Vis klassisk menu\037Flere muligheder\037Stigende\037Faldende\037(Ingen)\037Navn\037Ændret dato\037Type\037Tekstdokument\037Bitmap billede\037Rich Text-dokument\037på\037slukket\037skik\037standard\037Gemt\037Gem mislykkedes\037Skrifttype ikke fundet\037Base udseende\037Let udseende\037Mørkt udseende\037forældet — brug animationOpen/Close\037Tema: %s — redigering af temafil\037skema %d\037Menutilstand\037Brugerdefineret\037Klassisk\037Farve\037Farver\037Layout\037Tekst\037Skygge\037Effekter\037Animation\037Baggrund\037Grænse\037Separator\037Hover baggrund\037Trykt baggrund\037Tekstfarve\037Deaktiveret tekstfarve\037Undermenupil\037Overskriftsfarve\037Hjørneradius\037Hjørneradier\037Kantbredde\037Polstring\037Emne polstring\037Lodret polstring\037Varehøjde\037Ikon størrelse\037Minimum bredde\037Maksimal bredde\037Separator afstand\037Markør\037Markør bredde\037Markør farve\037Skrifttype\037Skrifttypevægt\037Skrifttypestil\037Accelerator display\037Skygge størrelse\037Skygge offset X\037Skygge offset Y\037Skyggeopacitet\037Tilpas skygge til baggrunden\037Skygge farve\037Skyggesløring\037Slør\037Sløringsstyrke\037Overlejringseffekter\037Overlejringsintensitet\037Overlejringshastighed\037Overlay størrelse\037Overlay frame interval\037Animer overlejringer, mens de er åbne\037Åbn animation\037Luk animation\037Åben varighed\037Luk varighed\037Animation frame interval\037Lempelse af animation\037Animation anker\037Animer undermenuer\037Slide offset X\037Slide offset Y\037Skala fra\037Mætning / værdi\037Hue\037Alfa\037Rød\037Grøn\037Blå\037Alfa værdi\037Øverst til venstre\037Øverst til højre\037Nederst til højre\037Nederst til venstre\037@option:skrifttypeVægt:normal\037@option:skrifttypeVægt:halvfed\037@option:fontWeight:fed\037@option:fontStyle:normal\037@option:fontStyle:kursiv\037@option:markør:prik\037@option:markør:check\037@option:markør:bjælke\037@option:markør:ingen\037@option:showAccelerators:understreget\037@option:vis Accelerators:strip\037@option:showAccelerators:rå\037@option:animationEasing:lineær\037@option:animationEasing:easeOut\037@option:animationEasing:easeInOut\037@option:animationEasing:tilbage\037@option:animationEasing:bounce\037@option:animationEasing:elastisk\037@option:animationAnker:markør\037@option:animationAnchor:center\037@effekt:ingen\037@effekt:fade\037@effekt:slide\037@effekt:skala\037@effekt:opløses\037@effekt:crt\037@effekt:udfolde sig\037@overlay:ingen\037@overlay:støj\037@overlay:plasma\037@overlay:hue\037@overlay:glød\037@overlay:scanlines\037@overlay:vignet\037Sprog\037Vis klassisk menupunkt\037Øverste handlingsbjælke\037Undermenu forsinkelse\037Bypass nøgler\037Debug logning\037Opvarmningsforsinkelse\037@tema:Tilpasset (menu.ini)\037@tema:Windows 11 Mørk\037@tema:Windows 11 lys\037@tema:Windows 10 Mørk\037@tema:Windows 10 lys\037@tema:Høj kontrast\037Brugerdefineret cache-kontekstmenu\037Øjeblikkelig åbning af cachelagret Explorer kontekstmenu, der kan tilpasses fuldt ud: temaer, layout, farver, animationer, regler og brugerdefinerede kommandoer.\037Tema\037Indlæser udseendet fra <storage>\\themes\\<name>.ini (oprettet fra den medfølgende forudindstilling ved første brug). menu.ini ændres aldrig.\037Brugerdefineret (menu.ini)\037Windows 11 Mørk\037Windows 11 lys\037Windows 10 Mørk\037Windows 10 lys\037Nord\037Dracula\037Solarized Dark\037Gruvbox Dark\037One Dark\037Cyberpunk\037Synthwave\037Terminal Green\037Amber CRT\037Tokyo Night\037AMOLED Black\037Høj kontrast\037Menutilstand\037Custom tegner den selvgengivne menu og falder tilbage til den klassiske menu efter gentagne fejl. Classic bruger altid den ejertegnede menu.\037Brugerdefineret (anbefales)\037Klassisk ejertegnet\037Sprog\037Sprog for menuen og indstillingerne i menuen. Automatisk følger Windows-skærmsproget og falder tilbage til engelsk, når det ikke er et af de understøttede sprog; selve denne side følger Windhawk's sprogindstilling.\037Automatic (match Windows)\037العربية\037Azərbaycanca\037বাংলা\037Čeština\037Dansk\037Deutsch\037Ελληνικά\037English\037Español\037فارسی\037Français\037हिन्दी\037Hrvatski\037Kreyòl ayisyen\037Magyar\037Bahasa Indonesia\037Italiano\037日本語\037한국어\037Norsk bokmål\037Nederlands\037ଓଡ଼ିଆ\037Polski\037Português (Brasil)\037Português (Portugal)\037Română\037Русский\037Svenska\037தமிழ்\037ไทย\037Türkçe\037Українська\037Oʻzbekcha\037Tiếng Việt\037简体中文\037繁體中文\037Bypass nøgler\037Hold Shift nede, mens du højreklikker for at omgå mod'et og få den klassiske menu, eller Ctrl for den uberørte native menu.\037Øjeblikkelig menu åben\037Viser native reservemenuer (klassisk tilstand, fallbacks) uden systemets åbne animation via TPM_NOANIMATION.\037Vis klassisk menupunkt\037Tilføj en \"Vis klassisk menu\"-post nederst i erstatningsmenuen.\037Øverste handlingsbjælke\037Flytter Klip, Kopier, Indsæt, Omdøb og Slet til en ikonlinje på siden af menuen nærmest markøren, som Windows 11-menuen. Kun brugerdefineret menutilstand.\037Undermenu åbningsforsinkelse\037Millisekunder før en undermenu, der svæver over, åbnes, mens erstatningsmenuen vises. 0 åbner øjeblikkeligt; -1 beholder Windows-indstillingen.\037Flyt Windows ekstramateriale\037Flyt de konfigurerede Windows-tilbehør til undermenuen Flere indstillinger.\037Flyt tredjepartshandlere\037Flyt tredjeparts shell-udvidelsesposter til undermenuen Flere muligheder.\037Windows-emner at flytte\037Kommaseparerede etiketter eller verber af Windows-elementer for at flytte ind i undermenuen. Verber (for eksempel setdesktopwallpaper) matcher på alle sprog; etiketter matcher menuens visningssprog. GUID-verb kommandoer accepterer også aliasserne openterminal, editwithphotos, editwithpaint og editwithnotepad.\037Hold i hovedmenuen\037Kommaseparerede tredjepartsetiketter eller verber, der bliver i hovedmenuen i stedet for at flytte ind i undermenuen.\037Flere muligheder undermenuetiket\037Etiket på undermenuen, der samler ekstra elementer.\037Indstillinger genvejstast\037Valgfri global genvejstast, der åbner menuen for udseendeindstillinger (for eksempel Ctrl+Alt+M). Tom deaktiverer den.\037Debug logning\037Log timing og diagnostik til fejlfinding.\037Ryd cache\037Tænd for at slette de cachelagrede menumodeller; de genopbygges ved næste brug.\037Forudbygget baggrund\037Opvarmer almindelige menuer kort efter, at Explorer starter, så deres første åbning er øjeblikkelig. Deaktivering springer over at indlæse alle registrerede kontekstmenuhandlere ved opstart (aktiemenuens eksponering), hvilket undgår startnedbrud fra defekte tredjepartsudvidelser; den første åbning af hver kontekst bygger derefter på efterspørgsel, som aktiemenuen. En handler, der ville gå ned i aktiemenuen, går stadig ned.\037Opvarmningsudvidelser\037Kommaseparerede filtyper, hvis menuer er forudbygget ved opstart af Explorer.\037Opvarmningsforsinkelse\037Sekunder at vente efter Explorer starter, før cachen opvarmes.\037Automatisk (match Windows)"},
     {L"de", false, "Öffnen\037%s zurücksetzen…\037Komprimierter (komprimierter) Ordner\037Ordner\037Abkürzung\037Über\037Symbole am Raster ausrichten\037Symbole automatisch anordnen\037Inhalt\037Kopieren\037Als Pfad kopieren\037Verknüpfung erstellen\037Ausschneiden\037Standard (nicht festgelegt)\037Löschen\037Einzelheiten\037Anzeigeeinstellungen\037Extra große Symbole\037Gesicht\037Gruppieren nach\037Hex\037Große Symbole\037Liste\037Mittlere Symbole\037Menüeinstellungen\037Menüeinstellungen…\037Neu\037Öffnen Sie Windhawk\037In neuem Prozess öffnen\037In neuem Fenster öffnen\037Öffnen Sie menu.ini\037Theme-Datei öffnen\037Öffnen mit\037Einfügen\037Verknüpfung einfügen\037Personalisieren\037An den Schnellzugriff anpinnen\037Eigenschaften\037Aktualisieren\037Umbenennen\037Öffnen Sie die Animation noch einmal\037Alle Erscheinungsbilder zurücksetzen\037Alle Erscheinungsbilder zurücksetzen…\037Skalierungsoptionen…\037Senden an\037Größe\037Folienoptionen…\037Kleine Symbole\037Sortieren nach\037Status\037Ziel\037Thema\037Fliesen\037CornerRadius verwenden (nicht gesetzt)\037Ansicht\037Windhawk-Einstellungen…\037Klassisches Menü anzeigen\037Weitere Optionen\037Aufsteigend\037Absteigend\037(Keine)\037Name\037Änderungsdatum\037Typ\037Textdokument\037Bitmap-Bild\037Rich-Text-Dokument\037auf\037aus\037Brauch\037Standard\037Gespeichert\037Speichern fehlgeschlagen\037Schriftart nicht gefunden\037Grundaussehen\037Leichtes Erscheinungsbild\037Dunkles Aussehen\037veraltet – verwenden Sie animationOpen/Close\037Thema: %s – Themendatei bearbeiten\037Schema %d\037Menümodus\037Benutzerdefiniert\037Klassisch\037Farbe\037Farben\037Layout\037Text\037Schatten\037Effekte\037Animation\037Hintergrund\037Grenze\037Trennzeichen\037Hover-Hintergrund\037Gepresster Hintergrund\037Textfarbe\037Textfarbe deaktiviert\037Untermenüpfeil\037Kopfzeilenfarbe\037Eckenradius\037Eckradien\037Randbreite\037Polsterung\037Artikelpolsterung\037Vertikale Polsterung\037Artikelhöhe\037Symbolgröße\037Mindestbreite\037Maximale Breite\037Trennabstand\037Markierung\037Markierungsbreite\037Markierungsfarbe\037Schriftart\037Schriftstärke\037Schriftstil\037Beschleunigeranzeige\037Schattengröße\037Schattenversatz X\037Schattenversatz Y\037Schattenopazität\037Schatten an Hintergrund anpassen\037Schattenfarbe\037Schattenunschärfe\037Unschärfe\037Unschärfestärke\037Overlay-Effekte\037Overlay-Intensität\037Overlay-Geschwindigkeit\037Overlay-Größe\037Overlay-Frame-Intervall\037Animieren Sie Overlays, während sie geöffnet sind\037Animation öffnen\037Animation schließen\037Offene Dauer\037Schließdauer\037Animationsbildintervall\037Lockerung der Animation\037Animationsanker\037Untermenüs animieren\037Folienversatz X\037Folienversatz Y\037Maßstab von\037Sättigung / Wert\037Farbton\037Alpha\037Rot\037Grün\037Blau\037Alpha-Wert\037Oben links\037Oben rechts\037Unten rechts\037Unten links\037@option:fontWeight:normal\037@option:fontWeight:semibold\037@option:fontWeight:bold\037@option:fontStyle:normal\037@option:fontStyle:italic\037@option:marker:dot\037@option:marker:check\037@option:marker:bar\037@option:marker:none\037@option:showAccelerators:underline\037@option:showAccelerators:strip\037@option:showAccelerators:raw\037@option:animationEasing:linear\037@option:animationEasing:easeOut\037@option:animationEasing:easeInOut\037@option:animationEasing:back\037@option:animationEasing:bounce\037@option:animationEasing:elastic\037@option:animationAnchor:cursor\037@option:animationAnchor:center\037@effect:none\037@effect:fade\037@effect:slide\037@effect:scale\037@effect:auflösen\037@effect:crt\037@effect:entfalten\037@overlay:none\037@overlay:noise\037@overlay:plasma\037@overlay:hue\037@overlay:glühen\037@overlay:scanlines\037@overlay:vignette\037Sprache\037Klassischen Menüpunkt anzeigen\037Obere Aktionsleiste\037Untermenüverzögerung\037Schlüssel umgehen\037Debug-Protokollierung\037Aufwärmverzögerung\037@theme:Benutzerdefiniert (menu.ini)\037@theme:Windows 11 Dunkel\037@theme:Windows 11 Licht\037@theme:Windows 10 Dunkel\037@theme:Windows 10 Licht\037@theme:Hoher Kontrast\037Benutzerdefiniertes zwischengespeichertes Kontextmenü\037Sofort öffnendes, zwischengespeichertes Explorer-Kontextmenü, das vollständig anpassbar ist: Themen, Layout, Farben, Animationen, Regeln und benutzerdefinierte Befehle.\037Thema\037Lädt das Erscheinungsbild von <storage>\\themes\\<name>.ini (erstellt aus der gebündelten Voreinstellung bei der ersten Verwendung). menu.ini wird nie verändert.\037Benutzerdefiniert (menu.ini)\037Windows 11 Dunkel\037Windows 11 Licht\037Windows 10 Dunkel\037Windows 10 Licht\037Nord\037Dracula\037Solarized Dark\037Gruvbox Dark\037One Dark\037Cyberpunk\037Synthwave\037Terminal Green\037Amber CRT\037Tokyo Night\037AMOLED Black\037Hoher Kontrast\037Menümodus\037Custom zeichnet das selbst gerenderte Menü und greift nach wiederholten Fehlern auf das klassische Menü zurück. Classic verwendet immer das vom Eigentümer erstellte Menü.\037Benutzerdefiniert (empfohlen)\037Klassisch vom Besitzer gezeichnet\037Sprache\037Sprache für das Menü und die Einstellungen im Menü. Automatisch folgt der Windows-Anzeigesprache und greift auf Englisch zurück, wenn es keine der unterstützten Sprachen ist; Diese Seite selbst folgt der Spracheinstellung von Windhawk.\037Automatic (match Windows)\037العربية\037Azərbaycanca\037বাংলা\037Čeština\037Dansk\037Deutsch\037Ελληνικά\037English\037Español\037فارسی\037Français\037हिन्दी\037Hrvatski\037Kreyòl ayisyen\037Magyar\037Bahasa Indonesia\037Italiano\037日本語\037한국어\037Norsk bokmål\037Nederlands\037ଓଡ଼ିଆ\037Polski\037Português (Brasil)\037Português (Portugal)\037Română\037Русский\037Svenska\037தமிழ்\037ไทย\037Türkçe\037Українська\037Oʻzbekcha\037Tiếng Việt\037简体中文\037繁體中文\037Schlüssel umgehen\037Halten Sie Shift gedrückt, während Sie mit der rechten Maustaste klicken, um den Mod zu umgehen und das klassische Standardmenü zu erhalten, oder Ctrl für das unberührte native Menü.\037Sofortiges Menü geöffnet\037Zeigt native Fallback-Menüs (klassischer Modus, Fallbacks) ohne die Systemöffnungsanimation über TPM_NOANIMATION an.\037Klassischen Menüpunkt anzeigen\037Fügen Sie unten im Ersatzmenü den Eintrag „Klassisches Menü anzeigen“ hinzu.\037Obere Aktionsleiste\037Verschiebt Ausschneiden, Kopieren, Einfügen, Umbenennen und Löschen in eine Symbolleiste auf der Seite des Menüs, die dem Cursor am nächsten liegt, wie das Windows 11-Menü. Nur benutzerdefinierter Menümodus.\037Verzögerung beim Öffnen des Untermenüs\037Millisekunden, bevor ein schwebendes Untermenü geöffnet wird, während das Ersatzmenü angezeigt wird. 0 öffnet sich sofort; -1 behält die Windows-Einstellung bei.\037Verschieben Sie Windows-Extras\037Verschieben Sie die konfigurierten Windows-Extras in das Untermenü Weitere Optionen.\037Verschieben Sie Drittanbieter-Handler\037Verschieben Sie Shell-Erweiterungseinträge von Drittanbietern in das Untermenü „Weitere Optionen“.\037Zu verschiebende Windows-Elemente\037Durch Kommas getrennte Bezeichnungen oder Verben von Windows-Elementen, die in das Untermenü verschoben werden sollen. Verben (zum Beispiel setdesktopwallpaper) stimmen in jeder Sprache überein; Beschriftungen entsprechen der Anzeigesprache des Menüs. GUID-Verb-Befehle akzeptieren auch die Aliase openterminal, editwithphotos, editwithpaint und editwithnotepad.\037Bleiben Sie im Hauptmenü\037Durch Kommas getrennte Bezeichnungen oder Verben von Drittanbietern, die im Hauptmenü bleiben, anstatt in das Untermenü zu wechseln.\037Beschriftung des Untermenüs „Weitere Optionen“.\037Bezeichnung des Untermenüs, das zusätzliche Elemente sammelt.\037Hotkey für Einstellungen\037Optionaler globaler Hotkey, der das Menü mit den Darstellungseinstellungen öffnet (z. B. Ctrl+Alt+M). Leer deaktiviert es.\037Debug-Protokollierung\037Protokollieren Sie Timing und Diagnose zur Fehlerbehebung.\037Cache leeren\037Aktivieren Sie diese Option, um die zwischengespeicherten Menümodelle zu löschen. Sie bauen sich bei der nächsten Verwendung wieder auf.\037Hintergrund vorgefertigt\037Erwärmt allgemeine Menüs kurz nach dem Start von Explorer, sodass sie sofort zum ersten Mal geöffnet werden können. Wenn Sie es deaktivieren, wird das Laden aller registrierten Kontextmenü-Handler beim Start (die Anzeige des Standardmenüs) übersprungen, wodurch Startabstürze durch fehlerhafte Erweiterungen von Drittanbietern vermieden werden. Das erste Öffnen jedes Kontexts baut sich dann bei Bedarf auf, wie das Aktienmenü. Ein Handler, der das Aktienmenü zum Absturz bringen würde, stürzt immer noch ab.\037Aufwärmverlängerungen\037Durch Kommas getrennte Dateitypen, deren Menüs beim Start von Explorer vorgefertigt sind.\037Aufwärmverzögerung\037Sekunden, die nach dem Start von Explorer gewartet werden müssen, bevor der Cache aufgewärmt wird.\037Automatisch (entsprechend Windows)"},
     {L"el", false, "\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037Nord\037Dracula\037Solarized Dark\037Gruvbox Dark\037One Dark\037Cyberpunk\037Synthwave\037Terminal Green\037Amber CRT\037Tokyo Night\037AMOLED Black\037\037\037\037\037\037\037\037Automatic (match Windows)\037العربية\037Azərbaycanca\037বাংলা\037Čeština\037Dansk\037Deutsch\037Ελληνικά\037English\037Español\037فارسی\037Français\037हिन्दी\037Hrvatski\037Kreyòl ayisyen\037Magyar\037Bahasa Indonesia\037Italiano\037日本語\037한국어\037Norsk bokmål\037Nederlands\037ଓଡ଼ିଆ\037Polski\037Português (Brasil)\037Português (Portugal)\037Română\037Русский\037Svenska\037தமிழ்\037ไทย\037Türkçe\037Українська\037Oʻzbekcha\037Tiếng Việt\037简体中文\037繁體中文"},
@@ -1810,9 +2602,9 @@ const LocalizationLanguage kLocalizationLanguages[] = {
     {L"fa", true, "\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037جدید\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037Nord\037Dracula\037Solarized Dark\037Gruvbox Dark\037One Dark\037Cyberpunk\037Synthwave\037Terminal Green\037Amber CRT\037Tokyo Night\037AMOLED Black\037\037\037\037\037\037\037\037Automatic (match Windows)\037العربية\037Azərbaycanca\037বাংলা\037Čeština\037Dansk\037Deutsch\037Ελληνικά\037English\037Español\037فارسی\037Français\037हिन्दी\037Hrvatski\037Kreyòl ayisyen\037Magyar\037Bahasa Indonesia\037Italiano\037日本語\037한국어\037Norsk bokmål\037Nederlands\037ଓଡ଼ିଆ\037Polski\037Português (Brasil)\037Português (Portugal)\037Română\037Русский\037Svenska\037தமிழ்\037ไทย\037Türkçe\037Українська\037Oʻzbekcha\037Tiếng Việt\037简体中文\037繁體中文"},
     {L"fr", false, "Ouvrir\037Réinitialiser %s…\037Dossier compressé (zippé)\037Dossier\037Raccourci\037À propos\037Aligner les icônes sur la grille\037Réorganiser automatiquement les icônes\037Contenu\037Copier\037Copier le chemin d'accès\037Créer un raccourci\037Couper\037Par défaut (non défini)\037Supprimer\037Détails\037Paramètres d'affichage\037Très grandes icônes\037Police\037Grouper par\037Hex\037Grandes icônes\037Liste\037Icônes moyennes\037Paramètres du menu\037Paramètres du menu…\037Nouveau\037Ouvrir Windhawk\037Ouvrir dans un nouveau processus\037Ouvrir dans une nouvelle fenêtre\037Ouvrir menu.ini\037Ouvrir le fichier de thème\037Ouvrir avec\037Coller\037Coller le raccourci\037Personnaliser\037Épingler à Accès rapide\037Propriétés\037Actualiser\037Renommer\037Rejouer l'animation d'ouverture\037Réinitialiser toute l'apparence\037Réinitialiser toute l'apparence…\037Options de mise à l'échelle…\037Envoyer vers\037Taille\037Options de glissement…\037Petites icônes\037Trier par\037Statut\037Cible\037Thème\037Tuiles\037Utiliser cornerRadius (non défini)\037Affichage\037Paramètres Windhawk…\037Afficher le menu classique\037Plus d'options\037Croissant\037Décroissant\037(Aucun)\037Nom\037Date de modification\037Type\037Document texte\037Image bitmap\037Document en texte enrichi\037activé\037désactivé\037personnalisé\037par défaut\037Enregistré\037Échec de l'enregistrement\037Police introuvable\037Apparence de base\037Apparence claire\037Apparence sombre\037obsolète — utilisez animationOpen/Close\037Thème : %s — modification du fichier de thème\037schéma %d\037Mode du menu\037Personnalisé\037Classique\037Couleur\037Couleurs\037Disposition\037Texte\037Ombre\037Effets\037Animation\037Arrière-plan\037Bordure\037Séparateur\037Arrière-plan au survol\037Arrière-plan pressé\037Couleur du texte\037Couleur du texte désactivé\037Flèche du sous-menu\037Couleur de l'en-tête\037Rayon des coins\037Rayons des coins\037Épaisseur de la bordure\037Marge intérieure\037Marge des éléments\037Marge verticale\037Hauteur des éléments\037Taille des icônes\037Largeur minimale\037Largeur maximale\037Espacement des séparateurs\037Marqueur\037Largeur du marqueur\037Couleur du marqueur\037Police\037Graisse de la police\037Style de la police\037Affichage des accélérateurs\037Taille de l'ombre\037Décalage horizontal de l'ombre\037Décalage vertical de l'ombre\037Opacité de l'ombre\037Adapter l'ombre à l'arrière-plan\037Couleur de l'ombre\037Flou de l'ombre\037Flou\037Intensité du flou\037Effets de superposition\037Intensité de la superposition\037Vitesse de la superposition\037Taille de la superposition\037Intervalle des images de superposition\037Animer les superpositions à l'ouverture\037Animation d'ouverture\037Animation de fermeture\037Durée d'ouverture\037Durée de fermeture\037Intervalle des images d'animation\037Courbe d'animation\037Ancre d'animation\037Animer les sous-menus\037Décalage horizontal du glissement\037Décalage vertical du glissement\037Échelle de départ\037Saturation / valeur\037Teinte\037Alpha\037Rouge\037Vert\037Bleu\037Valeur alpha\037En haut à gauche\037En haut à droite\037En bas à droite\037En bas à gauche\037Normal\037Demi-gras\037Gras\037Normal\037Italique\037Point\037Coche\037Barre\037Aucun\037Souligné\037Supprimer\037Brut\037Linéaire\037Sortie progressive\037Entrée-sortie progressive\037Retour\037Rebond\037Élastique\037Curseur\037Centre\037Aucun\037Fondu\037Glissement\037Mise à l'échelle\037Dissolution\037CRT\037Dépliage\037Aucun\037Bruit\037Plasma\037Teinte\037Lueur\037Lignes de balayage\037Vignettage\037Langue\037Afficher l'élément du menu classique\037Barre d'actions supérieure\037Délai des sous-menus\037Touches de contournement\037Journalisation de débogage\037Délai de préchauffage\037Personnalisé (menu.ini)\037Windows 11 sombre\037Windows 11 clair\037Windows 10 sombre\037Windows 10 clair\037Contraste élevé\037Menu contextuel mis en cache\037Menu contextuel de l'Explorateur mis en cache et personnalisable : thèmes, disposition, couleurs, animations, règles et commandes personnalisées.\037Thème\037Charge l'apparence de <storage>\\themes\\<name>.ini (créée à partir du préréglage fourni lors de la première utilisation). menu.ini n’est jamais modifié.\037Personnalisé (menu.ini)\037Windows 11 sombre\037Windows 11 clair\037Windows 10 sombre\037Windows 10 clair\037Nord\037Dracula\037Solarized Dark\037Gruvbox Dark\037One Dark\037Cyberpunk\037Synthwave\037Terminal Green\037Amber CRT\037Tokyo Night\037AMOLED Black\037Contraste élevé\037Mode du menu\037Custom dessine le menu auto-rendu et revient au menu classique après des échecs répétés. Classic utilise toujours le menu dessiné par le propriétaire.\037Personnalisé (recommandé)\037Classique (dessiné par le système)\037Langue\037Langue du menu et des paramètres du menu. Automatique suit la langue d'affichage de Windows et revient à l'anglais lorsqu'il ne s'agit pas d'une des langues prises en charge ; cette page elle-même suit les paramètres de langue du Windhawk.\037Automatic (match Windows)\037العربية\037Azərbaycanca\037বাংলা\037Čeština\037Dansk\037Deutsch\037Ελληνικά\037English\037Español\037فارسی\037Français\037हिन्दी\037Hrvatski\037Kreyòl ayisyen\037Magyar\037Bahasa Indonesia\037Italiano\037日本語\037한국어\037Norsk bokmål\037Nederlands\037ଓଡ଼ିଆ\037Polski\037Português (Brasil)\037Português (Portugal)\037Română\037Русский\037Svenska\037தமிழ்\037ไทย\037Türkçe\037Українська\037Oʻzbekcha\037Tiếng Việt\037简体中文\037繁體中文\037Touches de contournement\037Maintenez Shift tout en cliquant avec le bouton droit pour contourner le mod et obtenir le menu classique d'origine, ou Ctrl pour le menu natif intact.\037Ouverture instantanée du menu\037Affiche les menus de secours natifs (mode classique, secours) sans l'animation d'ouverture du système, via TPM_NOANIMATION.\037Afficher l'élément du menu classique\037Ajoutez une entrée \"Afficher le menu classique\" en bas du menu de remplacement.\037Barre d'actions supérieure\037Déplace Couper, Copier, Coller, Renommer et Supprimer dans une barre d'icônes sur le côté du menu le plus proche du curseur, comme le menu Windows 11. Mode menu personnalisé uniquement.\037Délai des sous-menus\037Millisecondes avant l'ouverture d'un sous-menu survolé pendant que le menu de remplacement est affiché. 0 s'ouvre instantanément ; -1 conserve le paramètre Windows.\037Déplacer les extras Windows\037Déplacez les extras Windows configurés dans le sous-menu Plus d'options.\037Déplacer les extensions tierces\037Déplacez les entrées d’extension de shell tierce dans le sous-menu Plus d’options.\037Éléments Windows à déplacer\037Étiquettes ou verbes d'éléments Windows séparés par des virgules à déplacer dans le sous-menu. Les verbes (par exemple setdesktopwallpaper) correspondent dans toutes les langues ; les étiquettes correspondent à la langue d’affichage du menu. Les commandes GUID-verb acceptent également les alias openterminal, editwithphotos, editwithpaint et editwithnotepad.\037Conserver dans le menu principal\037Étiquettes ou verbes tiers séparés par des virgules qui restent dans le menu principal au lieu de passer dans le sous-menu.\037Libellé du sous-menu Plus d'options\037Étiquette du sous-menu qui collecte les éléments supplémentaires.\037Raccourci des paramètres\037Touche de raccourci globale facultative qui ouvre le menu des paramètres d'apparence (par exemple Ctrl+Alt+M). Vide le désactive.\037Journalisation de débogage\037Enregistrez la synchronisation et les diagnostics pour le dépannage.\037Vider le cache\037Activez pour supprimer les modèles de menu mis en cache ; ils se reconstruisent lors de la prochaine utilisation.\037Préconstruction en arrière-plan\037Réchauffe les menus communs peu de temps après le démarrage du Explorer afin que leur première ouverture soit instantanée. Le désactiver ignore le chargement de chaque gestionnaire de menu contextuel enregistré au démarrage (l'exposition du menu stock), ce qui évite les plantages de démarrage dus à des extensions tierces défectueuses ; la première ouverture de chaque contexte se construit ensuite à la demande, comme le menu stock. Un gestionnaire qui ferait planter le menu stock plante toujours.\037Extensions à préchauffer\037Types de fichiers séparés par des virgules dont les menus sont prédéfinis au démarrage du Explorer.\037Délai de préchauffage\037Quelques secondes à attendre après le démarrage de Explorer avant de réchauffer le cache.\037Automatique (selon Windows)"},
     {L"hi", false, "\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037Nord\037Dracula\037Solarized Dark\037Gruvbox Dark\037One Dark\037Cyberpunk\037Synthwave\037Terminal Green\037Amber CRT\037Tokyo Night\037AMOLED Black\037\037\037\037\037\037\037\037Automatic (match Windows)\037العربية\037Azərbaycanca\037বাংলা\037Čeština\037Dansk\037Deutsch\037Ελληνικά\037English\037Español\037فارسی\037Français\037हिन्दी\037Hrvatski\037Kreyòl ayisyen\037Magyar\037Bahasa Indonesia\037Italiano\037日本語\037한국어\037Norsk bokmål\037Nederlands\037ଓଡ଼ିଆ\037Polski\037Português (Brasil)\037Português (Portugal)\037Română\037Русский\037Svenska\037தமிழ்\037ไทย\037Türkçe\037Українська\037Oʻzbekcha\037Tiếng Việt\037简体中文\037繁體中文"},
-    {L"hr", false, "\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037Nord\037Dracula\037Solarized Dark\037Gruvbox Dark\037One Dark\037Cyberpunk\037Synthwave\037Terminal Green\037Amber CRT\037Tokyo Night\037AMOLED Black\037\037\037\037\037\037\037\037Automatic (match Windows)\037العربية\037Azərbaycanca\037বাংলা\037Čeština\037Dansk\037Deutsch\037Ελληνικά\037English\037Español\037فارسی\037Français\037हिन्दी\037Hrvatski\037Kreyòl ayisyen\037Magyar\037Bahasa Indonesia\037Italiano\037日本語\037한국어\037Norsk bokmål\037Nederlands\037ଓଡ଼ିଆ\037Polski\037Português (Brasil)\037Português (Portugal)\037Română\037Русский\037Svenska\037தமிழ்\037ไทย\037Türkçe\037Українська\037Oʻzbekcha\037Tiếng Việt\037简体中文\037繁體中文"},
+    {L"hr", false, "Otvori\037Resetiraj %s…\037Komprimirana (zipana) mapa\037Mapa\037Prečac\037O\037Poravnajte ikone s mrežom\037Automatski raspored ikona\037Sadržaj\037Kopiraj\037Kopiraj kao put\037Stvori prečac\037Izreži\037Zadano (nije postavljeno)\037Izbriši\037pojedinosti\037Postavke zaslona\037Izuzetno velike ikone\037Lice\037Grupiraj po\037Hex\037Velike ikone\037Popis\037Srednje ikone\037Postavke izbornika\037Postavke izbornika…\037Novo\037Otvorite Windhawk\037Otvori u novom procesu\037Otvori u novom prozoru\037Otvorite menu.ini\037Otvori datoteku teme\037Otvori s\037Zalijepi\037Zalijepi prečac\037Personalizirajte\037Prikvači za brzi pristup\037Svojstva\037Osvježi\037Preimenuj\037Ponovno reproduciraj otvorenu animaciju\037Poništi sav izgled\037Poništi sav izgled...\037Opcije mjerila…\037Pošalji na\037Veličina\037Opcije slajda…\037Male ikone\037Poredaj po\037Status\037cilj\037Tema\037Pločice\037Koristi radijus kuta (nepostavljeno)\037Pogled\037Windhawk postavke…\037Prikaži klasični izbornik\037Više mogućnosti\037Uzlazno\037Spuštajući se\037(ništa)\037Ime\037Datum izmjene\037Vrsta\037Tekstualni dokument\037Bitmap slika\037Dokument obogaćenog teksta\037na\037isključeno\037običaj\037zadana vrijednost\037Spremljeno\037Spremanje nije uspjelo\037Font nije pronađen\037Izgled baze\037Lagani izgled\037Mračan izgled\037zastarjelo — koristite animationOpen/Close\037Tema: %s — uređivanje datoteke teme\037shema %d\037Način izbornika\037Prilagođeno\037Klasično\037Boja\037Boje\037Izgled\037Tekst\037Sjena\037Efekti\037Animacija\037Pozadina\037Granica\037Razdjelnik\037Lebdite u pozadini\037Prešana pozadina\037Boja teksta\037Onemogućena boja teksta\037Strelica podizbornika\037Boja zaglavlja\037Radijus kuta\037Radijusi kutova\037Širina ruba\037Padding\037Ispuna predmeta\037Okomito punjenje\037Visina predmeta\037Veličina ikone\037Minimalna širina\037Maksimalna širina\037Razmak separatora\037Marker\037Širina markera\037Boja markera\037Font\037Težina fonta\037Stil fonta\037Prikaz akceleratora\037Veličina sjene\037Pomak sjene X\037Pomak sjene Y\037Neprozirnost sjene\037Prilagodite sjenu pozadini\037Boja sjene\037Zamućenje sjene\037Zamutiti\037Snaga zamućenja\037Efekti preklapanja\037Intenzitet prekrivanja\037Brzina prekrivanja\037Veličina sloja\037Interval preklapanja okvira\037Animirajte slojeve dok su otvoreni\037Otvorena animacija\037Zatvori animaciju\037Otvoreno trajanje\037Zatvaranje trajanja\037Interval okvira animacije\037Ublažavanje animacije\037Animacijsko sidro\037Animirajte podizbornike\037Pomak klizača X\037Pomak klizača Y\037Skala od\037Zasićenost / vrijednost\037Nijansa\037alfa\037crvena\037zelena\037Plava\037Alfa vrijednost\037Gore lijevo\037Gore desno\037Dolje desno\037Dolje lijevo\037@opcija:Težina fonta:normalno\037@option:fontWeight:semibold\037@option:fontWeight:bold\037@opcija:fontStyle:normalno\037@option:fontStyle:kurziv\037@opcija:marker:točka\037@opcija:marker:provjeri\037@opcija:marker:traka\037@opcija:marker:ništa\037@option:showAccelerators:podcrtano\037@opcija:showAccelerators:strip\037@opcija:showAccelerators:raw\037@option:animationEasing:linearno\037@option:animationEasing:easeOut\037@option:animationEasing:easeInOut\037@option:animationEasing:natrag\037@option:animationEasing:bounce\037@option:animationEasing:elastično\037@option:animationAnchor:kursor\037@option:animationAnchor:centar\037@učinak: nikakav\037@efekt: izblijediti\037@efekt: slajd\037@efekt:razmjer\037@efekt:otapanje\037@efekt:crt\037@efekt: odviti\037@overlay:nema\037@prekrivanje:šum\037@prekrivanje:plazma\037@prekrivanje: nijansa\037@prekrivanje:sjaj\037@overlay:scanlines\037@overlay:vignette\037Jezik\037Prikaži klasičnu stavku izbornika\037Gornja akcijska traka\037Odgoda podizbornika\037Premosni ključevi\037Zapisivanje otklanjanja pogrešaka\037Odgoda zagrijavanja\037@tema:Prilagođeno (menu.ini)\037@theme:Windows 11 Tamno\037@theme:Windows 11 Svjetlo\037@theme:Windows 10 Tamno\037@theme:Windows 10 Svjetlo\037@theme:Visoki kontrast\037Prilagođeni kontekstni izbornik u predmemoriji\037Trenutačno otvarajući predmemorirani Explorer kontekstni izbornik koji je potpuno prilagodljiv: teme, izgled, boje, animacije, pravila i prilagođene naredbe.\037Tema\037Učitava izgled iz <storage>\\themes\\<name>.ini (stvoren iz unaprijed postavljenih postavki pri prvoj upotrebi). menu.ini se nikada ne mijenja.\037Prilagođeno (menu.ini)\037Windows 11 Tamno\037Windows 11 Svjetlo\037Windows 10 Tamno\037Windows 10 Svjetlo\037Nord\037Dracula\037Solarized Dark\037Gruvbox Dark\037One Dark\037Cyberpunk\037Synthwave\037Terminal Green\037Amber CRT\037Tokyo Night\037AMOLED Black\037Visoki kontrast\037Način izbornika\037Prilagođeno crta jelovnik koji je sam prikazao i vraća se na klasični jelovnik nakon ponovljenih neuspjeha. Classic uvijek koristi jelovnik koji je izradio vlasnik.\037Prilagođeno (preporučeno)\037Klasična vlasnička izrada\037Jezik\037Jezik za izbornik i postavke unutar izbornika. Automatski prati jezik prikaza sustava Windows i vraća se na engleski kada to nije jedan od podržanih jezika; sama ova stranica slijedi jezične postavke Windhawk-a.\037Automatic (match Windows)\037العربية\037Azərbaycanca\037বাংলা\037Čeština\037Dansk\037Deutsch\037Ελληνικά\037English\037Español\037فارسی\037Français\037हिन्दी\037Hrvatski\037Kreyòl ayisyen\037Magyar\037Bahasa Indonesia\037Italiano\037日本語\037한국어\037Norsk bokmål\037Nederlands\037ଓଡ଼ିଆ\037Polski\037Português (Brasil)\037Português (Portugal)\037Română\037Русский\037Svenska\037தமிழ்\037ไทย\037Türkçe\037Українська\037Oʻzbekcha\037Tiếng Việt\037简体中文\037繁體中文\037Premosni ključevi\037Držite Shift dok desnom tipkom miša kliknete kako biste zaobišli mod i dobili standardni klasični izbornik ili Ctrl za netaknuti izvorni izbornik.\037Otvoren instant izbornik\037Prikazuje izvorne rezervne izbornike (klasični način rada, rezervne opcije) bez animacije otvaranja sustava, putem TPM_NOANIMATION.\037Prikaži klasičnu stavku izbornika\037Dodajte unos \"Prikaži klasični izbornik\" na dnu zamjenskog izbornika.\037Gornja akcijska traka\037Premješta Izreži, Kopiraj, Zalijepi, Preimenuj i Izbriši u traku s ikonama na strani izbornika najbližoj pokazivaču, poput Windows 11 izbornika. Samo način prilagođenog izbornika.\037Odgoda otvaranja podizbornika\037Milisekunde prije otvaranja podizbornika nad kojim lebdite dok je prikazan zamjenski izbornik. 0 se otvara trenutno; -1 zadržava postavke sustava Windows.\037Premjesti Windows dodatke\037Premjestite konfigurirane Windows dodatke u podizbornik Više opcija.\037Premjestite rukovatelje treće strane\037Premjestite unose proširenja ljuske treće strane u podizbornik Više opcija.\037Windows stavke za premještanje\037Zarezima odvojene oznake ili glagoli Windows stavki za premještanje u podizbornik. Glagoli (na primjer setdesktopwallpaper) odgovaraju na svakom jeziku; oznake odgovaraju jeziku prikaza izbornika. GUID-verb naredbe također prihvaćaju aliase openterminal, editwithphotos, editwithpaint i editwithnotepad.\037Držite u glavnom izborniku\037Oznake ili glagoli trećih strana odvojeni zarezima koji ostaju u glavnom izborniku umjesto da se pomaknu u podizbornik.\037Oznaka podizbornika Više opcija\037Oznaka podizbornika koji prikuplja dodatne stavke.\037Prečac za postavke\037Neobavezna globalna tipka prečaca koja otvara izbornik postavki izgleda (na primjer Ctrl+Alt+M). Prazno ga onemogućuje.\037Zapisivanje otklanjanja pogrešaka\037Vrijeme zapisivanja i dijagnostika za rješavanje problema.\037Očisti predmemoriju\037Uključite za brisanje predmemoriranih modela izbornika; obnavljaju se prilikom sljedeće upotrebe.\037Predizgradnja pozadine\037Zagrijava uobičajene izbornike ubrzo nakon pokretanja Explorer tako da je njihovo prvo otvaranje trenutno. Isključivanjem se preskače učitavanje svakog registriranog rukovatelja kontekstnim izbornikom pri pokretanju (izloženost izbornika dionica), čime se izbjegavaju rušenja pri pokretanju zbog neispravnih proširenja trećih strana; prvo otvaranje svakog konteksta zatim se nadograđuje na zahtjev, poput izbornika dionica. Rukovatelj koji bi srušio dionički izbornik i dalje se ruši.\037Nastavci za zagrijavanje\037Vrste datoteka odvojenih zarezima čiji su izbornici unaprijed ugrađeni pri pokretanju Explorer.\037Odgoda zagrijavanja\037Nekoliko sekundi čekanja nakon pokretanja Explorer prije zagrijavanja predmemorije.\037Automatski (odgovara Windowsima)"},
     {L"ht", false, "\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037Nord\037Dracula\037Solarized Dark\037Gruvbox Dark\037One Dark\037Cyberpunk\037Synthwave\037Terminal Green\037Amber CRT\037Tokyo Night\037AMOLED Black\037\037\037\037\037\037\037\037Automatic (match Windows)\037العربية\037Azərbaycanca\037বাংলা\037Čeština\037Dansk\037Deutsch\037Ελληνικά\037English\037Español\037فارسی\037Français\037हिन्दी\037Hrvatski\037Kreyòl ayisyen\037Magyar\037Bahasa Indonesia\037Italiano\037日本語\037한국어\037Norsk bokmål\037Nederlands\037ଓଡ଼ିଆ\037Polski\037Português (Brasil)\037Português (Portugal)\037Română\037Русский\037Svenska\037தமிழ்\037ไทย\037Türkçe\037Українська\037Oʻzbekcha\037Tiếng Việt\037简体中文\037繁體中文"},
-    {L"hu", false, "\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037Nord\037Dracula\037Solarized Dark\037Gruvbox Dark\037One Dark\037Cyberpunk\037Synthwave\037Terminal Green\037Amber CRT\037Tokyo Night\037AMOLED Black\037\037\037\037\037\037\037\037Automatic (match Windows)\037العربية\037Azərbaycanca\037বাংলা\037Čeština\037Dansk\037Deutsch\037Ελληνικά\037English\037Español\037فارسی\037Français\037हिन्दी\037Hrvatski\037Kreyòl ayisyen\037Magyar\037Bahasa Indonesia\037Italiano\037日本語\037한국어\037Norsk bokmål\037Nederlands\037ଓଡ଼ିଆ\037Polski\037Português (Brasil)\037Português (Portugal)\037Română\037Русский\037Svenska\037தமிழ்\037ไทย\037Türkçe\037Українська\037Oʻzbekcha\037Tiếng Việt\037简体中文\037繁體中文"},
+    {L"hu", false, "Megnyitás\037%s visszaállítása…\037Tömörített (cipzáras) mappa\037Mappa\037Parancsikon\037Körülbelül\037Igazítsa az ikonokat a rácshoz\037Az ikonok automatikus elrendezése\037Tartalom\037Másolás\037Másolás útvonalként\037Parancsikon létrehozása\037Kivágás\037Alapértelmezett (beállítatlan)\037Törlés\037Részletek\037Megjelenítési beállítások\037Extra nagy ikonok\037Arc\037Csoportosítás szerint\037Hex\037Nagy ikonok\037Lista\037Közepes ikonok\037Menübeállítások\037Menübeállítások…\037Új\037Nyissa meg a Windhawk-t\037Megnyitás új folyamatban\037Megnyitás új ablakban\037Nyissa meg a menu.ini-t\037Nyissa meg a témafájlt\037Nyissa meg\037Beillesztés\037Parancsikon beillesztése\037Személyre szabhatja\037Rögzítés a Gyors hozzáféréshez\037Tulajdonságok\037Frissítés\037Átnevezés\037Nyitott animáció újrajátszása\037Állítsa vissza az összes megjelenést\037Minden megjelenés visszaállítása…\037Méretezési lehetőségek…\037Küldés ide\037Méret\037Diabeállítások…\037Kis ikonok\037Rendezés\037Állapot\037Cél\037téma\037csempe\037Saroksugár használata (beállítatlan)\037Nézet\037Windhawk beállítások…\037Klasszikus menü megjelenítése\037További lehetőségek\037Emelkedő\037Csökkenő\037(Nincs)\037Név\037Módosítás dátuma\037Írja be\037Szöveges dokumentum\037Bittérképes kép\037Gazdag szövegű dokumentum\037be\037kikapcsolva\037szokás\037alapértelmezett\037Mentve\037A mentés nem sikerült\037A betűtípus nem található\037Alap megjelenés\037Könnyű megjelenés\037Sötét megjelenés\037elavult – használja a animationOpen/Close-t\037Téma: %s — témafájl szerkesztése\037séma %d\037Menü mód\037Egyéni\037Klasszikus\037Szín\037Színek\037Elrendezés\037Szöveg\037Árnyék\037Hatások\037Animáció\037Háttér\037Határ\037Elválasztó\037Lebeg a háttérben\037Préselt háttér\037Szöveg színe\037Letiltott szövegszín\037Almenü nyíl\037Fejléc színe\037Saroksugár\037Sarok sugarai\037Szegély szélessége\037Padding\037Tétel kitöltése\037Függőleges párnázás\037A tétel magassága\037Ikon mérete\037Minimális szélesség\037Maximális szélesség\037Elválasztó távolság\037Marker\037Marker szélessége\037Marker színe\037Font\037Betűsúly\037Betűstílus\037Gyorsító kijelző\037Árnyék mérete\037Árnyékeltolás X\037Árnyékeltolás Y\037Árnyék átlátszatlansága\037Az árnyék hozzáigazítása a háttérhez\037Árnyék színe\037Árnyék elmosódása\037Elmosódás\037Elmosódás erőssége\037Overlay hatások\037Fedvény intenzitása\037Átfedési sebesség\037Fedvény mérete\037Overlay képkocka intervallum\037A fedvények animálása nyitott állapotban\037Animáció megnyitása\037Animáció bezárása\037Nyitott időtartam\037Bezárás időtartama\037Animációs képkocka intervallum\037Animáció könnyítés\037Animációs horgony\037Almenük animálása\037Eltolás X\037Eltolás Y\037Skála tól\037Telítettség / érték\037Hue\037Alpha\037Piros\037zöld\037Kék\037Alfa érték\037Balra fent\037Jobbra fent\037Jobbra lent\037Balra lent\037@option:fontWeight:normal\037@option:fontWeight:semibold\037@option:fontWeight:bold\037@option:fontStyle:normal\037@option:fontStyle:dőlt\037@opció:marker:pont\037@option:marker:check\037@option:marker:bar\037@opció:marker:nincs\037@option:showAccelerators:aláhúzva\037@option:showAccelerators:strip\037@option:showAccelerators:raw\037@opció:animationEasing:lineáris\037@option:animationEasing:easeOut\037@option:animationEasing:easeInOut\037@option:animationEasing:back\037@option:animationEasing:bounce\037@opció:animációEasing:rugalmas\037@option:animationAnchor:kurzor\037@option:animationAnchor:center\037@effect:nincs\037@effect:fade\037@effektus:dia\037@effektus:lépték\037@effect:old\037@effect:crt\037@effect:bontsd ki\037@overlay:nincs\037@overlay:zaj\037@overlay:plazma\037@overlay:hue\037@overlay:ragyog\037@overlay:scanlines\037@overlay:vignette\037Nyelv\037Klasszikus menüelem megjelenítése\037Legfelső akciósáv\037Az almenü késleltetése\037Kulcsok megkerülése\037Hibakeresési naplózás\037Bemelegítés késleltetése\037@theme:Egyéni (menu.ini)\037@theme:Windows 11 Sötét\037@theme:Windows 11 Light\037@theme:Windows 10 Sötét\037@theme:Windows 10 Light\037@theme:Nagy kontraszt\037Egyéni gyorsítótárazott helyi menü\037Azonnal megnyíló gyorsítótárazott Explorer helyi menü, amely teljesen testreszabható: témák, elrendezés, színek, animációk, szabályok és egyéni parancsok.\037téma\037Betölti a <storage>\\themes\\<name>.ini megjelenését (az első használatkor a mellékelt előbeállításból készült). A menu.ini-t soha nem módosítják.\037Egyéni (menu.ini)\037Windows 11 Sötét\037Windows 11 lámpa\037Windows 10 Sötét\037Windows 10 lámpa\037Nord\037Dracula\037Solarized Dark\037Gruvbox Dark\037One Dark\037Cyberpunk\037Synthwave\037Terminal Green\037Amber CRT\037Tokyo Night\037AMOLED Black\037Magas kontraszt\037Menü mód\037Az Egyéni megrajzolja a saját készítésű menüt, és ismételt meghibásodások után visszatér a klasszikus menühöz. A Classic mindig a tulajdonos által készített menüt használja.\037Egyéni (ajánlott)\037Klasszikus, tulajdonos által rajzolt\037Nyelv\037A menü nyelve és a menün belüli beállítások. Az Automatic a Windows megjelenítési nyelvét követi, és visszavált angolra, ha az nem tartozik a támogatott nyelvek közé; ez az oldal maga a Windhawk nyelvi beállítását követi.\037Automatic (match Windows)\037العربية\037Azərbaycanca\037বাংলা\037Čeština\037Dansk\037Deutsch\037Ελληνικά\037English\037Español\037فارسی\037Français\037हिन्दी\037Hrvatski\037Kreyòl ayisyen\037Magyar\037Bahasa Indonesia\037Italiano\037日本語\037한국어\037Norsk bokmål\037Nederlands\037ଓଡ଼ିଆ\037Polski\037Português (Brasil)\037Português (Portugal)\037Română\037Русский\037Svenska\037தமிழ்\037ไทย\037Türkçe\037Українська\037Oʻzbekcha\037Tiếng Việt\037简体中文\037繁體中文\037Kulcsok megkerülése\037Tartsa lenyomva a Shift billentyűt, miközben a jobb gombbal kattint a mod megkerüléséhez, és elérheti a normál klasszikus menüt, vagy a Ctrl gombot az érintetlen natív menühöz.\037Azonnali menü megnyitása\037Megjeleníti a natív tartalék menüket (klasszikus mód, tartalék menük) a rendszer megnyitása nélkül, a TPM_NOANIMATION-n keresztül.\037Klasszikus menüelem megjelenítése\037Adjon hozzá egy „Klasszikus menü megjelenítése” bejegyzést a helyettesítő menü aljához.\037Legfelső akciósáv\037A kivágást, másolást, beillesztést, átnevezést és törlést a menü kurzorhoz legközelebbi oldalán lévő ikonsávba helyezi, például a Windows 11 menüt. Csak egyéni menü mód.\037Az almenü megnyitásának késleltetése\037Ezredmásodperccel azelőtt, hogy megnyílik egy lebegtetett almenü, miközben a helyettesítő menü látható. 0 azonnal megnyílik; -1 megtartja a Windows beállítást.\037Windows extrák áthelyezése\037Helyezze át a konfigurált Windows extrákat a További beállítások almenübe.\037Harmadik fél kezelőinek áthelyezése\037Helyezze át a harmadik féltől származó shell-bővítmények bejegyzéseit a További beállítások almenübe.\037Az áthelyezendő Windows-elemek\037A Windows-elemek vesszővel elválasztott címkéi vagy igék az almenübe való áthelyezéshez. Az igék (például setdesktopwallpaper) minden nyelven megegyeznek; a címkék megegyeznek a menü megjelenítési nyelvével. A GUID-ige parancsai elfogadják az openterminal, editwithphotos, editwithpaint és editwithnotepad álneveket is.\037Tartsa a főmenüben\037Vesszővel elválasztott harmadik féltől származó címkék vagy igék, amelyek a főmenüben maradnak, nem pedig az almenübe.\037További lehetőségek almenü címke\037Az extra elemeket gyűjtő almenü címkéje.\037Beállítások gyorsbillentyű\037Opcionális globális gyorsbillentyű, amely megnyitja a megjelenési beállítások menüt (például Ctrl+Alt+M). Az üres letiltja.\037Hibakeresési naplózás\037Napló időzítés és diagnosztika a hibaelhárításhoz.\037Gyorsítótár törlése\037Kapcsolja be a gyorsítótárazott menümodellek törléséhez; a következő használatkor újjáépítik.\037Háttér előépítés\037Röviddel a Explorer indulása után felmelegíti a gyakori menüket, így azok első megnyitása azonnal megtörténik. A kikapcsolása kihagyja az összes regisztrált helyi menükezelő betöltését indításkor (a készletmenü megjelenítése), ami elkerüli a hibás, külső féltől származó bővítmények indítási összeomlását; az egyes kontextusok első megnyitása azután igény szerint épül fel, mint például a készletmenü. Az a kezelő, amely összeomolná a készletmenüt, továbbra is összeomlik.\037Bemelegítő hosszabbítások\037Vesszővel elválasztott fájltípusok, amelyek menüi előre be vannak építve a Explorer indításakor.\037Bemelegítés késleltetése\037Másodperceket kell várni a Explorer elindulása után, mielőtt felmelegítené a gyorsítótárat.\037Automatikus (egyezik a Windows rendszerrel)"},
     {L"id", false, "\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037Nord\037Dracula\037Solarized Dark\037Gruvbox Dark\037One Dark\037Cyberpunk\037Synthwave\037Terminal Green\037Amber CRT\037Tokyo Night\037AMOLED Black\037\037\037\037\037\037\037\037Automatic (match Windows)\037العربية\037Azərbaycanca\037বাংলা\037Čeština\037Dansk\037Deutsch\037Ελληνικά\037English\037Español\037فارسی\037Français\037हिन्दी\037Hrvatski\037Kreyòl ayisyen\037Magyar\037Bahasa Indonesia\037Italiano\037日本語\037한국어\037Norsk bokmål\037Nederlands\037ଓଡ଼ିଆ\037Polski\037Português (Brasil)\037Português (Portugal)\037Română\037Русский\037Svenska\037தமிழ்\037ไทย\037Türkçe\037Українська\037Oʻzbekcha\037Tiếng Việt\037简体中文\037繁體中文"},
     {L"it", false, "Apri\037Ripristina %s…\037Cartella compressa (zippata).\037Cartella\037Scorciatoia\037Circa\037Allinea le icone alla griglia\037Disporre automaticamente le icone\037Contenuto\037Copia\037Copia come percorso\037Crea scorciatoia\037Taglia\037Predefinito (non impostato)\037Elimina\037Dettagli\037Impostazioni di visualizzazione\037Icone molto grandi\037Faccia\037Raggruppa per\037Esadecimale\037Icone grandi\037Elenco\037Icone medie\037Impostazioni del menu\037Impostazioni del menu...\037Nuovo\037Apri Windhawk\037Apri in un nuovo processo\037Apri in una nuova finestra\037Apri menu.ini\037Apri il file del tema\037Apri con\037Incolla\037Incolla scorciatoia\037Personalizza\037Aggiungi ad Accesso rapido\037Proprietà\037Aggiorna\037Rinomina\037Riproduci l'animazione aperta\037Ripristina tutto l'aspetto\037Ripristina tutto l'aspetto...\037Opzioni di scala...\037Invia a\037Dimensioni\037Opzioni diapositiva...\037Piccole icone\037Ordina per\037Stato\037Obiettivo\037Tema\037Piastrelle\037Usa raggio angolo (non impostato)\037Visualizza\037Impostazioni Windhawk...\037Mostra il menu classico\037Più opzioni\037Ascendente\037Discendente\037(Nessuno)\037Nome\037Data modificata\037Digitare\037Documento di testo\037Immagine bitmap\037Documento di testo ricco\037su\037spento\037personalizzato\037predefinito\037Salvato\037Salvataggio non riuscito\037Carattere non trovato\037Aspetto basso\037Aspetto leggero\037Aspetto scuro\037deprecato: utilizzare animationOpen/Close\037Tema: %s: modifica del file del tema\037schema %d\037Modalità menù\037Personalizzato\037Classico\037Colore\037Colori\037Disposizione\037Testo\037Ombra\037Effetti\037Animazione\037Sfondo\037Confine\037Separatore\037Passa il mouse sullo sfondo\037Fondo pressato\037Colore del testo\037Colore del testo disabilitato\037Freccia del sottomenu\037Colore dell'intestazione\037Raggio dell'angolo\037Raggi d'angolo\037Larghezza del bordo\037Imbottitura\037Imbottitura dell'articolo\037Imbottitura verticale\037Altezza dell'articolo\037Dimensione dell'icona\037Larghezza minima\037Larghezza massima\037Spaziatura del separatore\037Marcatore\037Larghezza del marcatore\037Colore del marcatore\037Carattere\037Peso del carattere\037Stile del carattere\037Visualizzazione dell'acceleratore\037Dimensione dell'ombra\037Compensazione ombra X\037Compensazione ombra Y\037Opacità dell'ombra\037Adatta l'ombra allo sfondo\037Colore dell'ombra\037Sfocatura dell'ombra\037Sfocatura\037Intensità della sfocatura\037Effetti di sovrapposizione\037Intensità di sovrapposizione\037Velocità di sovrapposizione\037Dimensioni sovrapposte\037Intervallo fotogrammi sovrapposti\037Anima le sovrapposizioni mentre sono aperte\037Apri l'animazione\037Chiudi l'animazione\037Durata aperta\037Durata della chiusura\037Intervallo del fotogramma dell'animazione\037Alleggerimento dell'animazione\037Ancoraggio dell'animazione\037Animare i sottomenu\037Spostamento della diapositiva X\037Offset slitta Y\037Scala da\037Saturazione/valore\037Tonalità\037Alfa\037Rosso\037Verde\037Blu\037Valore alfa\037In alto a sinistra\037In alto a destra\037In basso a destra\037In basso a sinistra\037@option:fontWeight:normal\037@option:fontWeight:semibold\037@option:fontWeight:grassetto\037@option:fontStyle:normal\037@option:fontStyle:italic\037@opzione:marker:punto\037@opzione:marker:controlla\037@opzione:marker:bar\037@opzione:marker:nessuno\037@opzione:mostraAcceleratori:sottolineato\037@option:showAccelerators:strip\037@option:showAccelerators:raw\037@option:animationEasing:linear\037@option:animationEasing:easeOut\037@option:animationEasing:easeInOut\037@option:animationEasing:indietro\037@option:animationEasing:bounce\037@option:animationEasing:elastic\037@option:animationAnchor:cursor\037@option:animationAnchor:center\037@effetto:nessuno\037@effetto: dissolvenza\037@effetto:diapositiva\037@effetto:scala\037@effetto:dissolvenza\037@effetto:crt\037@effect:spiegare\037@overlay: nessuno\037@overlay:rumore\037@overlay:plasma\037@overlay:tonalità\037@overlay:bagliore\037@overlay:linee di scansione\037@overlay:vignetta\037Lingua\037Mostra la voce di menu classica\037Barra delle azioni superiore\037Ritardo sottomenu\037Chiavi di bypass\037Registrazione del debug\037Ritardo del riscaldamento\037@tema: Personalizzato (menu.ini)\037@theme:Windows 11 Scuro\037@tema:Windows 11 Luce\037@theme:Windows 10 Buio\037@tema:Windows 10 Luce\037@tema: Contrasto elevato\037Menu contestuale memorizzato nella cache personalizzato\037Menu contestuale Explorer memorizzato nella cache ad apertura immediata, completamente personalizzabile: temi, layout, colori, animazioni, regole e comandi personalizzati.\037Tema\037Carica l'aspetto da <storage>\\themes\\<name>.ini (creato dal preset in bundle al primo utilizzo). menu.ini non viene mai modificato.\037Personalizzato (menu.ini)\037Windows 11 Scuro\037Windows 11 Luce\037Windows 10 Scuro\037Windows 10 Luce\037Nord\037Dracula\037Solarized Dark\037Gruvbox Dark\037One Dark\037Cyberpunk\037Synthwave\037Terminal Green\037Amber CRT\037Tokyo Night\037AMOLED Black\037Contrasto elevato\037Modalità menù\037Custom disegna il menu self-renderizzato e torna al menu classico dopo ripetuti fallimenti. Classic utilizza sempre il menu disegnato dal proprietario.\037Personalizzato (consigliato)\037Classico disegnato dal proprietario\037Lingua\037Lingua del menu e impostazioni del menu. Automatico segue la lingua di visualizzazione di Windows e torna all'inglese quando non è una delle lingue supportate; questa pagina stessa segue l'impostazione della lingua di Windhawk.\037Automatic (match Windows)\037العربية\037Azərbaycanca\037বাংলা\037Čeština\037Dansk\037Deutsch\037Ελληνικά\037English\037Español\037فارسی\037Français\037हिन्दी\037Hrvatski\037Kreyòl ayisyen\037Magyar\037Bahasa Indonesia\037Italiano\037日本語\037한국어\037Norsk bokmål\037Nederlands\037ଓଡ଼ିଆ\037Polski\037Português (Brasil)\037Português (Portugal)\037Română\037Русский\037Svenska\037தமிழ்\037ไทย\037Türkçe\037Українська\037Oʻzbekcha\037Tiếng Việt\037简体中文\037繁體中文\037Chiavi di bypass\037Tieni premuto Shift mentre fai clic con il pulsante destro del mouse per bypassare la mod e ottenere il menu classico di serie o Ctrl per il menu nativo intatto.\037Menu istantaneo aperto\037Mostra i menu di fallback nativi (modalità classica, fallback) senza l'animazione di apertura del sistema, tramite TPM_NOANIMATION.\037Mostra la voce di menu classica\037Aggiungi una voce \"Mostra menu classico\" nella parte inferiore del menu sostitutivo.\037Barra delle azioni superiore\037Sposta Taglia, Copia, Incolla, Rinomina ed Elimina in una barra delle icone sul lato del menu più vicino al cursore, come il menu Windows 11. Solo modalità menu personalizzato.\037Ritardo apertura sottomenu\037Millisecondi prima che si apra un sottomenu al passaggio del mouse mentre viene visualizzato il menu di sostituzione. 0 si apre istantaneamente; -1 mantiene l'impostazione di Windows.\037Sposta gli extra di Windows\037Sposta gli extra di Windows configurati nel sottomenu Altre opzioni.\037Spostare gestori di terze parti\037Sposta le voci dell'estensione della shell di terze parti nel sottomenu Altre opzioni.\037Elementi di Windows da spostare\037Etichette o verbi separati da virgole degli elementi di Windows per spostarsi nel sottomenu. I verbi (ad esempio setdesktopwallpaper) corrispondono in ogni lingua; le etichette corrispondono alla lingua di visualizzazione del menu. I comandi GUID-verb accettano anche gli alias openterminal, editwithphotos, editwithpaint e editwithnotepad.\037Resta nel menu principale\037Etichette o verbi di terze parti separati da virgole che rimangono nel menu principale invece di spostarsi nel sottomenu.\037Etichetta del sottomenu Altre opzioni\037Etichetta del sottomenu che raccoglie voci extra.\037Tasto di scelta rapida Impostazioni\037Tasto di scelta rapida globale opzionale che apre il menu delle impostazioni dell'aspetto (ad esempio Ctrl+Alt+M). Vuoto lo disabilita.\037Registrazione del debug\037Registra tempi e diagnostica per la risoluzione dei problemi.\037Svuota cache\037Attiva per eliminare i modelli di menu memorizzati nella cache; si ricostruiscono al prossimo utilizzo.\037Pre-costruzione dello sfondo\037Riscalda i menu comuni subito dopo l'avvio di Explorer, quindi la loro prima apertura è immediata. Disattivandolo si salta il caricamento di ogni gestore di menu contestuale registrato all'avvio (l'esposizione del menu Stock), evitando arresti anomali all'avvio dovuti a estensioni di terze parti difettose; la prima apertura di ciascun contesto si basa quindi su richiesta, come il menu delle scorte. Un gestore che causerebbe l'arresto anomalo del menu Stock continua a bloccarsi.\037Estensioni di riscaldamento\037Tipi di file separati da virgole i cui menu sono precostruiti all'avvio di Explorer.\037Ritardo del riscaldamento\037Secondi di attesa dopo l'avvio di Explorer prima di riscaldare la cache.\037Automatico (corrisponde a Windows)"},
     {L"ja", false, "\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037新規\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037Nord\037Dracula\037Solarized Dark\037Gruvbox Dark\037One Dark\037Cyberpunk\037Synthwave\037Terminal Green\037Amber CRT\037Tokyo Night\037AMOLED Black\037\037\037\037\037\037\037\037Automatic (match Windows)\037العربية\037Azərbaycanca\037বাংলা\037Čeština\037Dansk\037Deutsch\037Ελληνικά\037English\037Español\037فارسی\037Français\037हिन्दी\037Hrvatski\037Kreyòl ayisyen\037Magyar\037Bahasa Indonesia\037Italiano\037日本語\037한국어\037Norsk bokmål\037Nederlands\037ଓଡ଼ିଆ\037Polski\037Português (Brasil)\037Português (Portugal)\037Română\037Русский\037Svenska\037தமிழ்\037ไทย\037Türkçe\037Українська\037Oʻzbekcha\037Tiếng Việt\037简体中文\037繁體中文"},
@@ -1820,17 +2612,17 @@ const LocalizationLanguage kLocalizationLanguages[] = {
     {L"nb", false, "Åpne\037Tilbakestill %s...\037Komprimert (zippet) mappe\037Mappe\037Snarvei\037Om\037Juster ikonene til rutenettet\037Ordne ikoner automatisk\037Innhold\037Kopier\037Kopier som bane\037Lag snarvei\037Klipp ut\037Standard (ikke innstilt)\037Slett\037Detaljer\037Skjerminnstillinger\037Ekstra store ikoner\037Ansikt\037Grupper etter\037Hex\037Store ikoner\037Liste\037Middels ikoner\037Menyinnstillinger\037Menyinnstillinger...\037Ny\037Åpne Windhawk\037Åpne i ny prosess\037Åpne i nytt vindu\037Åpne menu.ini\037Åpne temafil\037Åpne med\037Lim inn\037Lim inn snarvei\037Tilpass\037Fest til hurtigtilgang\037Egenskaper\037Oppdater\037Gi nytt navn\037Spill av åpen animasjon på nytt\037Tilbakestill alt utseende\037Tilbakestill alt utseende...\037Skaleringsalternativer …\037Send til\037Størrelse\037Lysbildealternativer...\037Små ikoner\037Sorter etter\037Status\037Mål\037Tema\037Fliser\037Bruk cornerRadius (ikke innstilt)\037Vis\037Windhawk-innstillinger...\037Vis klassisk meny\037Flere alternativer\037Stigende\037Synkende\037(Ingen)\037Navn\037Dato endret\037Type\037Tekstdokument\037Bitmap-bilde\037Rik tekstdokument\037på\037av\037tilpasset\037standard\037Lagret\037Lagring mislyktes\037Finner ikke skrift\037Base utseende\037Lett utseende\037Mørkt utseende\037utdatert — bruk animationOpen/Close\037Tema: %s — redigering av temafil\037skjema %d\037Menymodus\037Egendefinert\037Klassisk\037Farge\037Farger\037Oppsett\037Tekst\037Skygge\037Effekter\037Animasjon\037Bakgrunn\037Border\037Separator\037Hover bakgrunn\037Trykket bakgrunn\037Tekstfarge\037Deaktivert tekstfarge\037Undermenypil\037Overskriftsfarge\037Hjørneradius\037Hjørneradier\037Kantbredde\037Polstring\037Varepolstring\037Vertikal polstring\037Varehøyde\037Ikonstørrelse\037Minimum bredde\037Maksimal bredde\037Skille mellomrom\037Markør\037Markør bredde\037Markør farge\037Font\037Skriftvekt\037Skriftstil\037Accelerator display\037Skyggestørrelse\037Skyggeforskyvning X\037Skyggeforskyvning Y\037Skyggeopasitet\037Tilpass skyggen til bakteppet\037Skygge farge\037Skyggeuskarphet\037Uskarphet\037Uskarphet styrke\037Overleggseffekter\037Overleggsintensitet\037Overleggshastighet\037Overleggsstørrelse\037Overleggsrammeintervall\037Animer overlegg mens de er åpne\037Åpne animasjon\037Lukk animasjon\037Åpen varighet\037Lukk varighet\037Animasjonsrammeintervall\037Forenkling av animasjon\037Animasjonsanker\037Animer undermenyer\037Glideforskyvning X\037Glideforskyvning Y\037Skala fra\037Metning / verdi\037Hue\037Alfa\037Rødt\037Grønn\037Blått\037Alfa-verdi\037Øverst til venstre\037Øverst til høyre\037Nederst til høyre\037Nederst til venstre\037@option:fontWeight:normal\037@option:fontWeight:semibold\037@option:fontWeight:fet\037@option:fontStyle:normal\037@option:fontStyle:kursiv\037@alternativ:markør:punkt\037@alternativ:markør:sjekk\037@alternativ:markør:bar\037@alternativ:markør:ingen\037@option:showAccelerators:understrek\037@option:vis Accelerators:strip\037@option:showAccelerators:rå\037@alternativ:animasjonEasing:lineær\037@option:animationEasing:easeOut\037@option:animationEasing:easeInOut\037@option:animationEasing:tilbake\037@option:animasjonEasing:sprett\037@alternativ:animasjonEasing:elastisk\037@alternativ:animasjonAnker:markør\037@option:animasjonAnker:senter\037@effekt:ingen\037@effekt:fade\037@effekt:lysbilde\037@effekt:skala\037@effekt:oppløses\037@effekt:crt\037@effekt:utfolde seg\037@overlegg:ingen\037@overlegg:støy\037@overlegg:plasma\037@overlegg:farge\037@overlegg:glød\037@overlay:skannelinjer\037@overlegg:vignett\037Språk\037Vis klassisk menyelement\037Øverste handlingslinje\037Undermeny forsinkelse\037Omgå nøkler\037Feilsøk logging\037Oppvarmingsforsinkelse\037@tema:Egendefinert (menu.ini)\037@tema:Windows 11 Mørk\037@theme:Windows 11 lys\037@tema:Windows 10 Mørk\037@theme:Windows 10 lys\037@tema:Høy kontrast\037Tilpasset bufret kontekstmeny\037Umiddelbar åpning av bufret Explorer kontekstmeny som er fullt tilpassbar: temaer, layout, farger, animasjoner, regler og egendefinerte kommandoer.\037Tema\037Laster inn utseendet fra <storage>\\themes\\<name>.ini (opprettet fra den medfølgende forhåndsinnstillingen ved første gangs bruk). menu.ini endres aldri.\037Egendefinert (menu.ini)\037Windows 11 Mørk\037Windows 11 lys\037Windows 10 Mørk\037Windows 10 lys\037Nord\037Dracula\037Solarized Dark\037Gruvbox Dark\037One Dark\037Cyberpunk\037Synthwave\037Terminal Green\037Amber CRT\037Tokyo Night\037AMOLED Black\037Høy kontrast\037Menymodus\037Custom tegner den selvgjengitte menyen og faller tilbake til den klassiske menyen etter gjentatte feil. Classic bruker alltid den eiertegnede menyen.\037Egendefinert (anbefalt)\037Klassisk eiertegnet\037Språk\037Språk for menyen og innstillingene i menyen. Automatisk følger visningsspråket i Windows og faller tilbake til engelsk når det ikke er et av de støttede språkene; selve denne siden følger Windhawks språkinnstilling.\037Automatic (match Windows)\037العربية\037Azərbaycanca\037বাংলা\037Čeština\037Dansk\037Deutsch\037Ελληνικά\037English\037Español\037فارسی\037Français\037हिन्दी\037Hrvatski\037Kreyòl ayisyen\037Magyar\037Bahasa Indonesia\037Italiano\037日本語\037한국어\037Norsk bokmål\037Nederlands\037ଓଡ଼ିଆ\037Polski\037Português (Brasil)\037Português (Portugal)\037Română\037Русский\037Svenska\037தமிழ்\037ไทย\037Türkçe\037Українська\037Oʻzbekcha\037Tiếng Việt\037简体中文\037繁體中文\037Omgå nøkler\037Hold Shift mens du høyreklikker for å omgå moden og få den klassiske menyen, eller Ctrl for den uberørte native-menyen.\037Øyeblikkelig meny åpen\037Viser native reservemenyer (klassisk modus, fallbacks) uten systemets åpen animasjon, via TPM_NOANIMATION.\037Vis klassisk menyelement\037Legg til en «Vis klassisk meny»-oppføring nederst på erstatningsmenyen.\037Øverste handlingslinje\037Flytter Klipp ut, Kopier, Lim inn, Gi nytt navn og Slett til en ikonlinje på siden av menyen nærmest markøren, som Windows 11-menyen. Kun tilpasset menymodus.\037Undermeny åpningsforsinkelse\037Millisekunder før en undermeny med sveve åpnes mens erstatningsmenyen vises. 0 åpnes umiddelbart; -1 beholder Windows-innstillingen.\037Flytt Windows-ekstrautstyr\037Flytt det konfigurerte Windows-ekstrautstyret til undermenyen Flere alternativer.\037Flytt tredjepartsbehandlere\037Flytt oppføringer fra tredjeparts shell-utvidelser til undermenyen Flere alternativer.\037Windows-elementer å flytte\037Kommaseparerte etiketter eller verb for Windows-elementer for å flytte inn i undermenyen. Verb (for eksempel setdesktopwallpaper) samsvarer på hvert språk; etiketter samsvarer med menyens visningsspråk. GUID-verbkommandoer godtar også aliasene openterminal, editwithphotos, editwithpaint og editwithnotepad.\037Hold deg i hovedmenyen\037Kommaseparerte tredjepartsetiketter eller verb som blir værende i hovedmenyen i stedet for å flytte inn i undermenyen.\037Flere alternativer undermenyetikett\037Etikett på undermenyen som samler ekstra elementer.\037Innstillinger hurtigtast\037Valgfri global hurtigtast som åpner menyen for utseendeinnstillinger (for eksempel Ctrl+Alt+M). Tom deaktiverer den.\037Feilsøk logging\037Loggtiming og diagnostikk for feilsøking.\037Tøm hurtigbufferen\037Slå på for å slette de bufrede menymodellene; de bygger om ved neste bruk.\037Bakgrunn forhåndsbygging\037Varmer opp vanlige menyer kort tid etter at Explorer starter, slik at de åpnes umiddelbart. Hvis du slår den av, hopper du over lasting av alle registrerte kontekstmenybehandlere ved oppstart (aksjemenyens eksponering), noe som unngår oppstartskrasj fra defekte tredjepartsutvidelser; den første åpningen i hver kontekst bygger deretter på etterspørsel, som aksjemenyen. En behandler som ville krasje aksjemenyen krasjer fortsatt.\037Oppvarmingsforlengelser\037Kommaseparerte filtyper hvis menyer er forhåndsbygd ved oppstart av Explorer.\037Oppvarmingsforsinkelse\037Sekunder å vente etter at Explorer starter før cachen varmes opp.\037Automatisk (matcher Windows)"},
     {L"nl", false, "Openen\037%s opnieuw instellen…\037Gecomprimeerde (gezipte) map\037Map\037Snelkoppeling\037Over\037Lijn pictogrammen uit op het raster\037Pictogrammen automatisch rangschikken\037Inhoud\037Kopiëren\037Kopieer als pad\037Snelkoppeling maken\037Knippen\037Standaard (niet ingesteld)\037Verwijderen\037Details\037Weergave-instellingen\037Extra grote pictogrammen\037Gezicht\037Groepeer op\037Hex\037Grote iconen\037Lijst\037Middelgrote pictogrammen\037Menu-instellingen\037Menu-instellingen…\037Nieuw\037Open Windhawk\037Openen in nieuw proces\037Openen in nieuw venster\037Open menu.ini\037Themabestand openen\037Openen met\037Plakken\037Snelkoppeling plakken\037Personaliseer\037Vastmaken aan Snelle toegang\037Eigenschappen\037Vernieuwen\037Hernoemen\037Open animatie opnieuw afspelen\037Reset alle uiterlijk\037Alle weergaven resetten…\037Schaalopties…\037Verzenden naar\037Grootte\037Dia-opties…\037Kleine iconen\037Sorteer op\037Status\037Doel\037Thema\037Tegels\037Gebruik cornerRadius (niet ingesteld)\037Bekijken\037Windhawk-instellingen…\037Klassiek menu weergeven\037Meer opties\037Oplopend\037Aflopend\037(Geen)\037Naam\037Datum gewijzigd\037Typ\037Tekstdocument\037Bitmapafbeelding\037Rich Text-document\037op\037uit\037gewoonte\037standaard\037Opgeslagen\037Opslaan mislukt\037Lettertype niet gevonden\037Basis uiterlijk\037Lichte uitstraling\037Donker uiterlijk\037verouderd - gebruik animationOpen/Close\037Thema: %s - themabestand bewerken\037schema %d\037Menumodus\037Aangepast\037Klassiek\037Kleur\037Kleuren\037Indeling\037Tekst\037Schaduw\037Effecten\037Animatie\037Achtergrond\037Grens\037Scheidingsteken\037Beweeg de achtergrond\037Ingedrukte achtergrond\037Tekstkleur\037Uitgeschakelde tekstkleur\037Submenupijl\037Kleur koptekst\037Hoekradius\037Hoekradii\037Randbreedte\037Opvulling\037Opvulling van artikelen\037Verticale vulling\037Artikel hoogte\037Pictogramgrootte\037Minimale breedte\037Maximale breedte\037Afstand tussen scheidingstekens\037Markering\037Breedte markering\037Kleur van de markering\037Lettertype\037Lettertype gewicht\037Lettertypestijl\037Versneller weergave\037Schaduwgrootte\037Schaduwverschuiving X\037Schaduwverschuiving Y\037Schaduwdekking\037Pas schaduw aan de achtergrond aan\037Schaduw kleur\037Schaduw vervagen\037Vervagen\037Vervaging kracht\037Overlay-effecten\037Overlay-intensiteit\037Overlay-snelheid\037Overlay-grootte\037Frame-interval overlay\037Animeer overlays terwijl ze geopend zijn\037Animatie openen\037Animatie sluiten\037Open duur\037Sluitingsduur\037Animatieframe-interval\037Animatie versoepeling\037Animatie anker\037Animeer submenu's\037Dia-offset X\037Glijverschuiving Y\037Schaal vanaf\037Verzadiging / waarde\037Tint\037Alfa\037Rood\037Groen\037Blauw\037Alfa-waarde\037Linksboven\037Rechtsboven\037Rechtsonder\037Linksonder\037@optie:lettertypegewicht:normaal\037@option:fontWeight:halfvet\037@option:fontWeight:vet\037@optie:lettertype:normaal\037@optie:lettertype:cursief\037@optie:markering:punt\037@optie:markering:vink aan\037@optie:markering:balk\037@optie:markering:geen\037@option:showAccelerators:onderstrepen\037@option:showAccelerators:strip\037@option:showAccelerators:rauw\037@optie:animatieVersoepeling:lineair\037@optie:animatieEasing:easeOut\037@optie:animatieEasing:easeInOut\037@option:animatieVersoepeling:terug\037@optie:animatieVersoepeling:stuiteren\037@optie:animatieVersoepeling:elastisch\037@optie:animatieAnker:cursor\037@option:animatieAnker:centrum\037@effect: geen\037@effect: vervagen\037@effect:schuif\037@effect:schaal\037@effect: oplossen\037@effect:crt\037@effect: ontvouwen\037@overlay: geen\037@overlay: ruis\037@overlay:plasma\037@overlay: tint\037@overlay: gloed\037@overlay:scanlijnen\037@overlay: vignet\037Taal\037Klassiek menu-item weergeven\037Actiebalk bovenaan\037Submenu vertraging\037Sleutels omzeilen\037Foutopsporingslogboekregistratie\037Opwarmvertraging\037@thema:Aangepast (menu.ini)\037@thema:Windows 11 Donker\037@thema:Windows 11 Licht\037@thema:Windows 10 Donker\037@thema:Windows 10 Licht\037@thema:Hoog contrast\037Aangepast contextmenu in cache\037Direct te openen in het cachegeheugen opgeslagen Explorer-contextmenu dat volledig aanpasbaar is: thema's, lay-out, kleuren, animaties, regels en aangepaste opdrachten.\037Thema\037Laadt het uiterlijk uit <storage>\\themes\\<name>.ini (gemaakt op basis van de gebundelde voorinstelling bij het eerste gebruik). menu.ini wordt nooit gewijzigd.\037Aangepast (menu.ini)\037Windows 11 Donker\037Windows 11 Licht\037Windows 10 Donker\037Windows 10 Licht\037Nord\037Dracula\037Solarized Dark\037Gruvbox Dark\037One Dark\037Cyberpunk\037Synthwave\037Terminal Green\037Amber CRT\037Tokyo Night\037AMOLED Black\037Hoog contrast\037Menumodus\037Custom tekent het zelf weergegeven menu en valt na herhaalde mislukkingen terug naar het klassieke menu. Classic gebruikt altijd het door de eigenaar getekende menu.\037Aangepast (aanbevolen)\037Klassiek door de eigenaar getekend\037Taal\037Taal voor het menu en de instellingen in het menu. Automatisch volgt de Windows-weergavetaal en valt terug op Engels als dit niet een van de ondersteunde talen is; deze pagina zelf volgt de taalinstelling van Windhawk.\037Automatic (match Windows)\037العربية\037Azərbaycanca\037বাংলা\037Čeština\037Dansk\037Deutsch\037Ελληνικά\037English\037Español\037فارسی\037Français\037हिन्दी\037Hrvatski\037Kreyòl ayisyen\037Magyar\037Bahasa Indonesia\037Italiano\037日本語\037한국어\037Norsk bokmål\037Nederlands\037ଓଡ଼ିଆ\037Polski\037Português (Brasil)\037Português (Portugal)\037Română\037Русский\037Svenska\037தமிழ்\037ไทย\037Türkçe\037Українська\037Oʻzbekcha\037Tiếng Việt\037简体中文\037繁體中文\037Sleutels omzeilen\037Houd Shift vast terwijl je met de rechtermuisknop klikt om de mod te omzeilen en het standaard klassieke menu te krijgen, of Ctrl voor het onaangeroerde oorspronkelijke menu.\037Instantmenu geopend\037Toont native fallback-menu's (klassieke modus, fallbacks) zonder de open animatie van het systeem, via TPM_NOANIMATION.\037Klassiek menu-item weergeven\037Voeg een item 'Klassiek menu weergeven' toe onder aan het vervangingsmenu.\037Actiebalk bovenaan\037Verplaatst Knippen, Kopiëren, Plakken, Hernoemen en Verwijderen naar een pictogrammenbalk aan de kant van het menu die zich het dichtst bij de cursor bevindt, zoals het Windows 11-menu. Alleen aangepaste menumodus.\037Submenu openingsvertraging\037Milliseconden voordat een zwevend submenu wordt geopend terwijl het vervangingsmenu wordt weergegeven. 0 wordt onmiddellijk geopend; -1 behoudt de Windows-instelling.\037Verplaats Windows-extra's\037Verplaats de geconfigureerde Windows-extra's naar het submenu Meer opties.\037Verplaats handlers van derden\037Verplaats shell-extensie-items van derden naar het submenu Meer opties.\037Windows-items om te verplaatsen\037Door komma's gescheiden labels of werkwoorden van Windows-items om naar het submenu te gaan. Werkwoorden (bijvoorbeeld setdesktopwallpaper) komen in elke taal overeen; labels komen overeen met de weergavetaal van het menu. GUID-werkwoordopdrachten accepteren ook de aliassen openterminal, editwithphotos, editwithpaint en editwithnotepad.\037Blijf in het hoofdmenu\037Door komma's gescheiden labels of werkwoorden van derden die in het hoofdmenu blijven staan in plaats van naar het submenu te gaan.\037Submenulabel Meer opties\037Label van het submenu dat extra items verzamelt.\037Sneltoets voor instellingen\037Optionele algemene sneltoets die het menu met weergave-instellingen opent (bijvoorbeeld Ctrl+Alt+M). Leeg schakelt het uit.\037Foutopsporingslogboekregistratie\037Registreer timing en diagnostiek voor probleemoplossing.\037Cache wissen\037Schakel dit in om de in de cache opgeslagen menumodellen te verwijderen; ze herbouwen bij het volgende gebruik.\037Achtergrond vooraf gebouwd\037Verwarmt algemene menu's kort nadat de Explorer is gestart, zodat ze direct voor het eerst worden geopend. Als u dit uitschakelt, wordt het laden van elke geregistreerde contextmenu-handler bij het opstarten overgeslagen (de weergave van het aandelenmenu), waardoor opstartcrashes door defecte extensies van derden worden vermeden; de eerste opening van elke context bouwt vervolgens voort op aanvraag, zoals het aandelenmenu. Een handler die het aandelenmenu zou laten crashen, crasht nog steeds.\037Opwarmextensies\037Door komma's gescheiden bestandstypen waarvan de menu's vooraf zijn gebouwd bij het opstarten van de Explorer.\037Opwarmvertraging\037Seconden om te wachten nadat Explorer is gestart voordat de cache wordt opgewarmd.\037Automatisch (match Windows)"},
     {L"or", false, "\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037Nord\037Dracula\037Solarized Dark\037Gruvbox Dark\037One Dark\037Cyberpunk\037Synthwave\037Terminal Green\037Amber CRT\037Tokyo Night\037AMOLED Black\037\037\037\037\037\037\037\037Automatic (match Windows)\037العربية\037Azərbaycanca\037বাংলা\037Čeština\037Dansk\037Deutsch\037Ελληνικά\037English\037Español\037فارسی\037Français\037हिन्दी\037Hrvatski\037Kreyòl ayisyen\037Magyar\037Bahasa Indonesia\037Italiano\037日本語\037한국어\037Norsk bokmål\037Nederlands\037ଓଡ଼ିଆ\037Polski\037Português (Brasil)\037Português (Portugal)\037Română\037Русский\037Svenska\037தமிழ்\037ไทย\037Türkçe\037Українська\037Oʻzbekcha\037Tiếng Việt\037简体中文\037繁體中文"},
-    {L"pl", false, "\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037Nowy\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037Nord\037Dracula\037Solarized Dark\037Gruvbox Dark\037One Dark\037Cyberpunk\037Synthwave\037Terminal Green\037Amber CRT\037Tokyo Night\037AMOLED Black\037\037\037\037\037\037\037\037Automatic (match Windows)\037العربية\037Azərbaycanca\037বাংলা\037Čeština\037Dansk\037Deutsch\037Ελληνικά\037English\037Español\037فارسی\037Français\037हिन्दी\037Hrvatski\037Kreyòl ayisyen\037Magyar\037Bahasa Indonesia\037Italiano\037日本語\037한국어\037Norsk bokmål\037Nederlands\037ଓଡ଼ିଆ\037Polski\037Português (Brasil)\037Português (Portugal)\037Română\037Русский\037Svenska\037தமிழ்\037ไทย\037Türkçe\037Українська\037Oʻzbekcha\037Tiếng Việt\037简体中文\037繁體中文"},
+    {L"pl", false, "Otwórz\037Zresetuj %s…\037Folder skompresowany (spakowany).\037Folder\037Skrót\037O\037Wyrównaj ikony do siatki\037Automatyczne rozmieszczanie ikon\037Treść\037Kopiuj\037Skopiuj jako ścieżkę\037Utwórz skrót\037Wytnij\037Domyślne (nieustawione)\037Usuń\037Szczegóły\037Ustawienia wyświetlania\037Bardzo duże ikony\037Twarz\037Grupuj według\037Heks\037Duże ikony\037Lista\037Średnie ikony\037Ustawienia menu\037Ustawienia menu…\037Nowy\037Otwórz Windhawk\037Otwórz w nowym procesie\037Otwórz w nowym oknie\037Otwórz menu.ini\037Otwórz plik motywu\037Otwórz za pomocą\037Wklej\037Wklej skrót\037Personalizuj\037Przypnij do szybkiego dostępu\037Właściwości\037Odśwież\037Zmień nazwę\037Odtwórz ponownie otwartą animację\037Zresetuj cały wygląd\037Zresetuj cały wygląd…\037Opcje skali…\037Wyślij do\037Rozmiar\037Opcje slajdów…\037Małe ikony\037Sortuj według\037Stan\037Cel\037Motyw\037Płytki\037Użyj promienia narożnika (nieustawione)\037Widok\037Ustawienia Windhawk…\037Pokaż klasyczne menu\037Więcej opcji\037Rosnąco\037Malejąco\037(Brak)\037Imię\037Data modyfikacji\037Wpisz\037Dokument tekstowy\037Obraz bitmapowy\037Dokument bogaty w tekst\037na\037wyłączone\037niestandardowe\037domyślny\037Zapisano\037Zapisywanie nie powiodło się\037Nie znaleziono czcionki\037Wygląd podstawowy\037Lekki wygląd\037Ciemny wygląd\037przestarzałe — użyj animationOpen/Close\037Motyw: %s — edycja pliku motywu\037schemat %d\037Tryb menu\037Niestandardowe\037Klasyczny\037Kolor\037Kolory\037Układ\037Tekst\037Cień\037Efekty\037Animacja\037Tło\037Granica\037Separator\037Najedź na tło\037Tło tłoczone\037Kolor tekstu\037Wyłączony kolor tekstu\037Strzałka podmenu\037Kolor nagłówka\037Promień narożnika\037Promienie naroży\037Szerokość obramowania\037Wyściółka\037Wypełnienie przedmiotu\037Pionowe wypełnienie\037Wysokość przedmiotu\037Rozmiar ikony\037Minimalna szerokość\037Maksymalna szerokość\037Rozstaw separatorów\037Znacznik\037Szerokość znacznika\037Kolor znacznika\037Czcionka\037Waga czcionki\037Styl czcionki\037Wyświetlacz akceleratora\037Rozmiar cienia\037Przesunięcie cienia X\037Przesunięcie cienia Y\037Nieprzezroczystość cienia\037Dostosuj cień do tła\037Kolor cienia\037Rozmycie cienia\037Rozmycie\037Siła rozmycia\037Efekty nakładki\037Intensywność nakładki\037Szybkość nakładki\037Rozmiar nakładki\037Interwał klatek nakładki\037Animuj nakładki po otwarciu\037Otwórz animację\037Zamknij animację\037Czas otwarcia\037Czas trwania zamknięcia\037Interwał klatek animacji\037Złagodzenie animacji\037Kotwica animacji\037Animuj podmenu\037Przesunięcie slajdu X\037Przesunięcie suwaka Y\037Skala od\037Nasycenie / wartość\037Odcień\037Alfa\037Czerwony\037Zielony\037Niebieski\037Wartość alfa\037U góry po lewej\037U góry po prawej\037Prawy dolny róg\037Na dole po lewej\037@option:fontWeight:normalny\037@option:fontWeight:pogrubiony\037@option:fontWeight:pogrubienie\037@option:fontStyle:normalny\037@option:fontStyle:kursywa\037@opcja:znacznik:kropka\037@opcja:znacznik:sprawdź\037@opcja:znacznik:pasek\037@opcja:znacznik:brak\037@option:showAccelerators:podkreśl\037@option:showAccelerators:strip\037@option:showAccelerators:surowe\037@option:animacjaEasing:liniowy\037@option:animacjaEasing:easeOut\037@option:animationEasing:easeInOut\037@option:animacjaEasing:wstecz\037@option:animacjaUłatwianie:odbicie\037@option:animacjaEasing:elastyczny\037@opcja:animacjaKotwica:kursor\037@option:animacjaAnchor:centrum\037@efekt: brak\037@efekt: zanikanie\037@efekt:slajd\037@efekt:skala\037@efekt:rozpuścić\037@efekt:crt\037@efekt:rozwiń\037@nakładka: brak\037@overlay: hałas\037@overlay:plazma\037@overlay: odcień\037@overlay:poświata\037@overlay:linie skanowania\037@overlay:winieta\037Język\037Pokaż klasyczny element menu\037Górny pasek akcji\037Opóźnienie podmenu\037Omiń klucze\037Rejestrowanie debugowania\037Opóźnienie rozgrzewki\037@theme:Niestandardowy (menu.ini)\037@theme:Windows 11 Ciemny\037@theme:Windows 11 Światło\037@theme:Windows 10 Ciemny\037@theme:Windows 10 Światło\037@theme:Wysoki kontrast\037Niestandardowe menu kontekstowe buforowane\037Natychmiast otwierające się menu kontekstowe Explorer z pamięci podręcznej, które można w pełni dostosować: motywy, układ, kolory, animacje, reguły i niestandardowe polecenia.\037Motyw\037Ładuje wygląd z <storage>\\themes\\<name>.ini (utworzony na podstawie dołączonego zestawu wstępnego przy pierwszym użyciu). menu.ini nigdy nie jest modyfikowany.\037Niestandardowe (menu.ini)\037Windows 11 Ciemny\037Światło Windows 11\037Windows 10 Ciemny\037Światło Windows 10\037Nord\037Dracula\037Solarized Dark\037Gruvbox Dark\037One Dark\037Cyberpunk\037Synthwave\037Terminal Green\037Amber CRT\037Tokyo Night\037AMOLED Black\037Wysoki kontrast\037Tryb menu\037Niestandardowe rysuje samodzielnie renderowane menu i powraca do klasycznego menu po powtarzających się niepowodzeniach. Klasyczny zawsze korzysta z menu rysowanego przez właściciela.\037Niestandardowe (zalecane)\037Klasyczny, narysowany przez właściciela\037Język\037Język menu i ustawień w menu. Tryb automatyczny podąża za językiem wyświetlania systemu Windows i powraca do języka angielskiego, jeśli nie jest on jednym z obsługiwanych języków; ta strona sama w sobie jest zgodna z ustawieniami językowymi Windhawk.\037Automatic (match Windows)\037العربية\037Azərbaycanca\037বাংলা\037Čeština\037Dansk\037Deutsch\037Ελληνικά\037English\037Español\037فارسی\037Français\037हिन्दी\037Hrvatski\037Kreyòl ayisyen\037Magyar\037Bahasa Indonesia\037Italiano\037日本語\037한국어\037Norsk bokmål\037Nederlands\037ଓଡ଼ିଆ\037Polski\037Português (Brasil)\037Português (Portugal)\037Română\037Русский\037Svenska\037தமிழ்\037ไทย\037Türkçe\037Українська\037Oʻzbekcha\037Tiếng Việt\037简体中文\037繁體中文\037Omiń klucze\037Przytrzymaj Shift podczas klikania prawym przyciskiem myszy, aby ominąć mod i uzyskać standardowe menu klasyczne, lub Ctrl, aby uzyskać niezmienione menu natywne.\037Menu natychmiastowe otwarte\037Pokazuje natywne menu awaryjne (tryb klasyczny, awaryjne) bez animacji otwierania systemu, poprzez TPM_NOANIMATION.\037Pokaż klasyczny element menu\037Dodaj wpis „Pokaż menu klasyczne” na dole menu zastępczego.\037Górny pasek akcji\037Przenosi polecenie Wytnij, Kopiuj, Wklej, Zmień nazwę i Usuń na pasek ikon z boku menu najbliżej kursora, np. menu Windows 11. Tylko tryb menu niestandardowego.\037Opóźnienie otwarcia podmenu\037Milisekundy przed otwarciem podmenu po najechaniu kursorem i wyświetleniu menu zastępczego. 0 otwiera się natychmiast; -1 zachowuje ustawienie systemu Windows.\037Przenieś dodatki systemu Windows\037Przenieś skonfigurowane dodatki systemu Windows do podmenu Więcej opcji.\037Przenieś programy obsługi stron trzecich\037Przenieś wpisy rozszerzeń powłoki innych firm do podmenu Więcej opcji.\037Elementy systemu Windows do przeniesienia\037Oddzielone przecinkami etykiety lub czasowniki elementów systemu Windows, które mają zostać przeniesione do podmenu. Czasowniki (na przykład setdesktopwallpaper) pasują do każdego języka; etykiety odpowiadają językowi wyświetlania menu. Polecenia czasownika GUID akceptują także aliasy openterminal, editwithphotos, editwithpaint i editwithnotepad.\037Zachowaj w menu głównym\037Oddzielone przecinkami etykiety lub czasowniki innych firm, które pozostają w menu głównym zamiast przechodzić do podmenu.\037Etykieta podmenu więcej opcji\037Etykieta podmenu zbierającego dodatkowe pozycje.\037Skrót do ustawień\037Opcjonalny globalny klawisz skrótu otwierający menu ustawień wyglądu (na przykład Ctrl+Alt+M). Pusty wyłącza to.\037Rejestrowanie debugowania\037Rejestrowanie czasu i diagnostyka w celu rozwiązywania problemów.\037Wyczyść pamięć podręczną\037Włącz, aby usunąć buforowane modele menu; odbudowują się przy następnym użyciu.\037Wstępna kompilacja tła\037Ogrzewa popularne menu wkrótce po uruchomieniu Explorer, dzięki czemu ich pierwsze otwarcie jest natychmiastowe. Wyłączenie tej opcji powoduje pominięcie ładowania każdego zarejestrowanego modułu obsługi menu kontekstowego podczas uruchamiania (ekspozycja menu podstawowego), co pozwala uniknąć awarii uruchamiania spowodowanych wadliwymi rozszerzeniami innych firm; pierwsze otwarcie każdego kontekstu jest następnie tworzone na żądanie, podobnie jak menu akcji. Program obsługi, który spowodowałby awarię menu podstawowego, nadal ulega awarii.\037Przedłużenia rozgrzewkowe\037Typy plików oddzielonych przecinkami, których menu są wstępnie tworzone podczas uruchamiania Explorer.\037Opóźnienie nagrzewania\037Sekundy oczekiwania po uruchomieniu Explorer przed rozgrzaniem pamięci podręcznej.\037Automatyczny (dopasowany do systemu Windows)"},
     {L"pt-BR", false, "Abrir\037Redefinir %s…\037Pasta compactada (zipada)\037Pasta\037Atalho\037Sobre\037Alinhar ícones à grade\037Organizar ícones automaticamente\037Conteúdo\037Copiar\037Copiar como caminho\037Criar atalho\037Cortar\037Padrão (não definido)\037Excluir\037Detalhes\037Configurações de exibição\037Ícones extragrandes\037Cara\037Agrupar por\037Feitiço\037Ícones grandes\037Lista\037Ícones médios\037Configurações do menu\037Configurações do menu…\037Novo\037Abra Windhawk\037Abrir em novo processo\037Abrir em nova janela\037Abra menu.ini\037Abrir arquivo de tema\037Abrir com\037Colar\037Colar atalho\037Personalizar\037Fixar no acesso rápido\037Propriedades\037Atualizar\037Renomear\037Reproduzir animação aberta\037Redefinir toda a aparência\037Redefinir toda a aparência…\037Opções de escala…\037Enviar para\037Tamanho\037Opções de slides…\037Ícones pequenos\037Classificar por\037Status\037Alvo\037Tema\037Azulejos\037Use cornerRadius (não definido)\037Ver\037Configurações Windhawk…\037Mostrar menu clássico\037Mais opções\037Ascendente\037Descendente\037(Nenhum)\037Nome\037Data modificada\037Tipo\037Documento de texto\037Imagem bitmap\037Documento Rich Text\037ligado\037desligado\037personalizado\037padrão\037Salvo\037Falha ao salvar\037Fonte não encontrada\037Aparência básica\037Aparência leve\037Aparência escura\037obsoleto - use animationOpen/Close\037Tema: %s — editando arquivo de tema\037esquema %d\037Modo de menu\037Personalizado\037Clássico\037Cor\037Cores\037Disposição\037Texto\037Sombra\037Efeitos\037Animação\037Plano de fundo\037Fronteira\037Separador\037Passe o mouse sobre o fundo\037Fundo pressionado\037Cor do texto\037Cor do texto desativada\037Seta do submenu\037Cor do cabeçalho\037Raio de canto\037Raios de canto\037Largura da borda\037Preenchimento\037Preenchimento de item\037Preenchimento vertical\037Altura do item\037Tamanho do ícone\037Largura mínima\037Largura máxima\037Espaçamento entre separadores\037Marcador\037Largura do marcador\037Cor do marcador\037Fonte\037Peso da fonte\037Estilo da fonte\037Exibição do acelerador\037Tamanho da sombra\037Deslocamento de sombra X\037Deslocamento de sombra Y\037Opacidade da sombra\037Adapte a sombra ao cenário\037Cor da sombra\037Desfoque de sombra\037Desfoque\037Força do desfoque\037Efeitos de sobreposição\037Intensidade de sobreposição\037Velocidade de sobreposição\037Tamanho da sobreposição\037Intervalo de quadro de sobreposição\037Animar sobreposições enquanto abertas\037Abrir animação\037Fechar animação\037Duração aberta\037Duração do fechamento\037Intervalo de quadro de animação\037Facilitação de animação\037Âncora de animação\037Animar submenus\037Deslocamento de deslizamento X\037Deslocamento de deslizamento Y\037Escala de\037Saturação / valor\037Matiz\037Alfa\037Vermelho\037Verde\037Azul\037Valor alfa\037Canto superior esquerdo\037Canto superior direito\037Canto inferior direito\037Canto inferior esquerdo\037@option:fontWeight:normal\037@option:fontWeight:semibold\037@option:fontWeight:bold\037@option:fontStyle:normal\037@option:fontStyle:itálico\037@opção:marcador:ponto\037@opção:marcador:verificar\037@opção:marcador:bar\037@opção:marcador:nenhum\037@option:showAccelerators:underline\037@option:showAccelerators:strip\037@option:showAccelerators:raw\037@option:animationEasing:linear\037@option:animationEasing:easeOut\037@option:animationEasing:easeInOut\037@option:animationEasing:voltar\037@option:animationEasing:bounce\037@option:animationEasing:elastic\037@option:animationAnchor:cursor\037@option:animationAnchor:center\037@efeito: nenhum\037@efeito:desvanecer\037@efeito:slide\037@efeito:escala\037@efeito:dissolver\037@efeito:crt\037@efeito:desdobrar\037@overlay:nenhum\037@overlay:ruído\037@sobreposição:plasma\037@overlay: matiz\037@overlay: brilho\037@overlay:scanlines\037@overlay:vinheta\037Idioma\037Mostrar item de menu clássico\037Barra de ação superior\037Atraso do submenu\037Ignorar chaves\037Registro de depuração\037Atraso no aquecimento\037@tema:Personalizado (menu.ini)\037@tema:Windows 11 Escuro\037@tema:Windows 11 Luz\037@tema:Windows 10 Escuro\037@tema:Windows 10 Luz\037@tema:Alto Contraste\037Menu de contexto em cache personalizado\037Menu de contexto Explorer em cache de abertura instantânea e totalmente personalizável: temas, layout, cores, animações, regras e comandos personalizados.\037Tema\037Carrega a aparência de <storage>\\themes\\<name>.ini (criada a partir da predefinição incluída no primeiro uso). menu.ini nunca é modificado.\037Personalizado (menu.ini)\037Windows 11 Escuro\037Luz Windows 11\037Windows 10 Escuro\037Luz Windows 10\037Nord\037Dracula\037Solarized Dark\037Gruvbox Dark\037One Dark\037Cyberpunk\037Synthwave\037Terminal Green\037Amber CRT\037Tokyo Night\037AMOLED Black\037Alto contraste\037Modo de menu\037Custom desenha o menu auto-renderizado e volta ao menu clássico após falhas repetidas. Classic sempre usa o menu desenhado pelo proprietário.\037Personalizado (recomendado)\037Clássico desenhado pelo proprietário\037Idioma\037Idioma do menu e configurações do menu. Automático segue o idioma de exibição do Windows e volta para o inglês quando não é um dos idiomas suportados; esta página segue a configuração de idioma do Windhawk.\037Automatic (match Windows)\037العربية\037Azərbaycanca\037বাংলা\037Čeština\037Dansk\037Deutsch\037Ελληνικά\037English\037Español\037فارسی\037Français\037हिन्दी\037Hrvatski\037Kreyòl ayisyen\037Magyar\037Bahasa Indonesia\037Italiano\037日本語\037한국어\037Norsk bokmål\037Nederlands\037ଓଡ଼ିଆ\037Polski\037Português (Brasil)\037Português (Portugal)\037Română\037Русский\037Svenska\037தமிழ்\037ไทย\037Türkçe\037Українська\037Oʻzbekcha\037Tiếng Việt\037简体中文\037繁體中文\037Ignorar chaves\037Segure Shift enquanto clica com o botão direito para ignorar o mod e obter o menu clássico de estoque, ou Ctrl para o menu nativo intocado.\037Menu instantâneo aberto\037Mostra menus alternativos nativos (modo clássico, substitutos) sem a animação de abertura do sistema, via TPM_NOANIMATION.\037Mostrar item de menu clássico\037Adicione uma entrada “Mostrar menu clássico” na parte inferior do menu de substituição.\037Barra de ação superior\037Move Recortar, Copiar, Colar, Renomear e Excluir em uma barra de ícones na lateral do menu mais próxima do cursor, como o menu Windows 11. Somente modo de menu personalizado.\037Atraso na abertura do submenu\037Milissegundos antes que um submenu suspenso seja aberto enquanto o menu de substituição é mostrado. 0 abre instantaneamente; -1 mantém a configuração do Windows.\037Mover extras do Windows\037Mova os extras configurados do Windows para o submenu Mais opções.\037Mover gerenciadores de terceiros\037Mova entradas de extensão de shell de terceiros para o submenu Mais opções.\037Itens do Windows para mover\037Rótulos ou verbos separados por vírgula de itens do Windows para mover para o submenu. Verbos (por exemplo setdesktopwallpaper) correspondem em todos os idiomas; os rótulos correspondem ao idioma de exibição do menu. Os comandos de verbo GUID também aceitam os aliases openterminal, editwithphotos, editwithpaint e editwithnotepad.\037Manter no menu principal\037Rótulos ou verbos de terceiros separados por vírgula que permanecem no menu principal em vez de passarem para o submenu.\037Etiqueta do submenu Mais opções\037Etiqueta do submenu que coleta itens extras.\037Tecla de atalho de configurações\037Tecla de atalho global opcional que abre o menu de configurações de aparência (por exemplo Ctrl+Alt+M). Vazio o desativa.\037Registro de depuração\037Registro de tempo e diagnóstico para solução de problemas.\037Limpar cache\037Ative para excluir os modelos de menu em cache; eles reconstroem no próximo uso.\037Pré-construção em segundo plano\037Aquece menus comuns logo após o início do Explorer, para que sua primeira abertura seja instantânea. Desligá-lo ignora o carregamento de todos os manipuladores de menu de contexto registrados na inicialização (a exposição do menu de ações), o que evita travamentos de inicialização causados ​​por extensões de terceiros defeituosas; a primeira abertura de cada contexto é construída conforme a demanda, como o menu de estoque. Um manipulador que travaria o menu de ações ainda trava.\037Extensões de aquecimento\037Tipos de arquivos separados por vírgula cujos menus são pré-construídos na inicialização do Explorer.\037Atraso no aquecimento\037Segundos para esperar após o início do Explorer antes de aquecer o cache.\037Automático (corresponde ao Windows)"},
     {L"pt-PT", false, "Abrir\037Repor %s…\037Pasta compactada (zipada)\037Pasta\037Atalho\037Sobre\037Alinhar ícones à grelha\037Organizar os ícones automaticamente\037Conteúdo\037Copiar\037Copiar como caminho\037Criar atalho\037Cortar\037Padrão (não definido)\037Apagar\037Detalhes\037Configurações de visualização\037Ícones extragrandes\037Cara\037Agrupar por\037Feitiço\037Ícones grandes\037Lista\037Ícones médios\037Configurações do menu\037Definições do menu…\037Novo\037Abrir Windhawk\037Abrir em novo processo\037Abrir numa nova janela\037Abrir menu.ini\037Abrir ficheiro de tema\037Abrir com\037Colar\037Colar atalho\037Personalizar\037Fixar no acesso rápido\037Propriedades\037Atualizar\037Renomear\037Reproduzir animação aberta\037Redefinir toda a aparência\037Redefinir toda a aparência…\037Opções de escala…\037Enviar para\037Tamanho\037Opções de diapositivos…\037Ícones pequenos\037Classificar por\037Estado\037Alvo\037Tema\037Azulejos\037Utilizar cornerRadius (não definido)\037Ver\037Configurações Windhawk…\037Mostrar menu clássico\037Mais opções\037Ascendente\037Descendente\037(Nenhum)\037Nome\037Data modificada\037Tipo\037Documento de texto\037Imagem bitmap\037Documento Rich Text\037ligado\037desligado\037personalizado\037padrão\037Guardado\037Falha ao guardar\037Fonte não encontrada\037Aparência básica\037Aparência leve\037Aparência escura\037obsoleto - usar animationOpen/Close\037Tema: %s — editar ficheiro de tema\037esquema %d\037Modo de menu\037Personalizado\037Clássico\037Cor\037Cores\037Disposição\037Texto\037Sombra\037Efeitos\037Animação\037Plano de fundo\037Fronteira\037Separador\037Passe o rato sobre o fundo\037Fundo pressionado\037Cor do texto\037Cor do texto desativada\037Seta do submenu\037Cor do cabeçalho\037Raio de canto\037Raios de canto\037Largura da borda\037Preenchimento\037Preenchimento de item\037Preenchimento vertical\037Altura do item\037Tamanho do ícone\037Largura mínima\037Largura máxima\037Espaçamento entre separadores\037Marcador\037Largura do marcador\037Cor do marcador\037Fonte\037Peso da fonte\037Estilo da fonte\037Exibição do acelerador\037Tamanho da sombra\037Deslocamento de sombra X\037Deslocamento de sombra Y\037Opacidade da sombra\037Adapte a sombra ao cenário\037Cor da sombra\037Desfoque de sombra\037Desfoque\037Força do desfoque\037Efeitos de sobreposição\037Intensidade de sobreposição\037Velocidade de sobreposição\037Tamanho da sobreposição\037Intervalo de quadro de sobreposição\037Animar sobreposições enquanto abertas\037Abrir animação\037Fechar animação\037Duração aberta\037Duração do fecho\037Intervalo de fotogramas de animação\037Facilitação de animação\037Âncora de animação\037Animar submenus\037Deslocamento de deslizamento X\037Deslocamento de deslizamento Y\037Escala de\037Saturação / valor\037Matiz\037Alfa\037Vermelho\037Verde\037Azul\037Valor alfa\037Canto superior esquerdo\037Canto superior direito\037Canto inferior direito\037Canto inferior esquerdo\037@option:fontWeight:normal\037@option:fontWeight:semibold\037@option:fontWeight:bold\037@option:fontStyle:normal\037@option:fontStyle:itálico\037@opção:marcador:ponto\037@opção:marcador:verificar\037@opção:marcador:bar\037@opção:marcador:nenhum\037@option:showAccelerators:underline\037@option:showAccelerators:strip\037@option:showAccelerators:raw\037@option:animationEasing:linear\037@option:animationEasing:easeOut\037@option:animationEasing:easeInOut\037@option:animationEasing:voltar\037@option:animationEasing:bounce\037@option:animationEasing:elastic\037@option:animationAnchor:cursor\037@option:animationAnchor:center\037@efeito: nenhum\037@efeito:desvanecer\037@efeito:slide\037@efeito:escala\037@efeito:dissolver\037@efeito:crt\037@efeito:desdobrar\037@overlay:nenhum\037@overlay:ruído\037@sobreposição:plasma\037@overlay: matiz\037@overlay: brilho\037@overlay:scanlines\037@overlay:vinheta\037Idioma\037Mostrar item de menu clássico\037Barra de ação superior\037Atraso do submenu\037Ignorar chaves\037Registo de depuração\037Atraso no aquecimento\037@tema:Personalizado (menu.ini)\037@tema:Windows 11 Escuro\037@tema:Windows 11 Luz\037@tema:Windows 10 Escuro\037@tema:Windows 10 Luz\037@tema:Alto Contraste\037Menu de contexto em cache personalizado\037Menu de contexto Explorer em cache de abertura instantânea e totalmente personalizável: temas, layout, cores, animações, regras e comandos personalizados.\037Tema\037Carrega o aspeto de <storage>\\themes\\<name>.ini (criado a partir da predefinição incluída na primeira utilização). menu.ini nunca é modificado.\037Personalizado (menu.ini)\037Windows 11 Escuro\037Luz Windows 11\037Windows 10 Escuro\037Luz Windows 10\037Nord\037Dracula\037Solarized Dark\037Gruvbox Dark\037One Dark\037Cyberpunk\037Synthwave\037Terminal Green\037Amber CRT\037Tokyo Night\037AMOLED Black\037Alto contraste\037Modo de menu\037Custom desenha o menu auto-renderizado e volta ao menu clássico após falhas repetidas. O Classic utiliza sempre o menu desenhado pelo proprietário.\037Personalizado (recomendado)\037Clássico desenhado pelo proprietário\037Idioma\037Idioma do menu e definições do menu. Automático segue o idioma de visualização do Windows e volta ao inglês quando não é um dos idiomas suportados; esta página segue a configuração de idioma do Windhawk.\037Automatic (match Windows)\037العربية\037Azərbaycanca\037বাংলা\037Čeština\037Dansk\037Deutsch\037Ελληνικά\037English\037Español\037فارسی\037Français\037हिन्दी\037Hrvatski\037Kreyòl ayisyen\037Magyar\037Bahasa Indonesia\037Italiano\037日本語\037한국어\037Norsk bokmål\037Nederlands\037ଓଡ଼ିଆ\037Polski\037Português (Brasil)\037Português (Portugal)\037Română\037Русский\037Svenska\037தமிழ்\037ไทย\037Türkçe\037Українська\037Oʻzbekcha\037Tiếng Việt\037简体中文\037繁體中文\037Ignorar chaves\037Segure Shift enquanto clica com o botão direito do rato para ignorar o mod e obter o menu clássico de stock, ou Ctrl para o menu nativo intocado.\037Menu instantâneo aberto\037Mostra menus alternativos nativos (modo clássico, substitutos) sem a animação de abertura do sistema, através de TPM_NOANIMATION.\037Mostrar item de menu clássico\037Adicione uma entrada “Mostrar menu clássico” na parte inferior do menu de substituição.\037Barra de ação superior\037Move Recortar, Copiar, Colar, Renomear e Apagar numa barra de ícones na lateral do menu mais próxima do cursor, como o menu Windows 11. Apenas modo de menu personalizado.\037Atraso na abertura do submenu\037Milissegundos antes de um submenu suspenso ser aberto enquanto o menu de substituição é apresentado. 0 abre instantaneamente; -1 mantém a configuração do Windows.\037Mover extras do Windows\037Mova os extras configurados do Windows para o submenu Mais opções.\037Mover gestores de terceiros\037Mova as entradas de extensão de shell de terceiros para o submenu Mais opções.\037Itens do Windows para mover\037Rótulos ou verbos separados por vírgula dos itens do Windows para passar para o submenu. Os verbos (por exemplo setdesktopwallpaper) correspondem em todas as línguas; os rótulos correspondem ao idioma de apresentação do menu. Os comandos de verbo GUID também aceitam os alias openterminal, editwithphotos, editwithpaint e editwithnotepad.\037Manter no menu principal\037Rótulos ou verbos de terceiros separados por vírgula que permanecem no menu principal em vez de passarem para o submenu.\037Etiqueta do submenu Mais opções\037Etiqueta do submenu que recolhe itens extra.\037Tecla de atalho de definições\037Tecla de atalho global opcional que abre o menu de definições de aparência (por exemplo Ctrl+Alt+M). Vazio desativa-o.\037Registo de depuração\037Registo de tempo e diagnóstico para resolução de problemas.\037Limpar cache\037Ative para eliminar os modelos de menu em cache; reconstroem no próximo uso.\037Pré-construção em segundo plano\037Aquece os menus comuns logo após o início do Explorer, para que a sua primeira abertura seja instantânea. Desligá-lo ignora o carregamento de todos os manipuladores de menus de contexto registados no arranque (a exposição do menu de ações), o que evita falhas de arranque causados ​​por extensões de terceiros defeituosas; a primeira abertura de cada contexto é construída consoante a procura, como o menu de stock. Um manipulador que iria bloquear o menu de ações ainda bloqueia.\037Extensões de aquecimento\037Tipos de ficheiros separados por vírgula cujos menus são pré-construídos no arranque do Explorer.\037Atraso no aquecimento\037Segundos para esperar após o início do Explorer antes de aquecer a cache.\037Automático (corresponde ao Windows)"},
-    {L"ro", false, "\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037Nou\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037Nord\037Dracula\037Solarized Dark\037Gruvbox Dark\037One Dark\037Cyberpunk\037Synthwave\037Terminal Green\037Amber CRT\037Tokyo Night\037AMOLED Black\037\037\037\037\037\037\037\037Automatic (match Windows)\037العربية\037Azərbaycanca\037বাংলা\037Čeština\037Dansk\037Deutsch\037Ελληνικά\037English\037Español\037فارسی\037Français\037हिन्दी\037Hrvatski\037Kreyòl ayisyen\037Magyar\037Bahasa Indonesia\037Italiano\037日本語\037한국어\037Norsk bokmål\037Nederlands\037ଓଡ଼ିଆ\037Polski\037Português (Brasil)\037Português (Portugal)\037Română\037Русский\037Svenska\037தமிழ்\037ไทย\037Türkçe\037Українська\037Oʻzbekcha\037Tiếng Việt\037简体中文\037繁體中文"},
+    {L"ro", false, "Deschide\037Resetați %s...\037Folder comprimat (zip).\037Folder\037Comandă rapidă\037Despre\037Aliniați pictogramele la grilă\037Aranjați automat pictogramele\037Conținut\037Copiere\037Copiați ca cale\037Creați o comandă rapidă\037Tăiați\037Implicit (dezactivat)\037Șterge\037Detalii\037Setări de afișare\037Pictograme foarte mari\037Față\037Grupați după\037Hex\037Pictograme mari\037Lista\037Pictograme medii\037Setări de meniu\037Setări de meniu...\037Nou\037Deschideți Windhawk\037Deschide în proces nou\037Deschide într-o fereastră nouă\037Deschideți menu.ini\037Deschideți fișierul cu temă\037Deschide cu\037Lipire\037Lipiți comanda rapidă\037Personalizează\037Fixați în Acces rapid\037Proprietăți\037Reîmprospătare\037Redenumiți\037Reluați animația deschisă\037Resetați toate aspectul\037Resetați toate aspectul...\037Opțiuni de scalare...\037Trimite la\037Dimensiune\037Opțiuni pentru diapozitive...\037Pictograme mici\037Sortați după\037Stare\037țintă\037Temă\037Placi\037Utilizați cornerRadius (dezactivat)\037Vizualizare\037Setări Windhawk...\037Afișează meniul clasic\037Mai multe opțiuni\037Crescatoare\037Descrescătoare\037(Niciuna)\037Nume\037Data modificată\037Tip\037Document text\037Imagine bitmap\037Document text îmbogățit\037pe\037oprit\037personalizat\037implicit\037Salvat\037Salvarea nu a reușit\037Fontul nu a fost găsit\037Aspectul de bază\037Aspect ușor\037Aspect întunecat\037depreciat — utilizați animationOpen/Close\037Tema: %s — editarea fișierului temă\037schema %d\037Modul meniu\037Personalizat\037Clasic\037Culoare\037Culori\037Aspect\037Text\037Umbra\037Efecte\037Animație\037Fundal\037Frontieră\037Separator\037Plasați pe fundal\037Fundal apăsat\037Culoarea textului\037Culoarea textului este dezactivată\037Săgeată pentru submeniu\037Culoarea antetului\037Raza colțului\037Raze de colț\037Lățimea chenarului\037Captuseala\037Umplutura articolului\037Captuseala verticala\037Înălțimea articolului\037Dimensiunea pictogramei\037Latime minima\037Latime maxima\037Distanța dintre separatori\037Marker\037Lățimea markerului\037Culoarea markerului\037Font\037Greutatea fontului\037Stilul fontului\037Afișaj accelerator\037Dimensiunea umbrei\037Decalaj de umbră X\037Compensarea umbrei Y\037Opacitatea umbrei\037Adaptați umbra la fundal\037Culoarea umbrei\037Umbre estompate\037Estompare\037Puterea estomparii\037Efecte de suprapunere\037Intensitatea suprapunerii\037Viteza de suprapunere\037Dimensiunea suprapunerii\037Interval de cadre de suprapunere\037Animați suprapunerile în timp ce sunt deschise\037Animație deschisă\037Închideți animația\037Durata deschisă\037Durata închiderii\037Interval de cadre de animație\037Ușurarea animației\037Ancoră de animație\037Animați submeniuri\037Slide offset X\037Diapozitiv offset Y\037Scala de la\037Saturație / valoare\037Hue\037Alfa\037roșu\037verde\037Albastru\037Valoarea alfa\037Sus stânga\037dreapta sus\037dreapta jos\037Stânga jos\037@option:fontWeight:normal\037@option:fontWeight:semibold\037@option:fontWeight:bold\037@option:fontStyle:normal\037@option:fontStyle:italic\037@option:marker:dot\037@option:marker:verificare\037@option:marker:bar\037@option:marker:none\037@option:showAccelerators:subliniere\037@option:showAccelerators:strip\037@option:showAccelerators:raw\037@option:animationEasing:liniar\037@option:animationEasing:easeOut\037@option:animationEasing:easeInOut\037@option:animationEasing:back\037@option:animationEasing:bounce\037@option:animationEasing:elastic\037@option:animationAnchor:cursor\037@option:animationAnchor:center\037@efect:niciuna\037@efect: fade\037@efect: slide\037@efect:scale\037@efect:dizolvare\037@efect:crt\037@efect:desfășurare\037@overlay:niciuna\037@overlay:zgomot\037@overlay:plasmă\037@overlay: nuanță\037@overlay: strălucire\037@overlay: linii de scanare\037@overlay:vignetă\037Limba\037Afișează elementul de meniu clasic\037Bara de acțiuni de sus\037Întârziere submeniu\037Tastele de ocolire\037Jurnal de depanare\037Întârziere la încălzire\037@theme:Personalizat (menu.ini)\037@theme:Windows 11 Întunecat\037@theme:Windows 11 Lumină\037@theme:Windows 10 Întunecat\037@theme:Windows 10 Lumină\037@theme: Contrast ridicat\037Meniu contextual personalizat în cache\037Meniul contextual Explorer care se deschide instantaneu în cache, care este complet personalizabil: teme, aspect, culori, animații, reguli și comenzi personalizate.\037Temă\037Încarcă aspectul de la <storage>\\themes\\<name>.ini (creat din presetarea pachetului la prima utilizare). menu.ini nu este niciodată modificat.\037Personalizat (menu.ini)\037Windows 11 Întunecat\037Windows 11 Lumină\037Windows 10 Întunecat\037Windows 10 Lumină\037Nord\037Dracula\037Solarized Dark\037Gruvbox Dark\037One Dark\037Cyberpunk\037Synthwave\037Terminal Green\037Amber CRT\037Tokyo Night\037AMOLED Black\037Contrast ridicat\037Modul meniu\037Personalizat desenează meniul auto-redat și revine la meniul clasic după eșecuri repetate. Classic folosește întotdeauna meniul desenat de proprietar.\037Personalizat (recomandat)\037Clasic desenat de proprietar\037Limba\037Limba pentru meniu și setările din meniu. Automatic urmează limba de afișare Windows și revine la engleză atunci când aceasta nu este una dintre limbile acceptate; această pagină în sine urmează setarea de limbă a lui Windhawk.\037Automatic (match Windows)\037العربية\037Azərbaycanca\037বাংলা\037Čeština\037Dansk\037Deutsch\037Ελληνικά\037English\037Español\037فارسی\037Français\037हिन्दी\037Hrvatski\037Kreyòl ayisyen\037Magyar\037Bahasa Indonesia\037Italiano\037日本語\037한국어\037Norsk bokmål\037Nederlands\037ଓଡ଼ିଆ\037Polski\037Português (Brasil)\037Português (Portugal)\037Română\037Русский\037Svenska\037தமிழ்\037ไทย\037Türkçe\037Українська\037Oʻzbekcha\037Tiếng Việt\037简体中文\037繁體中文\037Tastele de ocolire\037Țineți apăsat Shift în timp ce faceți clic dreapta pentru a ocoli modul și a obține meniul clasic stoc sau Ctrl pentru meniul nativ neatins.\037Meniu instantaneu deschis\037Afișează meniuri de rezervă native (modul clasic, alternative) fără animația deschisă a sistemului, prin TPM_NOANIMATION.\037Afișează elementul de meniu clasic\037Adăugați o intrare „Afișați meniul clasic” în partea de jos a meniului de înlocuire.\037Bara de acțiuni de sus\037Mută Cut, Copy, Paste, Redenumire și Delete într-o bară de pictograme pe partea laterală a meniului cea mai apropiată de cursor, cum ar fi meniul Windows 11. Numai modul meniu personalizat.\037Întârziere deschidere submeniu\037Milisecunde înainte ca un submeniu plasat cu mouse-ul să se deschidă în timp ce este afișat meniul de înlocuire. 0 se deschide instantaneu; -1 păstrează setarea Windows.\037Mutați extraurile Windows\037Mutați extrasele Windows configurate în submeniul Mai multe opțiuni.\037Mutați handlere terți\037Mutați intrările de extensii shell de la terți în submeniul Mai multe opțiuni.\037Elemente Windows de mutat\037Etichete sau verbe separate prin virgulă ale elementelor Windows pentru a muta în submeniu. Verbele (de exemplu setdesktopwallpaper) se potrivesc în fiecare limbă; etichetele se potrivesc cu limba de afișare a meniului. Comenzile GUID-verb acceptă și aliasurile openterminal, editwithphotos, editwithpaint și editwithnotepad.\037Păstrați în meniul principal\037Etichete sau verbe de la terți, separate prin virgulă, care rămân în meniul principal în loc să fie mutate în submeniu.\037Eticheta submeniului mai multe opțiuni\037Eticheta submeniului care colectează articole suplimentare.\037Tasta rapidă Setări\037Tasta rapidă globală opțională care deschide meniul de setări de aspect (de exemplu Ctrl+Alt+M). Golire îl dezactivează.\037Jurnal de depanare\037Înregistrare sincronizare și diagnosticare pentru depanare.\037Goliți memoria cache\037Activați pentru a șterge modelele de meniu stocate în cache; se reconstruiesc la următoarea utilizare.\037Preconstrucție de fundal\037Încălzește meniurile comune la scurt timp după pornirea Explorer, astfel încât prima lor deschidere să fie instantanee. Dezactivarea acesteia omite încărcarea fiecărui handler de meniu contextual înregistrat la pornire (expunerea meniului stoc), ceea ce evită blocările la pornire de la extensiile terțe defecte; prima deschidere a fiecărui context se construiește apoi la cerere, cum ar fi meniul stoc. Un handler care ar bloca meniul stoc încă se blochează.\037Extensii de încălzire\037Tipuri de fișiere separate prin virgulă ale căror meniuri sunt pre-construite la pornirea Explorer.\037Întârziere la încălzire\037Secunde de așteptat după pornirea Explorer înainte de a încălzi memoria cache.\037Automat (se potrivește cu Windows)"},
     {L"ru", false, "\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037Создать\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037Nord\037Dracula\037Solarized Dark\037Gruvbox Dark\037One Dark\037Cyberpunk\037Synthwave\037Terminal Green\037Amber CRT\037Tokyo Night\037AMOLED Black\037\037\037\037\037\037\037\037Automatic (match Windows)\037العربية\037Azərbaycanca\037বাংলা\037Čeština\037Dansk\037Deutsch\037Ελληνικά\037English\037Español\037فارسی\037Français\037हिन्दी\037Hrvatski\037Kreyòl ayisyen\037Magyar\037Bahasa Indonesia\037Italiano\037日本語\037한국어\037Norsk bokmål\037Nederlands\037ଓଡ଼ିଆ\037Polski\037Português (Brasil)\037Português (Portugal)\037Română\037Русский\037Svenska\037தமிழ்\037ไทย\037Türkçe\037Українська\037Oʻzbekcha\037Tiếng Việt\037简体中文\037繁體中文"},
     {L"sv", false, "Öppna\037Återställ %s...\037Komprimerad (zippad) mapp\037Mapp\037Genväg\037Om\037Rikta in ikonerna till rutnätet\037Ordna ikoner automatiskt\037Innehåll\037Kopiera\037Kopiera som sökväg\037Skapa genväg\037Klipp ut\037Standard (ej inställd)\037Ta bort\037Detaljer\037Displayinställningar\037Extra stora ikoner\037Ansikte\037Gruppera efter\037Hex\037Stora ikoner\037Lista\037Medelstora ikoner\037Menyinställningar\037Menyinställningar...\037Ny\037Öppna Windhawk\037Öppna i ny process\037Öppna i nytt fönster\037Öppna menu.ini\037Öppna temafilen\037Öppna med\037Klistra in\037Klistra in genväg\037Anpassa\037Fäst till snabbåtkomst\037Egenskaper\037Uppdatera\037Byt namn\037Spela om öppen animation\037Återställ allt utseende\037Återställ allt utseende...\037Skalalternativ...\037Skicka till\037Storlek\037Bildalternativ...\037Små ikoner\037Sortera efter\037Status\037Mål\037Tema\037Kakel\037Använd cornerRadius (ej inställd)\037Visa\037Windhawk-inställningar...\037Visa klassisk meny\037Fler alternativ\037Stigande\037Fallande\037(Inga)\037Namn\037Datum ändrat\037Typ\037Textdokument\037Bitmappsbild\037Rich Text-dokument\037på\037av\037anpassad\037standard\037Sparad\037Det gick inte att spara\037Typsnitt hittades inte\037Basutseende\037Lätt utseende\037Mörkt utseende\037utfasad — använd animationOpen/Close\037Tema: %s — redigering av temafil\037schema %d\037Menyläge\037Anpassad\037Classic\037Färg\037Färger\037Layout\037Text\037Skugga\037Effekter\037Animation\037Bakgrund\037Gräns\037Separator\037Hover bakgrund\037Tryckt bakgrund\037Textfärg\037Inaktiverad textfärg\037Undermenypil\037Färg på rubriken\037Hörnradie\037Hörnradier\037Kantbredd\037Vaddering\037Objektstoppning\037Vertikal stoppning\037Objektets höjd\037Ikonstorlek\037Minsta bredd\037Maximal bredd\037Separatoravstånd\037Markör\037Markörens bredd\037Markör färg\037Teckensnitt\037Teckensnittsvikt\037Typsnittsstil\037Accelerator display\037Skuggstorlek\037Skuggoffset X\037Skuggoffset Y\037Skuggopacitet\037Anpassa skugga till bakgrunden\037Skuggfärg\037Skuggoskärpa\037Oskärpa\037Suddig styrka\037Överlagringseffekter\037Överlagringsintensitet\037Överlagringshastighet\037Överläggsstorlek\037Överlagringsbildintervall\037Animera överlagringar när de är öppna\037Öppna animation\037Stäng animation\037Öppet varaktighet\037Stäng varaktighet\037Animeringsramintervall\037Animeringslättnader\037Animation ankare\037Animera undermenyer\037Slidoffset X\037Slidoffset Y\037Skala från\037Mättnad / värde\037Nyans\037Alfa\037Röd\037Grönt\037Blå\037Alfavärde\037Överst till vänster\037Överst till höger\037Nederst till höger\037Nederst till vänster\037@option:fontWeight:normal\037@option:fontWeight:semibold\037@option:fontWeight:bold\037@option:fontStyle:normal\037@option:fontStyle:italic\037@option:marker:dot\037@option:marker:check\037@option:marker:bar\037@option:marker:none\037@option:showAccelerators:understryka\037@option:showAccelerators:strip\037@option:showAccelerators:rå\037@option:animationEasing:linjär\037@option:animationEasing:easeOut\037@option:animationEasing:easeInOut\037@option:animationEasing:tillbaka\037@option:animationEasing:studsa\037@option:animationEasing:elastisk\037@option:animationAnchor:cursor\037@option:animationAnchor:center\037@effekt:ingen\037@effekt: blekna\037@effekt:bild\037@effekt:skala\037@effekt:lös upp\037@effekt:crt\037@effekt: veckla ut sig\037@överlägg:ingen\037@överlägg:brus\037@överlägg:plasma\037@överlägg:nyans\037@överlägg:glöd\037@overlay:scanlines\037@overlay:vinjett\037Språk\037Visa klassiska menyalternativ\037Översta åtgärdsfältet\037Undermeny fördröjning\037Bypass nycklar\037Felsökning av loggning\037Uppvärmningsfördröjning\037@tema:Anpassad (menu.ini)\037@tema:Windows 11 Mörk\037@theme:Windows 11 Ljus\037@tema:Windows 10 Mörk\037@theme:Windows 10 Ljus\037@tema:Hög kontrast\037Anpassad cachad kontextmeny\037Omedelbart öppnande cachad Explorer-kontextmeny som är helt anpassningsbar: teman, layout, färger, animationer, regler och anpassade kommandon.\037Tema\037Laddar utseendet från <storage>\\themes\\<name>.ini (skapat från den medföljande förinställningen vid första användningen). menu.ini modifieras aldrig.\037Anpassad (menu.ini)\037Windows 11 Mörk\037Windows 11 ljus\037Windows 10 mörk\037Windows 10 ljus\037Nord\037Dracula\037Solarized Dark\037Gruvbox Dark\037One Dark\037Cyberpunk\037Synthwave\037Terminal Green\037Amber CRT\037Tokyo Night\037AMOLED Black\037Hög kontrast\037Menyläge\037Custom ritar den självrenderade menyn och faller tillbaka till den klassiska menyn efter upprepade misslyckanden. Classic använder alltid den ägarritade menyn.\037Anpassad (rekommenderas)\037Klassisk ägartecknad\037Språk\037Språk för menyn och inställningarna i menyn. Automatisk följer Windows visningsspråk och faller tillbaka till engelska när det inte är ett av de språk som stöds; denna sida själv följer Windhawks språkinställning.\037Automatic (match Windows)\037العربية\037Azərbaycanca\037বাংলা\037Čeština\037Dansk\037Deutsch\037Ελληνικά\037English\037Español\037فارسی\037Français\037हिन्दी\037Hrvatski\037Kreyòl ayisyen\037Magyar\037Bahasa Indonesia\037Italiano\037日本語\037한국어\037Norsk bokmål\037Nederlands\037ଓଡ଼ିଆ\037Polski\037Português (Brasil)\037Português (Portugal)\037Română\037Русский\037Svenska\037தமிழ்\037ไทย\037Türkçe\037Українська\037Oʻzbekcha\037Tiếng Việt\037简体中文\037繁體中文\037Bypass nycklar\037Håll Shift medan du högerklickar för att kringgå modden och få den klassiska menyn, eller Ctrl för den orörda inbyggda menyn.\037Instant-menyn öppen\037Visar inbyggda reservmenyer (klassiskt läge, fallbacks) utan systemets öppna animering, via TPM_NOANIMATION.\037Visa klassiska menyalternativ\037Lägg till en \"Visa klassisk meny\"-post längst ned på ersättningsmenyn.\037Översta åtgärdsfältet\037Flyttar Klipp ut, Kopiera, Klistra in, Byt namn och Ta bort till en ikonrad på sidan av menyn närmast markören, som Windows 11-menyn. Endast anpassat menyläge.\037Undermeny öppen fördröjning\037Millisekunder innan en undermeny med hovring öppnas medan ersättningsmenyn visas. 0 öppnas omedelbart; -1 behåller Windows-inställningen.\037Flytta Windows extrafunktioner\037Flytta de konfigurerade Windows-tilläggen till undermenyn Fler alternativ.\037Flytta tredjepartshanterare\037Flytta tredje parts skaltilläggsposter till undermenyn Fler alternativ.\037Windows-objekt att flytta\037Kommaseparerade etiketter eller verb för Windows-objekt för att flytta till undermenyn. Verb (till exempel setdesktopwallpaper) matchar på alla språk; etiketter matchar menyns visningsspråk. GUID-verbkommandon accepterar också aliasen openterminal, editwithphotos, editwithpaint och editwithnotepad.\037Håll kvar i huvudmenyn\037Kommaseparerade etiketter eller verb från tredje part som stannar i huvudmenyn istället för att flytta till undermenyn.\037Fler alternativ undermenyetikett\037Etikett för undermenyn som samlar extra objekt.\037Snabbknapp för inställningar\037Valfri global snabbtangent som öppnar menyn för utseendeinställningar (till exempel Ctrl+Alt+M). Empty inaktiverar den.\037Felsökning av loggning\037Logga timing och diagnostik för felsökning.\037Rensa cache\037Slå på för att radera de cachade menymodellerna; de bygger om vid nästa användning.\037Förbyggd bakgrund\037Värmer upp vanliga menyer strax efter att Explorer startar så att de öppnas omedelbart. Om du stänger av den hoppar du över alla registrerade kontextmenyhanterare vid start (aktiemenyns exponering), vilket undviker startkrascher från felaktiga tredjepartstillägg; den första öppningen i varje sammanhang bygger sedan på efterfrågan, som aktiemenyn. En hanterare som skulle krascha aktiemenyn kraschar fortfarande.\037Uppvärmningsförlängningar\037Kommaseparerade filtyper vars menyer är förbyggda vid Explorer-start.\037Uppvärmningsfördröjning\037Sekunder att vänta efter att Explorer startar innan cachen värms upp.\037Automatisk (matcha Windows)"},
     {L"ta", false, "\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037Nord\037Dracula\037Solarized Dark\037Gruvbox Dark\037One Dark\037Cyberpunk\037Synthwave\037Terminal Green\037Amber CRT\037Tokyo Night\037AMOLED Black\037\037\037\037\037\037\037\037Automatic (match Windows)\037العربية\037Azərbaycanca\037বাংলা\037Čeština\037Dansk\037Deutsch\037Ελληνικά\037English\037Español\037فارسی\037Français\037हिन्दी\037Hrvatski\037Kreyòl ayisyen\037Magyar\037Bahasa Indonesia\037Italiano\037日本語\037한국어\037Norsk bokmål\037Nederlands\037ଓଡ଼ିଆ\037Polski\037Português (Brasil)\037Português (Portugal)\037Română\037Русский\037Svenska\037தமிழ்\037ไทย\037Türkçe\037Українська\037Oʻzbekcha\037Tiếng Việt\037简体中文\037繁體中文"},
     {L"th", false, "\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037ใหม่\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037Nord\037Dracula\037Solarized Dark\037Gruvbox Dark\037One Dark\037Cyberpunk\037Synthwave\037Terminal Green\037Amber CRT\037Tokyo Night\037AMOLED Black\037\037\037\037\037\037\037\037Automatic (match Windows)\037العربية\037Azərbaycanca\037বাংলা\037Čeština\037Dansk\037Deutsch\037Ελληνικά\037English\037Español\037فارسی\037Français\037हिन्दी\037Hrvatski\037Kreyòl ayisyen\037Magyar\037Bahasa Indonesia\037Italiano\037日本語\037한국어\037Norsk bokmål\037Nederlands\037ଓଡ଼ିଆ\037Polski\037Português (Brasil)\037Português (Portugal)\037Română\037Русский\037Svenska\037தமிழ்\037ไทย\037Türkçe\037Українська\037Oʻzbekcha\037Tiếng Việt\037简体中文\037繁體中文"},
-    {L"tr", false, "\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037Yeni\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037Nord\037Dracula\037Solarized Dark\037Gruvbox Dark\037One Dark\037Cyberpunk\037Synthwave\037Terminal Green\037Amber CRT\037Tokyo Night\037AMOLED Black\037\037\037\037\037\037\037\037Automatic (match Windows)\037العربية\037Azərbaycanca\037বাংলা\037Čeština\037Dansk\037Deutsch\037Ελληνικά\037English\037Español\037فارسی\037Français\037हिन्दी\037Hrvatski\037Kreyòl ayisyen\037Magyar\037Bahasa Indonesia\037Italiano\037日本語\037한국어\037Norsk bokmål\037Nederlands\037ଓଡ଼ିଆ\037Polski\037Português (Brasil)\037Português (Portugal)\037Română\037Русский\037Svenska\037தமிழ்\037ไทย\037Türkçe\037Українська\037Oʻzbekcha\037Tiếng Việt\037简体中文\037繁體中文"},
+    {L"tr", false, "Aç\037%s'yi sıfırlayın…\037Sıkıştırılmış (sıkıştırılmış) Klasör\037Klasör\037Kısayol\037Hakkında\037Simgeleri ızgaraya hizalayın\037Simgeleri otomatik olarak düzenle\037İçerik\037Kopyala\037Yol olarak kopyala\037Kısayol oluştur\037Kes\037Varsayılan (ayarlanmadı)\037Sil\037Ayrıntılar\037Ekran ayarları\037Ekstra büyük simgeler\037Yüz\037Gruplandırma ölçütü\037Altıgen\037Büyük simgeler\037Liste\037Orta simgeler\037Menü ayarları\037Menü ayarları…\037Yeni\037Windhawk'yi açın\037Yeni süreçte aç\037Yeni pencerede aç\037menu.ini'yi açın\037Tema dosyasını aç\037Şununla aç:\037Yapıştır\037Kısayolu yapıştır\037Kişiselleştir\037Hızlı erişime sabitle\037Özellikler\037Yenile\037Yeniden adlandır\037Açık animasyonu tekrar oynat\037Tüm görünümü sıfırla\037Tüm görünümü sıfırla…\037Ölçek seçenekleri…\037Gönder\037Boyut\037Slayt seçenekleri…\037Küçük simgeler\037Sırala\037Durum\037Hedef\037Tema\037Fayans\037CornerRadius'u kullan (ayarlanmadı)\037Görünüm\037Windhawk ayarları…\037Klasik menüyü göster\037Daha fazla seçenek\037Artan\037Azalan\037(Yok)\037İsim\037Değiştirilme tarihi\037Tür\037Metin Belgesi\037Bit eşlem resmi\037Zengin Metin Belgesi\037üzerinde\037kapalı\037özel\037varsayılan\037Kaydedildi\037Kaydetme başarısız oldu\037Yazı tipi bulunamadı\037Temel görünüm\037Hafif görünüm\037Koyu görünüm\037kullanımdan kaldırıldı - animationOpen/Close kullanın\037Tema: %s — tema dosyasını düzenleme\037şema %d\037Menü modu\037Özel\037Klasik\037Renk\037Renkler\037Düzen\037Metin\037Gölge\037Efektler\037Animasyon\037Arka plan\037Sınır\037Ayırıcı\037Vurgulu arka plan\037Basılmış arka plan\037Metin rengi\037Devre dışı bırakılmış metin rengi\037Alt menü oku\037Başlık rengi\037Köşe yarıçapı\037Köşe yarıçapları\037Kenarlık genişliği\037Dolgu\037Öğe dolgusu\037Dikey dolgu\037Öğe yüksekliği\037Simge boyutu\037Minimum genişlik\037Maksimum genişlik\037Ayırıcı aralığı\037işaretleyici\037İşaretleyici genişliği\037İşaretleyici rengi\037Yazı tipi\037Yazı tipi ağırlığı\037Yazı tipi stili\037Hızlandırıcı ekranı\037Gölge boyutu\037Gölge ofseti X\037Gölge ofseti Y\037Gölge opaklığı\037Gölgeyi arka plana uyarlayın\037Gölge rengi\037Gölge bulanıklığı\037Bulanıklaştırma\037Bulanıklık gücü\037Kaplama efektleri\037Kaplama yoğunluğu\037Kaplama hızı\037Kaplama boyutu\037Yer paylaşımlı çerçeve aralığı\037Açıkken kaplamaları canlandırın\037Animasyonu aç\037Animasyonu kapat\037Açık süre\037Kapatma süresi\037Animasyon kare aralığı\037Animasyon yumuşatma\037Animasyon çapası\037Alt menüleri canlandır\037Slayt ofseti X\037Slayt ofseti Y\037Ölçeklendirme:\037Doygunluk / değer\037renk tonu\037Alfa\037Kırmızı\037Yeşil\037Mavi\037Alfa değeri\037Sol üst\037Sağ üst\037Sağ alt\037Sol alt\037@option:fontWeight:normal\037@option:fontWeight:yarı kalın\037@option:fontWeight:kalın\037@option:fontStyle:normal\037@option:fontStyle:italik\037@seçenek:işaretçi:nokta\037@seçenek:işaretçi:kontrol et\037@seçenek:işaretçi:çubuk\037@seçenek:işaretçi:yok\037@option:showHızlandırıcılar:altı çizili\037@option:showHızlandırıcılar:strip\037@option:showHızlandırıcılar:raw\037@option:animationEasing:linear\037@option:animationEasing:easeOut\037@option:animationEasing:easeInOut\037@option:animationEasing:geri\037@option:animationEasing:bounce\037@option:animationEasing:elastik\037@option:animationAnchor:imleç\037@option:animationAnchor:center\037@efekt:yok\037@efekt:solma\037@efekt:slayt\037@efekt:ölçek\037@efekt:çözünme\037@efekt:crt\037@efekt:açılma\037@yer paylaşımı:yok\037@yer paylaşımı:gürültü\037@yer paylaşımı:plazma\037@yer paylaşımı:ton\037@yer paylaşımı:parıltı\037@yer paylaşımı:tarama çizgileri\037@yer paylaşımı:skeç\037Dil\037Klasik menü öğesini göster\037Üst işlem çubuğu\037Alt menü gecikmesi\037Anahtarları atla\037Hata ayıklama günlüğü\037Isınma gecikmesi\037@tema:Özel (menu.ini)\037@theme:Windows 11 Koyu\037@tema:Windows 11 Işık\037@theme:Windows 10 Koyu\037@tema:Windows 10 Işık\037@tema:Yüksek Kontrast\037Özel Önbelleğe Alınmış İçerik Menüsü\037Tamamen özelleştirilebilir, anında açılan önbelleğe alınmış Explorer içerik menüsü: temalar, düzen, renkler, animasyonlar, kurallar ve özel komutlar.\037Tema\037Görünümü <storage>\\themes\\<name>.ini'den yükler (ilk kullanımda birlikte verilen ön ayardan oluşturulur). menu.ini asla değiştirilmez.\037Özel (menu.ini)\037Windows 11 Koyu\037Windows 11 Işık\037Windows 10 Koyu\037Windows 10 Işık\037Nord\037Dracula\037Solarized Dark\037Gruvbox Dark\037One Dark\037Cyberpunk\037Synthwave\037Terminal Green\037Amber CRT\037Tokyo Night\037AMOLED Black\037Yüksek Kontrast\037Menü modu\037Özel, kendi kendine oluşturulan menüyü çizer ve tekrarlanan hatalardan sonra klasik menüye geri döner. Classic her zaman sahibinin çizdiği menüyü kullanır.\037Özel (önerilen)\037Klasik sahibi tarafından çizilmiş\037Dil\037Menü dili ve menü içi ayarlar. Otomatik, Windows görüntüleme dilini izler ve desteklenen dillerden biri olmadığında İngilizce'ye geri döner; bu sayfanın kendisi Windhawk'nin dil ayarını takip eder.\037Automatic (match Windows)\037العربية\037Azərbaycanca\037বাংলা\037Čeština\037Dansk\037Deutsch\037Ελληνικά\037English\037Español\037فارسی\037Français\037हिन्दी\037Hrvatski\037Kreyòl ayisyen\037Magyar\037Bahasa Indonesia\037Italiano\037日本語\037한국어\037Norsk bokmål\037Nederlands\037ଓଡ଼ିଆ\037Polski\037Português (Brasil)\037Português (Portugal)\037Română\037Русский\037Svenska\037தமிழ்\037ไทย\037Türkçe\037Українська\037Oʻzbekcha\037Tiếng Việt\037简体中文\037繁體中文\037Anahtarları atla\037Modu atlayıp standart klasik menüyü almak için sağ tıklarken Shift'yi basılı tutun veya el değmemiş yerel menü için Ctrl'yi basılı tutun.\037Anlık menü açık\037TPM_NOANIMATION aracılığıyla sistem açma animasyonu olmadan yerel geri dönüş menülerini (klasik mod, geri dönüşler) gösterir.\037Klasik menü öğesini göster\037Değiştirme menüsünün altına \"Klasik menüyü göster\" girişini ekleyin.\037Üst işlem çubuğu\037Kes, Kopyala, Yapıştır, Yeniden Adlandır ve Sil'i, Windows 11 menüsü gibi menünün imlece en yakın tarafındaki simge çubuğuna taşır. Yalnızca özel menü modu.\037Alt menü açılma gecikmesi\037Değiştirme menüsü gösterilirken fareyle üzerine gelinen bir alt menünün açılmasından milisaniyeler önce. 0 anında açılır; -1 Windows ayarını korur.\037Windows ekstralarını taşıma\037Yapılandırılmış Windows ekstralarını Diğer seçenekler alt menüsüne taşıyın.\037Üçüncü taraf işleyicileri taşıma\037Üçüncü taraf kabuk uzantısı girişlerini Diğer seçenekler alt menüsüne taşıyın.\037Taşınacak Windows öğeleri\037Alt menüye taşınacak Windows öğelerinin virgülle ayrılmış etiketleri veya fiilleri. Fiiller (örneğin setdesktopwallpaper) her dilde eşleşir; etiketler menünün görüntüleme diliyle eşleşir. GUID fiil komutları aynı zamanda openterminal, editwithphotos, editwithpaint ve editwithnotepad takma adlarını da kabul eder.\037Ana menüde tut\037Alt menüye gitmek yerine ana menüde kalan virgülle ayrılmış üçüncü taraf etiketleri veya fiiller.\037Daha fazla seçenek alt menü etiketi\037Ekstra öğeleri toplayan alt menünün etiketi.\037Ayarlar kısayol tuşu\037Görünüm ayarları menüsünü açan isteğe bağlı genel kısayol tuşu (örneğin Ctrl+Alt+M). Boş bunu devre dışı bırakır.\037Hata ayıklama günlüğü\037Sorun giderme için zamanlamayı ve tanılamayı günlüğe kaydedin.\037Önbelleği temizle\037Önbelleğe alınan menü modellerini silmek için açın; bir sonraki kullanımda yeniden inşa edilirler.\037Arka planda ön derleme\037Explorer başladıktan kısa bir süre sonra ortak menüleri ısıtır, böylece ilk açılmaları anında gerçekleşir. Bunu kapatmak, başlangıçta kayıtlı her içerik menüsü işleyicisinin yüklenmesini atlar (stok menüsünün ortaya çıkması), bu da hatalı üçüncü taraf uzantılardan kaynaklanan başlangıç ​​çökmelerini önler; Her bağlamın ilk açılışı, stok menüsü gibi isteğe bağlı olarak oluşturulur. Stok menüsünü çökerten bir işleyici yine de çöküyor.\037Isınma uzatmaları\037Menüleri Explorer başlangıcında önceden oluşturulmuş olan virgülle ayrılmış dosya türleri.\037Isınma gecikmesi\037Önbelleği ısıtmadan önce Explorer başladıktan sonra beklenecek saniyeler.\037Otomatik (Windows'la eşleş)"},
     {L"uk", false, "\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037Створити\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037Nord\037Dracula\037Solarized Dark\037Gruvbox Dark\037One Dark\037Cyberpunk\037Synthwave\037Terminal Green\037Amber CRT\037Tokyo Night\037AMOLED Black\037\037\037\037\037\037\037\037Automatic (match Windows)\037العربية\037Azərbaycanca\037বাংলা\037Čeština\037Dansk\037Deutsch\037Ελληνικά\037English\037Español\037فارسی\037Français\037हिन्दी\037Hrvatski\037Kreyòl ayisyen\037Magyar\037Bahasa Indonesia\037Italiano\037日本語\037한국어\037Norsk bokmål\037Nederlands\037ଓଡ଼ିଆ\037Polski\037Português (Brasil)\037Português (Portugal)\037Română\037Русский\037Svenska\037தமிழ்\037ไทย\037Türkçe\037Українська\037Oʻzbekcha\037Tiếng Việt\037简体中文\037繁體中文"},
-    {L"uz", false, "\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037Nord\037Dracula\037Solarized Dark\037Gruvbox Dark\037One Dark\037Cyberpunk\037Synthwave\037Terminal Green\037Amber CRT\037Tokyo Night\037AMOLED Black\037\037\037\037\037\037\037\037Automatic (match Windows)\037العربية\037Azərbaycanca\037বাংলা\037Čeština\037Dansk\037Deutsch\037Ελληνικά\037English\037Español\037فارسی\037Français\037हिन्दी\037Hrvatski\037Kreyòl ayisyen\037Magyar\037Bahasa Indonesia\037Italiano\037日本語\037한국어\037Norsk bokmål\037Nederlands\037ଓଡ଼ିଆ\037Polski\037Português (Brasil)\037Português (Portugal)\037Română\037Русский\037Svenska\037தமிழ்\037ไทย\037Türkçe\037Українська\037Oʻzbekcha\037Tiếng Việt\037简体中文\037繁體中文"},
+    {L"uz", false, "Ochish\037%s sozlamalarini tiklash…\037Siqilgan (ziplangan) jild\037Jild\037Yorliq\037Haqida\037Belgilarni to'rga tekislang\037Belgilarni avtomatik tartibga solish\037Tarkib\037Nusxa olish\037Yo'l sifatida nusxalash\037Yorliq yaratish\037Kesish\037Birlamchi (oʻrnatilmagan)\037O'chirish\037Tafsilotlar\037Displey sozlamalari\037Juda katta piktogramma\037Yuz\037Bo'yicha guruhlash\037Hex\037Katta piktogramma\037Roʻyxat\037O'rta piktogramma\037Menyu sozlamalari\037Menyu sozlamalari…\037Yangi\037Windhawk-ni oching\037Yangi jarayonda oching\037Yangi oynada oching\037menu.ini-ni oching\037Mavzu faylini oching\037bilan oching\037Qo'yish\037Yorliqni joylashtirish\037Shaxsiylashtirish\037Tez kirish uchun mahkamlang\037Xususiyatlar\037Yangilash\037Nomini o'zgartirish\037Ochiq animatsiyani takrorlang\037Barcha ko'rinishni tiklash\037Barcha koʻrinishni tiklash…\037Masshtab parametrlari…\037Kimga yuboring\037Hajmi\037Slayd parametrlari…\037Kichik piktogramma\037Saralash\037Holat\037Maqsad\037Mavzu\037Plitkalar\037cornerRadius dan foydalanish (o‘rnatilmagan)\037Ko'rish\037Windhawk sozlamalari…\037Klassik menyuni ko'rsatish\037Boshqa variantlar\037Ko'tarilish\037Pastga\037(Yo'q)\037Ism\037O'zgartirilgan sana\037Turi\037Matnli hujjat\037Bitmap tasvir\037Boy matnli hujjat\037yoqilgan\037o'chirilgan\037odatiy\037standart\037Saqlangan\037Saqlash amalga oshmadi\037Shrift topilmadi\037Asosiy ko'rinish\037Yengil ko'rinish\037Qorong'i ko'rinish\037eskirgan — animationOpen/Close dan foydalaning\037Mavzu: %s — mavzu faylini tahrirlash\037%d sxemasi\037Menyu rejimi\037Maxsus\037Klassik\037Rang\037Ranglar\037Tartib\037Matn\037Soya\037Effektlar\037Animatsiya\037Fon\037Chegara\037Ajratuvchi\037Orqa fon\037Bosilgan fon\037Matn rangi\037O'chirilgan matn rangi\037Pastki menyu strelkasi\037Sarlavha rangi\037Burchak radiusi\037Burchak radiusi\037Chegara kengligi\037To'ldirish\037Elementni to'ldirish\037Vertikal to'ldirish\037Element balandligi\037Belgi o'lchami\037Minimal kenglik\037Maksimal kenglik\037Separator oralig'i\037Marker\037Marker kengligi\037Marker rangi\037Shrift\037Shrift og'irligi\037Shrift uslubi\037Tezlashtiruvchi displey\037Soya hajmi\037Soya ofset X\037Soya ofset Y\037Soya shaffofligi\037Soyani fonga moslashtiring\037Soya rangi\037Soya xiralashishi\037Xiralashtirish\037Loyqalik kuchi\037Overlay effektlari\037Overlay intensivligi\037Overlay tezligi\037Overlay hajmi\037Overlay ramka oralig'i\037Ochiq bo'lganda qoplamalarni animatsiya qiling\037Animatsiyani ochish\037Animatsiyani yopish\037Ochiq muddat\037Yopish muddati\037Animatsiya ramkalar oralig'i\037Animatsiyani engillashtirish\037Animatsiya langari\037Pastki menyularni jonlantirish\037Slayd ofset X\037Slayd ofset Y\037dan masshtab\037To'yinganlik / qiymat\037Hue\037Alfa\037Qizil\037Yashil\037Moviy\037Alfa qiymati\037Yuqori chap\037Yuqori o'ng\037Pastki o'ng\037Pastki chap\037@option:fontWeight:normal\037@option:fontWeight:semibold\037@option:fontWeight:bold\037@option:fontStyle:normal\037@option:fontStyle:italic\037@option:marker:nuqta\037@option:marker:check\037@option:marker:bar\037@option:marker:yo'q\037@option:showAccelerators:pastga chizilgan\037@option:showAccelerators:strip\037@option:showAccelerators:raw\037@option:animationEasing:chiziqli\037@option:animationEasing:easeOut\037@option:animationEasing:easeInOut\037@option:animationEasing:back\037@option:animationEasing:bounce\037@option:animationEasing:elastik\037@option:animationAnchor:kursor\037@option:animationAnchor:center\037@effect: yo'q\037@effect:fade\037@effect:slide\037@effect:scale\037@effect:eritish\037@effect:crt\037@effect: ochiladi\037@overlay: yo'q\037@overlay: shovqin\037@overlay: plazma\037@overlay:hue\037@overlay:glow\037@overlay:scanlines\037@overlay: vinyetka\037Til\037Klassik menyu elementini ko'rsatish\037Yuqori harakatlar paneli\037Pastki menyu kechikishi\037Bypass kalitlari\037Nosozliklarni tuzatish jurnali\037Isitish kechikishi\037@mavzu: Maxsus (menu.ini)\037@mavzu: Windows 11 To'q\037@mavzu: Windows 11 Nur\037@mavzu: Windows 10 To'q\037@mavzu: Windows 10 Nur\037@mavzu: Yuqori kontrast\037Maxsus keshlangan kontekst menyusi\037To'liq sozlanishi mumkin bo'lgan keshlangan Explorer kontekst menyusi darhol ochiladi: mavzular, tartib, ranglar, animatsiyalar, qoidalar va maxsus buyruqlar.\037Mavzu\037<storage>\\themes\\<name>.ini dan ko'rinishni yuklaydi (birinchi foydalanishda yig'ilgan oldindan o'rnatilgandan yaratilgan). menu.ini hech qachon o'zgartirilmaydi.\037Maxsus (menu.ini)\037Windows 11 To'q\037Windows 11 yorug'lik\037Windows 10 To'q\037Windows 10 yorug'lik\037Nord\037Dracula\037Solarized Dark\037Gruvbox Dark\037One Dark\037Cyberpunk\037Synthwave\037Terminal Green\037Amber CRT\037Tokyo Night\037AMOLED Black\037Yuqori kontrast\037Menyu rejimi\037Maxsus o'z-o'zidan ko'rsatilgan menyuni chizadi va takroriy nosozliklardan so'ng klassik menyuga qaytadi. Klassik har doim egasi tomonidan tuzilgan menyudan foydalanadi.\037Maxsus (tavsiya etiladi)\037Klassik egasi tomonidan chizilgan\037Til\037Menyu va menyu ichidagi sozlamalar uchun til. Avtomatik Windows displey tiliga amal qiladi va qo'llab-quvvatlanadigan tillardan biri bo'lmaganda ingliz tiliga qaytadi; bu sahifaning o'zi Windhawk til sozlamalariga amal qiladi.\037Automatic (match Windows)\037العربية\037Azərbaycanca\037বাংলা\037Čeština\037Dansk\037Deutsch\037Ελληνικά\037English\037Español\037فارسی\037Français\037हिन्दी\037Hrvatski\037Kreyòl ayisyen\037Magyar\037Bahasa Indonesia\037Italiano\037日本語\037한국어\037Norsk bokmål\037Nederlands\037ଓଡ଼ିଆ\037Polski\037Português (Brasil)\037Português (Portugal)\037Română\037Русский\037Svenska\037தமிழ்\037ไทย\037Türkçe\037Українська\037Oʻzbekcha\037Tiếng Việt\037简体中文\037繁體中文\037Bypass kalitlari\037Modni chetlab o'tish va birja klassik menyusini olish uchun sichqonchaning o'ng tugmachasini bosgan holda Shift-ni yoki tegilmagan mahalliy menyu uchun Ctrl-ni ushlab turing.\037Tezkor menyu ochiladi\037TPM_NOANIMATION orqali tizimning ochiq animatsiyasisiz mahalliy zaxira menyularni (klassik rejim, zaxiralar) ko'rsatadi.\037Klassik menyu elementini ko'rsatish\037O'zgartirish menyusining pastki qismida \"Klassik menyuni ko'rsatish\" yozuvini qo'shing.\037Yuqori harakatlar paneli\037Kesish, Nusxalash, joylashtirish, nomini o'zgartirish va o'chirishni Windows 11 menyusi kabi kursorga eng yaqin menyuning yon tomonidagi piktogramma satriga o'tkazadi. Faqat shaxsiy menyu rejimi.\037Pastki menyuni ochish kechikishi\037O'zgartirish menyusi ko'rsatilganda kursorga o'rnatilgan pastki menyu ochilishidan oldin millisekundlar. 0 darhol ochiladi; -1 Windows sozlamalarini saqlaydi.\037Windows qo'shimchalarini ko'chiring\037Sozlangan Windows qo'shimchalarini Qo'shimcha parametrlar pastki menyusiga o'tkazing.\037Uchinchi tomon ishlov beruvchilarini ko'chiring\037Uchinchi tomon qobiq kengaytmasi yozuvlarini Qo'shimcha parametrlar pastki menyusiga o'tkazing.\037Ko'chirish uchun Windows elementlari\037Pastki menyuga o'tish uchun Windows elementlarining vergul bilan ajratilgan yorliqlari yoki fe'llari. Fe'llar (masalan, setdesktopwallpaper) har bir tilda mos keladi; teglar menyuning ekran tiliga mos keladi. GUID-fe'l buyruqlari shuningdek openterminal, editwithphotos, editwithpaint va editwithnotepad taxalluslarini qabul qiladi.\037Asosiy menyuda saqlang\037Vergul bilan ajratilgan uchinchi tomon yorliqlari yoki pastki menyuga o'tish o'rniga asosiy menyuda qoladigan fe'llar.\037Ko'proq parametrlar pastki menyusi yorlig'i\037Qo'shimcha elementlarni to'playdigan pastki menyuning yorlig'i.\037Sozlamalar tezkor tugmasi\037Tashqi ko'rinish sozlamalari menyusini ochadigan ixtiyoriy global tezkor tugma (masalan, Ctrl+Alt+M). Bo'sh uni o'chiradi.\037Nosozliklarni tuzatish jurnali\037Muammolarni bartaraf etish uchun vaqt va diagnostika jurnali.\037Keshni tozalash\037Keshlangan menyu modellarini o'chirish uchun yoqing; ular keyingi foydalanishda qayta quradilar.\037Oldindan yaratilgan fon\037Explorer ishga tushirilgandan so'ng qisqa vaqt ichida umumiy menyularni isitadi, shuning uchun ular bir zumda ochiladi. Uni o'chirib qo'yish ishga tushirilganda ro'yxatdan o'tgan har bir kontekst menyusi ishlovchisini yuklashni o'tkazib yuboradi (birja menyusi ko'rinishi), bu noto'g'ri uchinchi tomon kengaytmalari tufayli ishga tushishning ishdan chiqishini oldini oladi; Har bir kontekstning birinchi ochilishi, so'ngra stok menyusi kabi talab asosida tuziladi. Birja menyusini buzadigan ishlov beruvchi hali ham ishdan chiqadi.\037Isitish kengaytmalari\037Menyulari Explorer ishga tushirilganda oldindan tuzilgan vergul bilan ajratilgan fayl turlari.\037Isitish kechikishi\037Keshni isitishdan oldin Explorer ishga tushirilgandan keyin kutish uchun soniyalar.\037Avtomatik (Windows mos)"},
     {L"vi", false, "\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037Nord\037Dracula\037Solarized Dark\037Gruvbox Dark\037One Dark\037Cyberpunk\037Synthwave\037Terminal Green\037Amber CRT\037Tokyo Night\037AMOLED Black\037\037\037\037\037\037\037\037Automatic (match Windows)\037العربية\037Azərbaycanca\037বাংলা\037Čeština\037Dansk\037Deutsch\037Ελληνικά\037English\037Español\037فارسی\037Français\037हिन्दी\037Hrvatski\037Kreyòl ayisyen\037Magyar\037Bahasa Indonesia\037Italiano\037日本語\037한국어\037Norsk bokmål\037Nederlands\037ଓଡ଼ିଆ\037Polski\037Português (Brasil)\037Português (Portugal)\037Română\037Русский\037Svenska\037தமிழ்\037ไทย\037Türkçe\037Українська\037Oʻzbekcha\037Tiếng Việt\037简体中文\037繁體中文"},
     {L"zh-CN", false, "\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037新建\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037Nord\037Dracula\037Solarized Dark\037Gruvbox Dark\037One Dark\037Cyberpunk\037Synthwave\037Terminal Green\037Amber CRT\037Tokyo Night\037AMOLED Black\037\037\037\037\037\037\037\037Automatic (match Windows)\037العربية\037Azərbaycanca\037বাংলা\037Čeština\037Dansk\037Deutsch\037Ελληνικά\037English\037Español\037فارسی\037Français\037हिन्दी\037Hrvatski\037Kreyòl ayisyen\037Magyar\037Bahasa Indonesia\037Italiano\037日本語\037한국어\037Norsk bokmål\037Nederlands\037ଓଡ଼ିଆ\037Polski\037Português (Brasil)\037Português (Portugal)\037Română\037Русский\037Svenska\037தமிழ்\037ไทย\037Türkçe\037Українська\037Oʻzbekcha\037Tiếng Việt\037简体中文\037繁體中文"},
     {L"zh-TW", false, "\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037新增\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037\037Nord\037Dracula\037Solarized Dark\037Gruvbox Dark\037One Dark\037Cyberpunk\037Synthwave\037Terminal Green\037Amber CRT\037Tokyo Night\037AMOLED Black\037\037\037\037\037\037\037\037Automatic (match Windows)\037العربية\037Azərbaycanca\037বাংলা\037Čeština\037Dansk\037Deutsch\037Ελληνικά\037English\037Español\037فارسی\037Français\037हिन्दी\037Hrvatski\037Kreyòl ayisyen\037Magyar\037Bahasa Indonesia\037Italiano\037日本語\037한국어\037Norsk bokmål\037Nederlands\037ଓଡ଼ିଆ\037Polski\037Português (Brasil)\037Português (Portugal)\037Română\037Русский\037Svenska\037தமிழ்\037ไทย\037Türkçe\037Українська\037Oʻzbekcha\037Tiếng Việt\037简体中文\037繁體中文"},

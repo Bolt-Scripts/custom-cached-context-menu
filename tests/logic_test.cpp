@@ -283,11 +283,46 @@ static void TestLocalizationSettings() {
     cmo::SelectLanguage(L"en");
 }
 
+static void TestLocalizationSettingsAndCache() {
+    cmo::SelectLanguage(L"de-DE");
+    CHECK(cmo::Tr(L"Open") == L"Öffnen");
+
+    cmo::Settings next = cmo::g_settings.Snapshot();
+    next.language = L"fr";
+    cmo::g_settings.Publish(next);
+    cmo::SelectLanguage(cmo::g_settings->language);
+    CHECK(cmo::Tr(L"Open") == L"Ouvrir");
+
+    cmo::Cache cache;
+    cmo::MenuModel model;
+    model.sig = cmo::ContextSignature{cmo::Scope::Files, L"*",
+                                      cmo::Shape::Single,
+                                      cmo::Variant::Normal};
+    model.items.push_back(cmo::MakeCommandForTesting(L"Open"));
+    cache.Put(model);
+    auto blob = cache.Serialize();
+    const std::wstring systemTag = cmo::SystemLanguageTag();
+    CHECK(cmo::DeserializeCacheWithSystemLanguageForTesting(
+        blob, systemTag.c_str()));
+    CHECK(!cmo::DeserializeCacheWithSystemLanguageForTesting(blob, L"zz-ZZ"));
+    CHECK(cmo::kCacheVersion == 17);
+
+    cmo::ResetNewTemplatesForTesting();
+    cmo::EnsureNewTemplates();
+    CHECK(cmo::g_newTemplatesReady.load());
+    cmo::SelectLanguage(L"fr");
+    cmo::ResetNewTemplates();
+    CHECK(!cmo::g_newTemplatesReady.load());
+
+    cmo::SelectLanguage(L"en");
+}
+
 int main() {
     TestLocalizationCore();
     TestLocalizationMenu();
     TestLocalizationDedup();
     TestLocalizationSettings();
+    TestLocalizationSettingsAndCache();
 
     // The Windhawk metadata blocks must stay balanced: an unclosed readme
     // block makes the app show "Mod details are missing".

@@ -933,6 +933,58 @@
     {
       "key": "@overlay:vignette",
       "english": "@overlay:vignette"
+    },
+    {
+      "key": "Language",
+      "english": "Language"
+    },
+    {
+      "key": "Show classic menu item",
+      "english": "Show classic menu item"
+    },
+    {
+      "key": "Top action bar",
+      "english": "Top action bar"
+    },
+    {
+      "key": "Submenu delay",
+      "english": "Submenu delay"
+    },
+    {
+      "key": "Bypass keys",
+      "english": "Bypass keys"
+    },
+    {
+      "key": "Debug logging",
+      "english": "Debug logging"
+    },
+    {
+      "key": "Warmup delay",
+      "english": "Warmup delay"
+    },
+    {
+      "key": "@theme:Custom (menu.ini)",
+      "english": "@theme:Custom (menu.ini)"
+    },
+    {
+      "key": "@theme:Windows 11 Dark",
+      "english": "@theme:Windows 11 Dark"
+    },
+    {
+      "key": "@theme:Windows 11 Light",
+      "english": "@theme:Windows 11 Light"
+    },
+    {
+      "key": "@theme:Windows 10 Dark",
+      "english": "@theme:Windows 10 Dark"
+    },
+    {
+      "key": "@theme:Windows 10 Light",
+      "english": "@theme:Windows 10 Light"
+    },
+    {
+      "key": "@theme:High Contrast",
+      "english": "@theme:High Contrast"
     }
   ],
   "translations": {
@@ -1124,7 +1176,20 @@
       "@overlay:hue": "Teinte",
       "@overlay:glow": "Lueur",
       "@overlay:scanlines": "Lignes de balayage",
-      "@overlay:vignette": "Vignettage"
+      "@overlay:vignette": "Vignettage",
+      "Language": "Langue",
+      "Show classic menu item": "Afficher l'élément du menu classique",
+      "Top action bar": "Barre d'actions supérieure",
+      "Submenu delay": "Délai des sous-menus",
+      "Bypass keys": "Touches de contournement",
+      "Debug logging": "Journalisation de débogage",
+      "Warmup delay": "Délai de préchauffage",
+      "@theme:Custom (menu.ini)": "Personnalisé (menu.ini)",
+      "@theme:Windows 11 Dark": "Windows 11 sombre",
+      "@theme:Windows 11 Light": "Windows 11 clair",
+      "@theme:Windows 10 Dark": "Windows 10 sombre",
+      "@theme:Windows 10 Light": "Windows 10 clair",
+      "@theme:High Contrast": "Contraste élevé"
     },
     "de": {
       "Open": "Öffnen"

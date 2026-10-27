@@ -152,6 +152,47 @@ MIT
   $options:
   - custom: Custom (recommended)
   - classic: Classic owner-drawn
+- language: auto
+  $name: Language
+  $description: Language for the menu and the in-menu settings. Automatic follows the Windows display language and falls back to English when it is not one of the supported languages; this page itself follows Windhawk's language setting.
+  $options:
+  - auto: Automatic (match Windows)
+  - ar: العربية
+  - az: Azərbaycanca
+  - bn: বাংলা
+  - cs: Čeština
+  - da: Dansk
+  - de: Deutsch
+  - el: Ελληνικά
+  - en: English
+  - es: Español
+  - fa: فارسی
+  - fr: Français
+  - hi: हिन्दी
+  - hr: Hrvatski
+  - ht: Kreyòl ayisyen
+  - hu: Magyar
+  - id: Bahasa Indonesia
+  - it: Italiano
+  - ja: 日本語
+  - ko: 한국어
+  - nb: Norsk bokmål
+  - nl: Nederlands
+  - or: ଓଡ଼ିଆ
+  - pl: Polski
+  - pt-BR: Português (Brasil)
+  - pt-PT: Português (Portugal)
+  - ro: Română
+  - ru: Русский
+  - sv: Svenska
+  - ta: தமிழ்
+  - th: ไทย
+  - tr: Türkçe
+  - uk: Українська
+  - uz: Oʻzbekcha
+  - vi: Tiếng Việt
+  - zh-CN: 简体中文
+  - zh-TW: 繁體中文
 - enableShiftBypass: true
   $name: Bypass keys
   $description: Hold Shift while right-clicking to bypass the mod and get the stock classic menu, or Ctrl for the untouched native menu.
@@ -280,6 +321,7 @@ struct Settings {
     std::wstring theme = L"Custom (menu.ini)";
     int themeIndex = 0;
     std::wstring settingsHotkey;
+    std::wstring language = L"auto";
     int menuMode = 0;
     bool showMoreOptionsItem = true;
     bool topBar = false;
@@ -295,6 +337,9 @@ struct Settings {
     std::vector<std::wstring> advancedSubmenuItems;
     std::vector<std::wstring> advancedSubmenuExclude;
 };
+
+void SelectLanguage(const std::wstring& setting);
+void ResetNewTemplates();
 
 // Settings are published as immutable snapshots: LoadSettings runs on the
 // engine thread while UI and warm-up threads read, and swapping a snapshot
@@ -407,6 +452,10 @@ void LoadSettings() {
     WindhawkUtils::StringSetting hotkey =
         WindhawkUtils::StringSetting::make(L"settingsHotkey");
     next.settingsHotkey = hotkey.get();
+
+    WindhawkUtils::StringSetting language =
+        WindhawkUtils::StringSetting::make(L"language");
+    next.language = language.get()[0] ? language.get() : L"auto";
     next.themeIndex = ThemeIndexFromName(next.theme);
 
     WindhawkUtils::StringSetting menuMode =
@@ -440,6 +489,7 @@ void LoadSettings() {
     next.advancedSubmenuExclude = ParseAdvancedItems(advancedExclude.get());
 
     g_settings.Publish(std::move(next));
+    SelectLanguage(g_settings->language);
 }
 
 // ===========================================================================
@@ -647,6 +697,19 @@ const LocalizationKey kLocalizationKeys[] = {
     {L"@overlay:glow", L"@overlay:glow"},
     {L"@overlay:scanlines", L"@overlay:scanlines"},
     {L"@overlay:vignette", L"@overlay:vignette"},
+    {L"Language", L"Language"},
+    {L"Show classic menu item", L"Show classic menu item"},
+    {L"Top action bar", L"Top action bar"},
+    {L"Submenu delay", L"Submenu delay"},
+    {L"Bypass keys", L"Bypass keys"},
+    {L"Debug logging", L"Debug logging"},
+    {L"Warmup delay", L"Warmup delay"},
+    {L"@theme:Custom (menu.ini)", L"@theme:Custom (menu.ini)"},
+    {L"@theme:Windows 11 Dark", L"@theme:Windows 11 Dark"},
+    {L"@theme:Windows 11 Light", L"@theme:Windows 11 Light"},
+    {L"@theme:Windows 10 Dark", L"@theme:Windows 10 Dark"},
+    {L"@theme:Windows 10 Light", L"@theme:Windows 10 Light"},
+    {L"@theme:High Contrast", L"@theme:High Contrast"},
 };
 
 const LocalizationLanguage kLocalizationLanguages[] = {
@@ -657,10 +720,10 @@ const LocalizationLanguage kLocalizationLanguages[] = {
     {L"da", false, ""},
     {L"de", false, "Öffnen"},
     {L"el", false, ""},
-    {L"en", false, "Open\037Reset %s…\037Compressed (zipped) Folder\037Folder\037Shortcut\037About\037Align icons to grid\037Auto arrange icons\037Content\037Copy\037Copy as path\037Create shortcut\037Cut\037Default (unset)\037Delete\037Details\037Display settings\037Extra large icons\037Face\037Group by\037Hex\037Large icons\037List\037Medium icons\037Menu settings\037Menu settings…\037New\037Open Windhawk\037Open in new process\037Open in new window\037Open menu.ini\037Open theme file\037Open with\037Paste\037Paste shortcut\037Personalize\037Pin to Quick access\037Properties\037Refresh\037Rename\037Replay open animation\037Reset all appearance\037Reset all appearance…\037Scale options…\037Send to\037Size\037Slide options…\037Small icons\037Sort by\037Status\037Target\037Theme\037Tiles\037Use cornerRadius (unset)\037View\037Windhawk settings…\037Show classic menu\037More options\037Ascending\037Descending\037(None)\037Name\037Date modified\037Type\037Text Document\037Bitmap image\037Rich Text Document\037on\037off\037custom\037default\037Saved\037Save failed\037Font not found\037Base appearance\037Light appearance\037Dark appearance\037deprecated — use animationOpen/Close\037Theme: %s — editing theme file\037schema %d\037Menu mode\037Custom\037Classic\037Color\037Colors\037Layout\037Text\037Shadow\037Effects\037Animation\037Background\037Border\037Separator\037Hover background\037Pressed background\037Text color\037Disabled text color\037Submenu arrow\037Header color\037Corner radius\037Corner radii\037Border width\037Padding\037Item padding\037Vertical padding\037Item height\037Icon size\037Minimum width\037Maximum width\037Separator spacing\037Marker\037Marker width\037Marker color\037Font\037Font weight\037Font style\037Accelerator display\037Shadow size\037Shadow offset X\037Shadow offset Y\037Shadow opacity\037Adapt shadow to backdrop\037Shadow color\037Shadow blur\037Blur\037Blur strength\037Overlay effects\037Overlay intensity\037Overlay speed\037Overlay size\037Overlay frame interval\037Animate overlays while open\037Open animation\037Close animation\037Open duration\037Close duration\037Animation frame interval\037Animation easing\037Animation anchor\037Animate submenus\037Slide offset X\037Slide offset Y\037Scale from\037Saturation / value\037Hue\037Alpha\037Red\037Green\037Blue\037Alpha value\037Top left\037Top right\037Bottom right\037Bottom left\037@option:fontWeight:normal\037@option:fontWeight:semibold\037@option:fontWeight:bold\037@option:fontStyle:normal\037@option:fontStyle:italic\037@option:marker:dot\037@option:marker:check\037@option:marker:bar\037@option:marker:none\037@option:showAccelerators:underline\037@option:showAccelerators:strip\037@option:showAccelerators:raw\037@option:animationEasing:linear\037@option:animationEasing:easeOut\037@option:animationEasing:easeInOut\037@option:animationEasing:back\037@option:animationEasing:bounce\037@option:animationEasing:elastic\037@option:animationAnchor:cursor\037@option:animationAnchor:center\037@effect:none\037@effect:fade\037@effect:slide\037@effect:scale\037@effect:dissolve\037@effect:crt\037@effect:unfold\037@overlay:none\037@overlay:noise\037@overlay:plasma\037@overlay:hue\037@overlay:glow\037@overlay:scanlines\037@overlay:vignette"},
+    {L"en", false, "Open\037Reset %s…\037Compressed (zipped) Folder\037Folder\037Shortcut\037About\037Align icons to grid\037Auto arrange icons\037Content\037Copy\037Copy as path\037Create shortcut\037Cut\037Default (unset)\037Delete\037Details\037Display settings\037Extra large icons\037Face\037Group by\037Hex\037Large icons\037List\037Medium icons\037Menu settings\037Menu settings…\037New\037Open Windhawk\037Open in new process\037Open in new window\037Open menu.ini\037Open theme file\037Open with\037Paste\037Paste shortcut\037Personalize\037Pin to Quick access\037Properties\037Refresh\037Rename\037Replay open animation\037Reset all appearance\037Reset all appearance…\037Scale options…\037Send to\037Size\037Slide options…\037Small icons\037Sort by\037Status\037Target\037Theme\037Tiles\037Use cornerRadius (unset)\037View\037Windhawk settings…\037Show classic menu\037More options\037Ascending\037Descending\037(None)\037Name\037Date modified\037Type\037Text Document\037Bitmap image\037Rich Text Document\037on\037off\037custom\037default\037Saved\037Save failed\037Font not found\037Base appearance\037Light appearance\037Dark appearance\037deprecated — use animationOpen/Close\037Theme: %s — editing theme file\037schema %d\037Menu mode\037Custom\037Classic\037Color\037Colors\037Layout\037Text\037Shadow\037Effects\037Animation\037Background\037Border\037Separator\037Hover background\037Pressed background\037Text color\037Disabled text color\037Submenu arrow\037Header color\037Corner radius\037Corner radii\037Border width\037Padding\037Item padding\037Vertical padding\037Item height\037Icon size\037Minimum width\037Maximum width\037Separator spacing\037Marker\037Marker width\037Marker color\037Font\037Font weight\037Font style\037Accelerator display\037Shadow size\037Shadow offset X\037Shadow offset Y\037Shadow opacity\037Adapt shadow to backdrop\037Shadow color\037Shadow blur\037Blur\037Blur strength\037Overlay effects\037Overlay intensity\037Overlay speed\037Overlay size\037Overlay frame interval\037Animate overlays while open\037Open animation\037Close animation\037Open duration\037Close duration\037Animation frame interval\037Animation easing\037Animation anchor\037Animate submenus\037Slide offset X\037Slide offset Y\037Scale from\037Saturation / value\037Hue\037Alpha\037Red\037Green\037Blue\037Alpha value\037Top left\037Top right\037Bottom right\037Bottom left\037@option:fontWeight:normal\037@option:fontWeight:semibold\037@option:fontWeight:bold\037@option:fontStyle:normal\037@option:fontStyle:italic\037@option:marker:dot\037@option:marker:check\037@option:marker:bar\037@option:marker:none\037@option:showAccelerators:underline\037@option:showAccelerators:strip\037@option:showAccelerators:raw\037@option:animationEasing:linear\037@option:animationEasing:easeOut\037@option:animationEasing:easeInOut\037@option:animationEasing:back\037@option:animationEasing:bounce\037@option:animationEasing:elastic\037@option:animationAnchor:cursor\037@option:animationAnchor:center\037@effect:none\037@effect:fade\037@effect:slide\037@effect:scale\037@effect:dissolve\037@effect:crt\037@effect:unfold\037@overlay:none\037@overlay:noise\037@overlay:plasma\037@overlay:hue\037@overlay:glow\037@overlay:scanlines\037@overlay:vignette\037Language\037Show classic menu item\037Top action bar\037Submenu delay\037Bypass keys\037Debug logging\037Warmup delay\037@theme:Custom (menu.ini)\037@theme:Windows 11 Dark\037@theme:Windows 11 Light\037@theme:Windows 10 Dark\037@theme:Windows 10 Light\037@theme:High Contrast"},
     {L"es", false, ""},
     {L"fa", true, ""},
-    {L"fr", false, "Ouvrir\037Réinitialiser %s…\037Dossier compressé (zippé)\037Dossier\037Raccourci\037À propos\037Aligner les icônes sur la grille\037Réorganiser automatiquement les icônes\037Contenu\037Copier\037Copier le chemin d'accès\037Créer un raccourci\037Couper\037Par défaut (non défini)\037Supprimer\037Détails\037Paramètres d'affichage\037Très grandes icônes\037Police\037Grouper par\037Hex\037Grandes icônes\037Liste\037Icônes moyennes\037Paramètres du menu\037Paramètres du menu…\037Nouveau\037Ouvrir Windhawk\037Ouvrir dans un nouveau processus\037Ouvrir dans une nouvelle fenêtre\037Ouvrir menu.ini\037Ouvrir le fichier de thème\037Ouvrir avec\037Coller\037Coller le raccourci\037Personnaliser\037Épingler à Accès rapide\037Propriétés\037Actualiser\037Renommer\037Rejouer l'animation d'ouverture\037Réinitialiser toute l'apparence\037Réinitialiser toute l'apparence…\037Options de mise à l'échelle…\037Envoyer vers\037Taille\037Options de glissement…\037Petites icônes\037Trier par\037Statut\037Cible\037Thème\037Tuiles\037Utiliser cornerRadius (non défini)\037Affichage\037Paramètres Windhawk…\037Afficher le menu classique\037Plus d'options\037Croissant\037Décroissant\037(Aucun)\037Nom\037Date de modification\037Type\037Document texte\037Image bitmap\037Document en texte enrichi\037activé\037désactivé\037personnalisé\037par défaut\037Enregistré\037Échec de l'enregistrement\037Police introuvable\037Apparence de base\037Apparence claire\037Apparence sombre\037obsolète — utilisez animationOpen/Close\037Thème : %s — modification du fichier de thème\037schéma %d\037Mode du menu\037Personnalisé\037Classique\037Couleur\037Couleurs\037Disposition\037Texte\037Ombre\037Effets\037Animation\037Arrière-plan\037Bordure\037Séparateur\037Arrière-plan au survol\037Arrière-plan pressé\037Couleur du texte\037Couleur du texte désactivé\037Flèche du sous-menu\037Couleur de l'en-tête\037Rayon des coins\037Rayons des coins\037Épaisseur de la bordure\037Marge intérieure\037Marge des éléments\037Marge verticale\037Hauteur des éléments\037Taille des icônes\037Largeur minimale\037Largeur maximale\037Espacement des séparateurs\037Marqueur\037Largeur du marqueur\037Couleur du marqueur\037Police\037Graisse de la police\037Style de la police\037Affichage des accélérateurs\037Taille de l'ombre\037Décalage horizontal de l'ombre\037Décalage vertical de l'ombre\037Opacité de l'ombre\037Adapter l'ombre à l'arrière-plan\037Couleur de l'ombre\037Flou de l'ombre\037Flou\037Intensité du flou\037Effets de superposition\037Intensité de la superposition\037Vitesse de la superposition\037Taille de la superposition\037Intervalle des images de superposition\037Animer les superpositions à l'ouverture\037Animation d'ouverture\037Animation de fermeture\037Durée d'ouverture\037Durée de fermeture\037Intervalle des images d'animation\037Courbe d'animation\037Ancre d'animation\037Animer les sous-menus\037Décalage horizontal du glissement\037Décalage vertical du glissement\037Échelle de départ\037Saturation / valeur\037Teinte\037Alpha\037Rouge\037Vert\037Bleu\037Valeur alpha\037En haut à gauche\037En haut à droite\037En bas à droite\037En bas à gauche\037Normal\037Demi-gras\037Gras\037Normal\037Italique\037Point\037Coche\037Barre\037Aucun\037Souligné\037Supprimer\037Brut\037Linéaire\037Sortie progressive\037Entrée-sortie progressive\037Retour\037Rebond\037Élastique\037Curseur\037Centre\037Aucun\037Fondu\037Glissement\037Mise à l'échelle\037Dissolution\037CRT\037Dépliage\037Aucun\037Bruit\037Plasma\037Teinte\037Lueur\037Lignes de balayage\037Vignettage"},
+    {L"fr", false, "Ouvrir\037Réinitialiser %s…\037Dossier compressé (zippé)\037Dossier\037Raccourci\037À propos\037Aligner les icônes sur la grille\037Réorganiser automatiquement les icônes\037Contenu\037Copier\037Copier le chemin d'accès\037Créer un raccourci\037Couper\037Par défaut (non défini)\037Supprimer\037Détails\037Paramètres d'affichage\037Très grandes icônes\037Police\037Grouper par\037Hex\037Grandes icônes\037Liste\037Icônes moyennes\037Paramètres du menu\037Paramètres du menu…\037Nouveau\037Ouvrir Windhawk\037Ouvrir dans un nouveau processus\037Ouvrir dans une nouvelle fenêtre\037Ouvrir menu.ini\037Ouvrir le fichier de thème\037Ouvrir avec\037Coller\037Coller le raccourci\037Personnaliser\037Épingler à Accès rapide\037Propriétés\037Actualiser\037Renommer\037Rejouer l'animation d'ouverture\037Réinitialiser toute l'apparence\037Réinitialiser toute l'apparence…\037Options de mise à l'échelle…\037Envoyer vers\037Taille\037Options de glissement…\037Petites icônes\037Trier par\037Statut\037Cible\037Thème\037Tuiles\037Utiliser cornerRadius (non défini)\037Affichage\037Paramètres Windhawk…\037Afficher le menu classique\037Plus d'options\037Croissant\037Décroissant\037(Aucun)\037Nom\037Date de modification\037Type\037Document texte\037Image bitmap\037Document en texte enrichi\037activé\037désactivé\037personnalisé\037par défaut\037Enregistré\037Échec de l'enregistrement\037Police introuvable\037Apparence de base\037Apparence claire\037Apparence sombre\037obsolète — utilisez animationOpen/Close\037Thème : %s — modification du fichier de thème\037schéma %d\037Mode du menu\037Personnalisé\037Classique\037Couleur\037Couleurs\037Disposition\037Texte\037Ombre\037Effets\037Animation\037Arrière-plan\037Bordure\037Séparateur\037Arrière-plan au survol\037Arrière-plan pressé\037Couleur du texte\037Couleur du texte désactivé\037Flèche du sous-menu\037Couleur de l'en-tête\037Rayon des coins\037Rayons des coins\037Épaisseur de la bordure\037Marge intérieure\037Marge des éléments\037Marge verticale\037Hauteur des éléments\037Taille des icônes\037Largeur minimale\037Largeur maximale\037Espacement des séparateurs\037Marqueur\037Largeur du marqueur\037Couleur du marqueur\037Police\037Graisse de la police\037Style de la police\037Affichage des accélérateurs\037Taille de l'ombre\037Décalage horizontal de l'ombre\037Décalage vertical de l'ombre\037Opacité de l'ombre\037Adapter l'ombre à l'arrière-plan\037Couleur de l'ombre\037Flou de l'ombre\037Flou\037Intensité du flou\037Effets de superposition\037Intensité de la superposition\037Vitesse de la superposition\037Taille de la superposition\037Intervalle des images de superposition\037Animer les superpositions à l'ouverture\037Animation d'ouverture\037Animation de fermeture\037Durée d'ouverture\037Durée de fermeture\037Intervalle des images d'animation\037Courbe d'animation\037Ancre d'animation\037Animer les sous-menus\037Décalage horizontal du glissement\037Décalage vertical du glissement\037Échelle de départ\037Saturation / valeur\037Teinte\037Alpha\037Rouge\037Vert\037Bleu\037Valeur alpha\037En haut à gauche\037En haut à droite\037En bas à droite\037En bas à gauche\037Normal\037Demi-gras\037Gras\037Normal\037Italique\037Point\037Coche\037Barre\037Aucun\037Souligné\037Supprimer\037Brut\037Linéaire\037Sortie progressive\037Entrée-sortie progressive\037Retour\037Rebond\037Élastique\037Curseur\037Centre\037Aucun\037Fondu\037Glissement\037Mise à l'échelle\037Dissolution\037CRT\037Dépliage\037Aucun\037Bruit\037Plasma\037Teinte\037Lueur\037Lignes de balayage\037Vignettage\037Langue\037Afficher l'élément du menu classique\037Barre d'actions supérieure\037Délai des sous-menus\037Touches de contournement\037Journalisation de débogage\037Délai de préchauffage\037Personnalisé (menu.ini)\037Windows 11 sombre\037Windows 11 clair\037Windows 10 sombre\037Windows 10 clair\037Contraste élevé"},
     {L"hi", false, ""},
     {L"hr", false, ""},
     {L"ht", false, ""},
@@ -773,6 +836,27 @@ const LocalizationLanguage* FindLanguage(const wchar_t* tag) {
         }
     }
     return nullptr;
+}
+
+std::wstring SystemLanguageTag() {
+    ULONG count = 0;
+    ULONG chars = 0;
+    if (GetUserPreferredUILanguages(MUI_LANGUAGE_NAME, &count, nullptr, &chars) &&
+        chars > 0) {
+        std::vector<wchar_t> buffer(chars);
+        if (GetUserPreferredUILanguages(MUI_LANGUAGE_NAME, &count, buffer.data(),
+                                        &chars) &&
+            buffer[0]) {
+            return buffer.data();
+        }
+    }
+
+    wchar_t locale[LOCALE_NAME_MAX_LENGTH] = {};
+    if (LCIDToLocaleName(MAKELCID(GetUserDefaultUILanguage(), SORT_DEFAULT),
+                         locale, ARRAYSIZE(locale), 0)) {
+        return locale;
+    }
+    return L"en";
 }
 
 const LocalizationLanguage* SystemLanguage() {
@@ -1745,6 +1829,12 @@ void LogShellNewProbe(const wchar_t* ext) {
 
 // Builds the template list once. The warm-up thread or the invalidation
 // thread prepares it, so the open path never pays for the registry walk.
+void ResetNewTemplates() {
+    std::lock_guard<std::mutex> lock(g_newTemplatesMutex);
+    g_newTemplates.clear();
+    g_newTemplatesReady.store(false, std::memory_order_release);
+}
+
 void EnsureNewTemplates() {
     if (g_newTemplatesReady.load(std::memory_order_acquire)) {
         return;
@@ -13798,6 +13888,7 @@ void OpenSettingsMenu(HWND owner, POINT pt, bool activate = false) {
     settings.inputs.statusText = L"Saved";
     settings.inputs.windhawkHints = {
         {L"Theme", g_settings->theme},
+        {L"Language", CurrentLanguageTag()},
         {L"Menu mode", g_settings->menuMode == 0 ? L"Custom" : L"Classic"},
         {L"Show classic menu item",
          g_settings->showMoreOptionsItem ? L"on" : L"off"},
@@ -14721,7 +14812,7 @@ MenuModel MergeCoreWithCached(const MenuModel& core, const MenuModel& cached,
 namespace cmo {
 
 constexpr uint32_t kCacheMagic = 0x434F4D4F;  // "COMO"
-constexpr uint32_t kCacheVersion = 16;
+constexpr uint32_t kCacheVersion = 17;
 constexpr uint32_t kMaxCacheEntries = 1024;
 constexpr uint32_t kMaxModelItems = 4096;
 constexpr uint32_t kMaxMenuDepth = 16;
@@ -15063,6 +15154,14 @@ public:
         return true;
     }
 
+#ifdef CMO_TESTING
+    static bool DeserializeWithLanguageForTesting(
+        std::span<const uint8_t> data, const std::wstring& systemTag) {
+        std::vector<MenuModel> models;
+        return DeserializeModelsWithSystemTag(data, systemTag, models);
+    }
+#endif
+
     bool Load(const std::wstring& path) {
         HANDLE file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
                                   OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -15215,6 +15314,7 @@ private:
         std::vector<uint8_t> out;
         WriteU32(out, kCacheMagic);
         WriteU32(out, kCacheVersion);
+        WriteString(out, SystemLanguageTag());
         uint32_t count = 0;
         for (const auto& pair : entries_) {
             if (pair.second.model.sig.scope != Scope::NavPane) {
@@ -15236,6 +15336,12 @@ private:
 
     static bool DeserializeModels(std::span<const uint8_t> data,
                                   std::vector<MenuModel>& out) {
+        return DeserializeModelsWithSystemTag(data, SystemLanguageTag(), out);
+    }
+
+    static bool DeserializeModelsWithSystemTag(
+        std::span<const uint8_t> data, const std::wstring& systemTag,
+        std::vector<MenuModel>& out) {
         if (data.size() < 12) {
             return false;
         }
@@ -15255,7 +15361,10 @@ private:
         uint32_t magic = 0;
         uint32_t version = 0;
         uint32_t entryCount = 0;
+        std::wstring storedLanguage;
         if (!reader.ReadU32(magic) || !reader.ReadU32(version) ||
+            !reader.ReadString(storedLanguage) ||
+            _wcsicmp(storedLanguage.c_str(), systemTag.c_str()) != 0 ||
             !reader.ReadU32(entryCount) || entryCount > kMaxCacheEntries) {
             return false;
         }
@@ -21880,7 +21989,13 @@ void Wh_ModSettingsChanged() {
         return;
     }
     Wh_Log(L"Custom Cached Context Menu settings changed");
+    const std::wstring oldLanguage = cmo::g_settings->language;
     cmo::LoadSettings();
+    if (_wcsicmp(oldLanguage.c_str(), cmo::g_settings->language.c_str()) != 0) {
+        // Synthetic New names are cached per language; rebuild them off the
+        // UI thread on the next invalidation pass.
+        cmo::ResetNewTemplates();
+    }
     cmo::g_hotkeyHost.SettingsChanged();
 
     if (cmo::g_settings->warmup) {

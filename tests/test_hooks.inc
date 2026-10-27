@@ -24,9 +24,7 @@ std::vector<uint32_t> FlattenIds(const MenuModel& model) {
 }
 
 void ResetNewTemplatesForTesting() {
-    std::lock_guard<std::mutex> lock(g_newTemplatesMutex);
-    g_newTemplates.clear();
-    g_newTemplatesReady.store(false, std::memory_order_relaxed);
+    ResetNewTemplates();
 }
 
 size_t CountSubstring(const std::wstring& text, const std::wstring& needle) {
@@ -133,6 +131,11 @@ MenuItem MakeSubmenuForTesting(const wchar_t* label) {
     item.label = label;
     item.canonicalLabel = label;
     return item;
+}
+
+bool DeserializeCacheWithSystemLanguageForTesting(
+    std::span<const uint8_t> data, const wchar_t* systemTag) {
+    return Cache::DeserializeWithLanguageForTesting(data, systemTag);
 }
 
 MenuItem* FindItemByLabelInItem(MenuItem& item, const wchar_t* label) {

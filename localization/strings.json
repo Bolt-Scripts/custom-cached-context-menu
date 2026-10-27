@@ -1,0 +1,644 @@
+{
+  "languages": [
+    {
+      "tag": "ar",
+      "windhawk": "ar",
+      "rtl": true
+    },
+    {
+      "tag": "az",
+      "windhawk": "az",
+      "rtl": false
+    },
+    {
+      "tag": "bn",
+      "windhawk": "bn",
+      "rtl": false
+    },
+    {
+      "tag": "cs",
+      "windhawk": "cs",
+      "rtl": false
+    },
+    {
+      "tag": "da",
+      "windhawk": "da",
+      "rtl": false
+    },
+    {
+      "tag": "de",
+      "windhawk": "de-DE",
+      "rtl": false
+    },
+    {
+      "tag": "el",
+      "windhawk": "el",
+      "rtl": false
+    },
+    {
+      "tag": "en",
+      "windhawk": "en",
+      "rtl": false
+    },
+    {
+      "tag": "es",
+      "windhawk": "es-ES",
+      "rtl": false
+    },
+    {
+      "tag": "fa",
+      "windhawk": "fa",
+      "rtl": true
+    },
+    {
+      "tag": "fr",
+      "windhawk": "fr-FR",
+      "rtl": false
+    },
+    {
+      "tag": "hi",
+      "windhawk": "hi",
+      "rtl": false
+    },
+    {
+      "tag": "hr",
+      "windhawk": "hr",
+      "rtl": false
+    },
+    {
+      "tag": "ht",
+      "windhawk": "ht",
+      "rtl": false
+    },
+    {
+      "tag": "hu",
+      "windhawk": "hu",
+      "rtl": false
+    },
+    {
+      "tag": "id",
+      "windhawk": "id-ID",
+      "rtl": false
+    },
+    {
+      "tag": "it",
+      "windhawk": "it-IT",
+      "rtl": false
+    },
+    {
+      "tag": "ja",
+      "windhawk": "ja-JP",
+      "rtl": false
+    },
+    {
+      "tag": "ko",
+      "windhawk": "ko-KR",
+      "rtl": false
+    },
+    {
+      "tag": "nb",
+      "windhawk": "nb",
+      "rtl": false
+    },
+    {
+      "tag": "nl",
+      "windhawk": "nl-NL",
+      "rtl": false
+    },
+    {
+      "tag": "or",
+      "windhawk": "or",
+      "rtl": false
+    },
+    {
+      "tag": "pl",
+      "windhawk": "pl-PL",
+      "rtl": false
+    },
+    {
+      "tag": "pt-BR",
+      "windhawk": "pt-BR",
+      "rtl": false
+    },
+    {
+      "tag": "pt-PT",
+      "windhawk": "pt-PT",
+      "rtl": false
+    },
+    {
+      "tag": "ro",
+      "windhawk": "ro",
+      "rtl": false
+    },
+    {
+      "tag": "ru",
+      "windhawk": "ru-RU",
+      "rtl": false
+    },
+    {
+      "tag": "sv",
+      "windhawk": "sv",
+      "rtl": false
+    },
+    {
+      "tag": "ta",
+      "windhawk": "ta",
+      "rtl": false
+    },
+    {
+      "tag": "th",
+      "windhawk": "th",
+      "rtl": false
+    },
+    {
+      "tag": "tr",
+      "windhawk": "tr-TR",
+      "rtl": false
+    },
+    {
+      "tag": "uk",
+      "windhawk": "uk-UA",
+      "rtl": false
+    },
+    {
+      "tag": "uz",
+      "windhawk": "uz",
+      "rtl": false
+    },
+    {
+      "tag": "vi",
+      "windhawk": "vi-VN",
+      "rtl": false
+    },
+    {
+      "tag": "zh-CN",
+      "windhawk": "zh-CN",
+      "rtl": false
+    },
+    {
+      "tag": "zh-TW",
+      "windhawk": "zh-TW",
+      "rtl": false
+    }
+  ],
+  "keys": [
+    {
+      "key": "Open",
+      "english": "Open"
+    },
+    {
+      "key": "Reset %s…",
+      "english": "Reset %s…"
+    },
+    {
+      "key": "Compressed (zipped) Folder",
+      "english": "Compressed (zipped) Folder"
+    },
+    {
+      "key": "Folder",
+      "english": "Folder"
+    },
+    {
+      "key": "Shortcut",
+      "english": "Shortcut"
+    },
+    {
+      "key": "About",
+      "english": "About"
+    },
+    {
+      "key": "Align icons to grid",
+      "english": "Align icons to grid"
+    },
+    {
+      "key": "Auto arrange icons",
+      "english": "Auto arrange icons"
+    },
+    {
+      "key": "Content",
+      "english": "Content"
+    },
+    {
+      "key": "Copy",
+      "english": "Copy"
+    },
+    {
+      "key": "Copy as path",
+      "english": "Copy as path"
+    },
+    {
+      "key": "Create shortcut",
+      "english": "Create shortcut"
+    },
+    {
+      "key": "Cut",
+      "english": "Cut"
+    },
+    {
+      "key": "Default (unset)",
+      "english": "Default (unset)"
+    },
+    {
+      "key": "Delete",
+      "english": "Delete"
+    },
+    {
+      "key": "Details",
+      "english": "Details"
+    },
+    {
+      "key": "Display settings",
+      "english": "Display settings"
+    },
+    {
+      "key": "Extra large icons",
+      "english": "Extra large icons"
+    },
+    {
+      "key": "Face",
+      "english": "Face"
+    },
+    {
+      "key": "Group by",
+      "english": "Group by"
+    },
+    {
+      "key": "Hex",
+      "english": "Hex"
+    },
+    {
+      "key": "Large icons",
+      "english": "Large icons"
+    },
+    {
+      "key": "List",
+      "english": "List"
+    },
+    {
+      "key": "Medium icons",
+      "english": "Medium icons"
+    },
+    {
+      "key": "Menu settings",
+      "english": "Menu settings"
+    },
+    {
+      "key": "Menu settings…",
+      "english": "Menu settings…"
+    },
+    {
+      "key": "New",
+      "english": "New"
+    },
+    {
+      "key": "Open Windhawk",
+      "english": "Open Windhawk"
+    },
+    {
+      "key": "Open in new process",
+      "english": "Open in new process"
+    },
+    {
+      "key": "Open in new window",
+      "english": "Open in new window"
+    },
+    {
+      "key": "Open menu.ini",
+      "english": "Open menu.ini"
+    },
+    {
+      "key": "Open theme file",
+      "english": "Open theme file"
+    },
+    {
+      "key": "Open with",
+      "english": "Open with"
+    },
+    {
+      "key": "Paste",
+      "english": "Paste"
+    },
+    {
+      "key": "Paste shortcut",
+      "english": "Paste shortcut"
+    },
+    {
+      "key": "Personalize",
+      "english": "Personalize"
+    },
+    {
+      "key": "Pin to Quick access",
+      "english": "Pin to Quick access"
+    },
+    {
+      "key": "Properties",
+      "english": "Properties"
+    },
+    {
+      "key": "Refresh",
+      "english": "Refresh"
+    },
+    {
+      "key": "Rename",
+      "english": "Rename"
+    },
+    {
+      "key": "Replay open animation",
+      "english": "Replay open animation"
+    },
+    {
+      "key": "Reset all appearance",
+      "english": "Reset all appearance"
+    },
+    {
+      "key": "Reset all appearance…",
+      "english": "Reset all appearance…"
+    },
+    {
+      "key": "Scale options…",
+      "english": "Scale options…"
+    },
+    {
+      "key": "Send to",
+      "english": "Send to"
+    },
+    {
+      "key": "Size",
+      "english": "Size"
+    },
+    {
+      "key": "Slide options…",
+      "english": "Slide options…"
+    },
+    {
+      "key": "Small icons",
+      "english": "Small icons"
+    },
+    {
+      "key": "Sort by",
+      "english": "Sort by"
+    },
+    {
+      "key": "Status",
+      "english": "Status"
+    },
+    {
+      "key": "Target",
+      "english": "Target"
+    },
+    {
+      "key": "Theme",
+      "english": "Theme"
+    },
+    {
+      "key": "Tiles",
+      "english": "Tiles"
+    },
+    {
+      "key": "Use cornerRadius (unset)",
+      "english": "Use cornerRadius (unset)"
+    },
+    {
+      "key": "View",
+      "english": "View"
+    },
+    {
+      "key": "Windhawk settings…",
+      "english": "Windhawk settings…"
+    },
+    {
+      "key": "Show classic menu",
+      "english": "Show classic menu"
+    },
+    {
+      "key": "More options",
+      "english": "More options"
+    },
+    {
+      "key": "Ascending",
+      "english": "Ascending"
+    },
+    {
+      "key": "Descending",
+      "english": "Descending"
+    },
+    {
+      "key": "(None)",
+      "english": "(None)"
+    },
+    {
+      "key": "Name",
+      "english": "Name"
+    },
+    {
+      "key": "Date modified",
+      "english": "Date modified"
+    },
+    {
+      "key": "Type",
+      "english": "Type"
+    },
+    {
+      "key": "Text Document",
+      "english": "Text Document"
+    },
+    {
+      "key": "Bitmap image",
+      "english": "Bitmap image"
+    },
+    {
+      "key": "Rich Text Document",
+      "english": "Rich Text Document"
+    },
+    {
+      "key": "on",
+      "english": "on"
+    },
+    {
+      "key": "off",
+      "english": "off"
+    },
+    {
+      "key": "custom",
+      "english": "custom"
+    },
+    {
+      "key": "default",
+      "english": "default"
+    },
+    {
+      "key": "Saved",
+      "english": "Saved"
+    },
+    {
+      "key": "Save failed",
+      "english": "Save failed"
+    },
+    {
+      "key": "Font not found",
+      "english": "Font not found"
+    },
+    {
+      "key": "Base appearance",
+      "english": "Base appearance"
+    },
+    {
+      "key": "Light appearance",
+      "english": "Light appearance"
+    },
+    {
+      "key": "Dark appearance",
+      "english": "Dark appearance"
+    },
+    {
+      "key": "deprecated — use animationOpen/Close",
+      "english": "deprecated — use animationOpen/Close"
+    },
+    {
+      "key": "Theme: %s — editing theme file",
+      "english": "Theme: %s — editing theme file"
+    },
+    {
+      "key": "schema %d",
+      "english": "schema %d"
+    },
+    {
+      "key": "Menu mode",
+      "english": "Menu mode"
+    },
+    {
+      "key": "Custom",
+      "english": "Custom"
+    },
+    {
+      "key": "Classic",
+      "english": "Classic"
+    },
+    {
+      "key": "Color",
+      "english": "Color"
+    },
+    {
+      "key": "Colors",
+      "english": "Colors"
+    },
+    {
+      "key": "Layout",
+      "english": "Layout"
+    },
+    {
+      "key": "Text",
+      "english": "Text"
+    },
+    {
+      "key": "Shadow",
+      "english": "Shadow"
+    },
+    {
+      "key": "Effects",
+      "english": "Effects"
+    },
+    {
+      "key": "Animation",
+      "english": "Animation"
+    }
+  ],
+  "translations": {
+    "fr": {
+      "Open": "Ouvrir",
+      "Reset %s…": "Réinitialiser %s…",
+      "New": "Nouveau",
+      "Display settings": "Paramètres d'affichage",
+      "Personalize": "Personnaliser",
+      "Paste": "Coller",
+      "Send to": "Envoyer vers",
+      "Menu settings": "Paramètres du menu",
+      "Menu settings…": "Paramètres du menu…",
+      "Status": "Statut",
+      "Saved": "Enregistré",
+      "Colors": "Couleurs",
+      "Custom": "Personnalisé",
+      "Menu mode": "Mode du menu",
+      "Folder": "Dossier",
+      "Shortcut": "Raccourci",
+      "Text Document": "Document texte",
+      "Compressed (zipped) Folder": "Dossier compressé (zippé)",
+      "Bitmap image": "Image bitmap",
+      "Rich Text Document": "Document en texte enrichi",
+      "Open with": "Ouvrir avec",
+      "Cut": "Couper",
+      "Copy": "Copier",
+      "Rename": "Renommer",
+      "Delete": "Supprimer",
+      "Create shortcut": "Créer un raccourci",
+      "Copy as path": "Copier le chemin d'accès",
+      "Properties": "Propriétés",
+      "Refresh": "Actualiser",
+      "Paste shortcut": "Coller le raccourci",
+      "View": "Affichage",
+      "Sort by": "Trier par",
+      "Group by": "Grouper par",
+      "Ascending": "Croissant",
+      "Descending": "Décroissant",
+      "(None)": "(Aucun)",
+      "Name": "Nom",
+      "Date modified": "Date de modification",
+      "Type": "Type",
+      "Size": "Taille",
+      "Open in new window": "Ouvrir dans une nouvelle fenêtre",
+      "Pin to Quick access": "Épingler à Accès rapide",
+      "More options": "Plus d'options",
+      "Show classic menu": "Afficher le menu classique",
+      "Extra large icons": "Très grandes icônes",
+      "Large icons": "Grandes icônes",
+      "Medium icons": "Icônes moyennes",
+      "Small icons": "Petites icônes",
+      "List": "Liste",
+      "Details": "Détails",
+      "Tiles": "Tuiles",
+      "Content": "Contenu",
+      "Auto arrange icons": "Réorganiser automatiquement les icônes",
+      "Align icons to grid": "Aligner les icônes sur la grille",
+      "About": "À propos",
+      "Face": "Police",
+      "Hex": "Hex",
+      "Default (unset)": "Par défaut (non défini)",
+      "Use cornerRadius (unset)": "Utiliser cornerRadius (non défini)",
+      "Replay open animation": "Rejouer l'animation d'ouverture",
+      "Reset all appearance": "Réinitialiser toute l'apparence",
+      "Reset all appearance…": "Réinitialiser toute l'apparence…",
+      "Slide options…": "Options de glissement…",
+      "Scale options…": "Options de mise à l'échelle…",
+      "Target": "Cible",
+      "Theme": "Thème",
+      "Windhawk settings…": "Paramètres Windhawk…",
+      "Open Windhawk": "Ouvrir Windhawk",
+      "Open menu.ini": "Ouvrir menu.ini",
+      "Open theme file": "Ouvrir le fichier de thème",
+      "Open in new process": "Ouvrir dans un nouveau processus",
+      "on": "activé",
+      "off": "désactivé",
+      "custom": "personnalisé",
+      "default": "par défaut",
+      "Base appearance": "Apparence de base",
+      "Light appearance": "Apparence claire",
+      "Dark appearance": "Apparence sombre",
+      "deprecated — use animationOpen/Close": "obsolète — utilisez animationOpen/Close",
+      "Theme: %s — editing theme file": "Thème : %s — modification du fichier de thème",
+      "schema %d": "schéma %d",
+      "Classic": "Classique",
+      "Color": "Couleur",
+      "Layout": "Disposition",
+      "Text": "Texte",
+      "Shadow": "Ombre",
+      "Effects": "Effets",
+      "Animation": "Animation"
+    },
+    "de": {
+      "Open": "Öffnen"
+    },
+    "ar": {
+      "Open": "فتح"
+    }
+  }
+}

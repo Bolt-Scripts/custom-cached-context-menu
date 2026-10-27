@@ -310,7 +310,13 @@ def _language_blob(
 
 
 def generate_localization_block(data: dict[str, Any]) -> str:
-    keys = data.get("keys", [])
+    # Metadata keys are used by the Windhawk settings block only; keeping
+    # them out of the runtime blobs saves a large amount of mod size.
+    keys = [
+        entry
+        for entry in data.get("keys", [])
+        if not str(entry.get("key", "")).startswith("@meta:")
+    ]
     languages = data.get("languages", [])
     lines = ["const LocalizationKey kLocalizationKeys[] = {"]
     for entry in keys:

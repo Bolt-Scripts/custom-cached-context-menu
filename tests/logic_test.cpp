@@ -380,6 +380,21 @@ static void TestLocalizationBatch3() {
     CHECK(cmo::FindLanguage(L"fa-IR")->rtl);
 }
 
+static void TestLocalizationBatch4() {
+    CHECK(cmo::TranslateForTesting(L"hi", L"New") == L"नया");
+    CHECK(cmo::TranslateForTesting(L"bn", L"New") == L"নতুন");
+    CHECK(cmo::TranslateForTesting(L"or", L"New") == L"ନୂତନ");
+    CHECK(cmo::TranslateForTesting(L"ta", L"New") == L"புதியது");
+    CHECK(cmo::TranslateForTesting(L"th", L"New") == L"ใหม่");
+    CHECK(cmo::TranslateForTesting(L"vi", L"New") == L"Mới");
+    CHECK(cmo::TranslateForTesting(L"id", L"New") == L"Baru");
+    CHECK(cmo::TranslateForTesting(L"ht", L"New") == L"Nouvo");
+    CHECK(cmo::TranslateForTesting(L"ja", L"New") == L"新規");
+    CHECK(cmo::TranslateForTesting(L"ko", L"New") == L"새로 만들기");
+    CHECK(cmo::TranslateForTesting(L"zh-CN", L"New") == L"新建");
+    CHECK(cmo::TranslateForTesting(L"zh-TW", L"New") == L"新增");
+}
+
 int main() {
     TestLocalizationCore();
     TestLocalizationMenu();
@@ -390,6 +405,7 @@ int main() {
     TestLocalizationBatch1();
     TestLocalizationBatch2();
     TestLocalizationBatch3();
+    TestLocalizationBatch4();
 
     // The Windhawk metadata blocks must stay balanced: an unclosed readme
     // block makes the app show "Mod details are missing".

@@ -13,4 +13,4 @@ x86_64-w64-mingw32-g++ -std=c++20 -static -static-libgcc -static-libstdc++ \
 echo "production compile OK"
 
 python3 -m unittest tests.test_localization
-python3 tools/gen_localization.py --allow-missing-translations --check
+python3 tools/gen_localization.py --check

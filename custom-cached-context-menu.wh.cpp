@@ -2,7 +2,7 @@
 // @id              custom-cached-context-menu
 // @name            Custom Cached Context Menu
 // @description     Instantly-opening cached Explorer context menu that is fully customizable: themes, layout, colors, animations, rules, and custom commands.
-// @version         1.1.1
+// @version         1.2.0
 // @include         explorer.exe
 // @architecture    x86-64
 // @compilerOptions -lole32 -lshlwapi -luuid -lcomctl32 -ladvapi32 -lgdi32 -luxtheme -lversion -ld3d11 -ld2d1 -ldwrite -ldcomp
@@ -123,6 +123,9 @@ and discovers extension items in the background, so repeated opens are instant.
   preview) and written back to the active theme file or `menu.ini`.
 - **No code needed** — `menu.ini` supports rules (`hide`/`keep`/`move`),
   custom commands, custom submenus, per-item overrides, and an icon library.
+- **36 languages** — the menu and the in-menu settings follow the Windows
+  display language, with an override in the settings. Shell-extension labels
+  stay in their own language.
 
 ## Settings
 
@@ -179,6 +182,19 @@ or use the in-menu settings browser.
   extension can crash it (the background pre-build loads every registered
   handler). If Explorer crashes when a menu opens, disable the offending
   extension, for example with ShellExView.
+
+## Languages
+
+Arabic, Azerbaijani, Bengali, Czech, Danish, German, Greek, English, Spanish,
+Persian, French, Hindi, Croatian, Haitian Creole, Hungarian, Indonesian,
+Italian, Japanese, Korean, Norwegian, Dutch, Odia, Polish, Portuguese
+(Brazil and Portugal), Romanian, Russian, Swedish, Tamil, Thai, Turkish,
+Ukrainian, Uzbek, Vietnamese, Chinese (Simplified and Traditional).
+
+The menu follows the Windows display language by default; the **Language**
+setting can override it. The mod's own strings are machine-translated and
+native corrections are welcome. Third-party shell-extension labels remain in
+the language their extension supplies.
 
 ## Feedback
 
@@ -3803,6 +3819,7 @@ struct Settings {
 
 void SelectLanguage(const std::wstring& setting);
 void ResetNewTemplates();
+void EnsureNewTemplates();
 
 // Settings are published as immutable snapshots: LoadSettings runs on the
 // engine thread while UI and warm-up threads read, and swapping a snapshot
@@ -10330,6 +10347,18 @@ std::wstring SettingsDisplayLabel(const std::wstring& key) {
     return out;
 }
 
+int EnumOptionIndex(const ControlSpec& control,
+                     const std::wstring& display) {
+    for (size_t i = 0; i < control.options.size(); ++i) {
+        const std::wstring localized =
+            OptionDisplayLabel(control.key.c_str(), control.options[i].c_str());
+        if (_wcsicmp(localized.c_str(), display.c_str()) == 0) {
+            return static_cast<int>(i);
+        }
+    }
+    return 0;
+}
+
 MenuItem BuildSettingsRow(const Appearance& working,
                           const ConfigSchemaEntry& entry) {
     const std::wstring key = ToLowerCopy(entry.key);
@@ -15711,14 +15740,7 @@ bool SettingsHandleKey(MenuSession& session, UINT key, wchar_t ch) {
             return true;
         }
         if (control.kind == ControlKind::Enum && !control.options.empty()) {
-            int index = 0;
-            for (size_t i = 0; i < control.options.size(); ++i) {
-                if (_wcsicmp(control.options[i].c_str(),
-                             item->controlText.c_str()) == 0) {
-                    index = static_cast<int>(i);
-                    break;
-                }
-            }
+            int index = EnumOptionIndex(control, item->controlText);
             const int count = static_cast<int>(control.options.size());
             index = (index + (key == VK_RIGHT ? 1 : count - 1)) % count;
             SettingsApplyControlChange(session, control.key,
@@ -25559,8 +25581,9 @@ void Wh_ModSettingsChanged() {
     cmo::LoadSettings();
     if (_wcsicmp(oldLanguage.c_str(), cmo::g_settings->language.c_str()) != 0) {
         // Synthetic New names are cached per language; rebuild them off the
-        // UI thread on the next invalidation pass.
+        // UI thread now so the next menu already has the new language.
         cmo::ResetNewTemplates();
+        cmo::EnsureNewTemplates();
     }
     cmo::g_hotkeyHost.SettingsChanged();
 

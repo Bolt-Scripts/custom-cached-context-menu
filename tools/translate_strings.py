@@ -143,7 +143,7 @@ def translate_batch(texts: list[str], tag: str) -> list[str] | None:
         if restored is None:
             return None
         if source in CONTEXT_KEYS:
-            restored = re.sub(r"\s*\([^()]*\)\s*$", "", restored).strip()
+            restored = re.sub(r"\s*[\(（][^()（）]*[\)）]\s*$", "", restored).strip()
         translated.append(restored)
     return translated
 
@@ -170,7 +170,7 @@ def translate_one(text: str, tag: str) -> str | None:
     if restored is None:
         return None
     if text in CONTEXT_KEYS:
-        restored = re.sub(r"\s*\([^()]*\)\s*$", "", restored).strip()
+        restored = re.sub(r"\s*[\(（][^()（）]*[\)）]\s*$", "", restored).strip()
     return restored
 
 

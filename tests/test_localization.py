@@ -1,5 +1,6 @@
 import json
 import pathlib
+import re
 import unittest
 
 from tools import gen_localization
@@ -99,6 +100,55 @@ class LocalizationSourceTests(unittest.TestCase):
         self.assertIn("theme", keys)
         self.assertIn("language", keys)
         self.assertIn("warmup", keys)
+
+    def test_schema_labels_and_options_are_in_catalog(self):
+        source = gen_localization.load_source(STRINGS_PATH)
+        keys = {entry["key"] for entry in source["keys"]}
+        mod_text = (REPO_ROOT / "custom-cached-context-menu.wh.cpp").read_text(
+            encoding="utf-8"
+        )
+        start = mod_text.index("const ConfigSchemaEntry kAppearanceSchema[] = {")
+        end = mod_text.index("};", start)
+        body = mod_text[start:end]
+
+        overrides_start = mod_text.index(
+            "static const LabelOverride kOverrides[] = {"
+        )
+        overrides_end = mod_text.index("};", overrides_start)
+        overrides = dict(
+            re.findall(
+                r'\{L"([^"]+)", L"([^"]+)"\}',
+                mod_text[overrides_start:overrides_end],
+            )
+        )
+
+        for match in re.finditer(
+            r'\{L"appearance", L"([^"]+)", L"([^"]+)", '
+            r"SettingType::(Enum|EffectList),[^}]*?, L\"([^\"]*)\",",
+            body,
+        ):
+            key, _group, setting_type, values = match.groups()
+            for value in values.split("|") if values else []:
+                if setting_type == "Enum":
+                    catalog_key = f"@option:{key}:{value}"
+                elif key == "overlay":
+                    catalog_key = f"@overlay:{value}"
+                else:
+                    catalog_key = f"@effect:{value}"
+                self.assertIn(catalog_key, keys)
+
+        for match in re.finditer(r'\{L"appearance", L"([^"]+)"', body):
+            key = match.group(1)
+            lower = key.lower()
+            if lower in overrides:
+                label = overrides[lower]
+            else:
+                label = "".join(
+                    (" " + char if index and char.isupper() else char)
+                    for index, char in enumerate(key)
+                )
+                label = label[0].upper() + label[1:]
+            self.assertIn(label, keys)
 
     def test_metadata_block_is_localized(self):
         source = gen_localization.load_source(STRINGS_PATH)

@@ -280,6 +280,13 @@ static void TestLocalizationSettings() {
     CHECK(cmo::DisplayEffectsText(cmo::kAnimFade | cmo::kAnimSlide, false) ==
           L"Fondu, Glissement");
 
+    cmo::ControlSpec enumSpec;
+    enumSpec.kind = cmo::ControlKind::Enum;
+    enumSpec.key = L"fontWeight";
+    enumSpec.options = {L"normal", L"semibold", L"bold"};
+    CHECK(cmo::EnumOptionIndex(enumSpec, L"Demi-gras") == 1);
+    CHECK(cmo::EnumOptionIndex(enumSpec, L"Gras") == 2);
+
     cmo::SelectLanguage(L"en");
 }
 

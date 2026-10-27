@@ -51,6 +51,9 @@ native menu. **Show classic menu** does the same from the menu itself.
   fields, an HSV color picker, font-face validation, and instant preview.
 - **No code needed** — `menu.ini` supports rules (`hide`/`keep`/`move`),
   custom commands, custom submenus, per-item overrides, and an icon library.
+- **36 languages** — the menu, the in-menu settings and the Windhawk settings
+  page follow the Windows display language, with an override in the settings.
+  Third-party shell-extension labels stay in their own language.
 
 ## Install
 
@@ -65,6 +68,7 @@ native menu. **Show classic menu** does the same from the menu itself.
 |---|---|---|
 | Theme | Custom (menu.ini) | Appearance source: `menu.ini`, or a theme file under `<mod storage>\themes\<name>.ini` created from the bundled preset on first use. |
 | Menu mode | Custom (recommended) | Custom draws the self-rendered menu and falls back to the classic menu after repeated failures; Classic always uses the owner-drawn menu. |
+| Language | Automatic | Menu and in-menu settings language. Automatic follows the Windows display language and falls back to English; the Windhawk settings page follows Windhawk's own language. |
 | Bypass keys | on | Hold Shift while right-clicking to bypass the mod and get the stock classic menu, or Ctrl for the untouched native menu. |
 | Instant menu open | on | Native fallback menus (classic mode, fallbacks) are shown without the system open animation, via `TPM_NOANIMATION`. |
 | Show classic menu item | on | Adds a "Show classic menu" entry at the bottom of the replacement menu. |
@@ -101,6 +105,21 @@ debounced and atomic, and the status row shows `Saved` or `Save failed`.
 Behavior settings (theme selection, menu mode, logging, delays, and so on) are
 Windhawk settings the mod cannot write; they appear in the menu as read-only
 hints.
+
+## Languages
+
+The menu, the in-menu settings editor and the Windhawk settings page are
+localized into 36 languages: Arabic, Azerbaijani, Bengali, Czech, Danish,
+German, Greek, English, Spanish, Persian, French, Hindi, Croatian, Haitian
+Creole, Hungarian, Indonesian, Italian, Japanese, Korean, Norwegian, Dutch,
+Odia, Polish, Portuguese (Brazil and Portugal), Romanian, Russian, Swedish,
+Tamil, Thai, Turkish, Ukrainian, Uzbek, Vietnamese, and Chinese (Simplified
+and Traditional).
+
+The menu follows the Windows display language by default; the **Language**
+setting can override it. The mod's own translations are machine-generated and
+native corrections are welcome. Third-party shell-extension labels remain in
+the language their extension supplies.
 
 ## Themes
 

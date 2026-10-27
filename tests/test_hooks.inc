@@ -142,6 +142,20 @@ void MirrorLayoutPanelForTesting(LayoutPanel& panel) {
     MirrorLayoutPanel(panel);
 }
 
+std::wstring TranslateForTesting(const wchar_t* tag, const wchar_t* key) {
+    const LocalizationLanguage* language = FindLanguage(tag);
+    if (!language) {
+        return key;
+    }
+    const std::shared_ptr<const TranslationTable> table =
+        BuildTranslationTable(*language);
+    const auto found = table->values.find(key);
+    if (found != table->values.end() && !found->second.empty()) {
+        return found->second;
+    }
+    return Tr(key, key);
+}
+
 MenuItem* FindItemByLabelInItem(MenuItem& item, const wchar_t* label) {
     if (_wcsicmp(item.label.c_str(), label) == 0) {
         return &item;

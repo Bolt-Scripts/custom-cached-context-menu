@@ -138,6 +138,10 @@ bool DeserializeCacheWithSystemLanguageForTesting(
     return Cache::DeserializeWithLanguageForTesting(data, systemTag);
 }
 
+void MirrorLayoutPanelForTesting(LayoutPanel& panel) {
+    MirrorLayoutPanel(panel);
+}
+
 MenuItem* FindItemByLabelInItem(MenuItem& item, const wchar_t* label) {
     if (_wcsicmp(item.label.c_str(), label) == 0) {
         return &item;

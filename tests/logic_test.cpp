@@ -317,12 +317,47 @@ static void TestLocalizationSettingsAndCache() {
     cmo::SelectLanguage(L"en");
 }
 
+static void TestLocalizationRtlLayout() {
+    cmo::SelectLanguage(L"ar");
+    CHECK(cmo::LeadingTextAlignment() == DWRITE_TEXT_ALIGNMENT_TRAILING);
+    CHECK(cmo::TrailingTextAlignment() == DWRITE_TEXT_ALIGNMENT_LEADING);
+
+    cmo::LayoutMetrics metrics;
+    std::vector<cmo::MenuItem> items;
+    items.push_back(cmo::MakeCommandForTesting(L"Open"));
+    items.push_back(cmo::MakeSubmenuForTesting(L"New"));
+    auto panel = cmo::BuildLayoutPanel(items, metrics);
+    const int width = panel.size.cx;
+    const RECT markerBefore = panel.items[0].markerRect;
+    const RECT iconBefore = panel.items[0].iconRect;
+    const RECT textBefore = panel.items[0].textRect;
+    cmo::MirrorLayoutPanelForTesting(panel);
+    CHECK(panel.items[0].markerRect.left == width - markerBefore.right);
+    CHECK(panel.items[0].iconRect.left == width - iconBefore.right);
+    CHECK(panel.items[0].textRect.left == width - textBefore.right);
+    CHECK(panel.items[0].textRect.right == width - textBefore.left);
+
+    POINT iconCenter = {
+        (panel.items[0].iconRect.left + panel.items[0].iconRect.right) / 2,
+        (panel.items[0].iconRect.top + panel.items[0].iconRect.bottom) / 2};
+    CHECK(cmo::PointInRect(panel.items[0].iconRect, iconCenter));
+
+    RECT parent = {300, 100, 500, 130};
+    RECT work = {0, 0, 800, 600};
+    POINT rtlPos = cmo::SubmenuPosition(parent, SIZE{120, 200}, work, 0, true);
+    CHECK(rtlPos.x == parent.left - 120);
+
+    cmo::SelectLanguage(L"en");
+    CHECK(cmo::LeadingTextAlignment() == DWRITE_TEXT_ALIGNMENT_LEADING);
+}
+
 int main() {
     TestLocalizationCore();
     TestLocalizationMenu();
     TestLocalizationDedup();
     TestLocalizationSettings();
     TestLocalizationSettingsAndCache();
+    TestLocalizationRtlLayout();
 
     // The Windhawk metadata blocks must stay balanced: an unclosed readme
     // block makes the app show "Mod details are missing".

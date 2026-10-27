@@ -1106,6 +1106,16 @@ bool IsRtlLanguage() {
     return table && table->rtl;
 }
 
+DWRITE_TEXT_ALIGNMENT LeadingTextAlignment() {
+    return IsRtlLanguage() ? DWRITE_TEXT_ALIGNMENT_TRAILING
+                           : DWRITE_TEXT_ALIGNMENT_LEADING;
+}
+
+DWRITE_TEXT_ALIGNMENT TrailingTextAlignment() {
+    return IsRtlLanguage() ? DWRITE_TEXT_ALIGNMENT_LEADING
+                           : DWRITE_TEXT_ALIGNMENT_TRAILING;
+}
+
 const wchar_t* CurrentLanguageTag() {
     static thread_local std::wstring tag;
     const std::shared_ptr<const TranslationTable> table = CurrentTranslation();
@@ -6401,8 +6411,11 @@ int SliderValueFromX(int x, int trackLeft, int trackWidth, int minValue,
     if (trackWidth <= 0 || maxValue <= minValue) {
         return minValue;
     }
-    const double fraction =
+    double fraction =
         static_cast<double>(x - trackLeft) / static_cast<double>(trackWidth);
+    if (IsRtlLanguage()) {
+        fraction = 1.0 - fraction;
+    }
     const double raw = minValue + fraction * (maxValue - minValue);
     long long value = 0;
     if (step > 0) {
@@ -6420,9 +6433,12 @@ int SliderXFromValue(int value, int trackLeft, int trackWidth, int minValue,
     if (maxValue <= minValue) {
         return trackLeft;
     }
-    const double fraction =
+    double fraction =
         static_cast<double>(value - minValue) /
         static_cast<double>(maxValue - minValue);
+    if (IsRtlLanguage()) {
+        fraction = 1.0 - fraction;
+    }
     return trackLeft + static_cast<int>(std::lround(fraction * trackWidth));
 }
 
@@ -7963,6 +7979,36 @@ LayoutPanel BuildLayoutPanel(const std::vector<MenuItem>& items,
     return panel;
 }
 
+void MirrorRectHorizontally(RECT& rect, int width) {
+    if (rect.right <= rect.left) {
+        return;
+    }
+    const int left = rect.left;
+    rect.left = width - rect.right;
+    rect.right = width - left;
+}
+
+void MirrorLayoutPanel(LayoutPanel& panel) {
+    const int width = static_cast<int>(panel.size.cx);
+    for (LayoutItem& item : panel.items) {
+        MirrorRectHorizontally(item.rect, width);
+        MirrorRectHorizontally(item.gutterRect, width);
+        MirrorRectHorizontally(item.markerRect, width);
+        MirrorRectHorizontally(item.iconRect, width);
+        MirrorRectHorizontally(item.textRect, width);
+        MirrorRectHorizontally(item.controlRect, width);
+        MirrorRectHorizontally(item.fieldRect, width);
+        MirrorRectHorizontally(item.trackRect, width);
+        MirrorRectHorizontally(item.thumbRect, width);
+        MirrorRectHorizontally(item.swatchRect, width);
+        MirrorRectHorizontally(item.areaRect, width);
+        MirrorRectHorizontally(item.stripRect, width);
+    }
+    for (LayoutPanel& child : panel.children) {
+        MirrorLayoutPanel(child);
+    }
+}
+
 // --- Control hit-testing and field editing ---------------------------------
 
 enum class ControlPart : uint8_t {
@@ -8167,9 +8213,14 @@ POINT ClampPanelPosition(POINT anchor, SIZE panelSize, const RECT& workArea) {
 }
 
 POINT SubmenuPosition(const RECT& parentItemScreenRect, SIZE childSize,
-                      const RECT& workArea, int overlapPx) {
-    int x = parentItemScreenRect.right - overlapPx;
-    if (x + childSize.cx > workArea.right) {
+                      const RECT& workArea, int overlapPx, bool rtl = false) {
+    int x = rtl ? parentItemScreenRect.left - childSize.cx + overlapPx
+                : parentItemScreenRect.right - overlapPx;
+    if (rtl) {
+        if (x < workArea.left) {
+            x = parentItemScreenRect.right - overlapPx;
+        }
+    } else if (x + childSize.cx > workArea.right) {
         x = parentItemScreenRect.left - childSize.cx;
     }
     const int left = static_cast<int>(workArea.left);
@@ -8208,6 +8259,7 @@ struct LayoutKey {
     uint32_t dpi = 96;
     bool darkTheme = false;
     bool topBarAtBottom = false;
+    bool rtl = false;
     uint64_t modelFingerprint = 0;
 
     bool operator==(const LayoutKey&) const = default;
@@ -8220,6 +8272,7 @@ struct LayoutKey {
         hash = HashCombine(hash, dpi);
         hash = HashCombine(hash, darkTheme ? 1 : 0);
         hash = HashCombine(hash, topBarAtBottom ? 1 : 0);
+        hash = HashCombine(hash, rtl ? 1 : 0);
         hash = HashCombine(hash, modelFingerprint);
         return hash;
     }
@@ -8235,6 +8288,7 @@ LayoutKey MakeLayoutKey(const ContextSignature& sig, const RulesConfig& config,
     key.themeRevision = themeRevision;
     key.dpi = dpi;
     key.darkTheme = darkTheme;
+    key.rtl = IsRtlLanguage();
     key.modelFingerprint = ModelFingerprint(model.items);
     return key;
 }
@@ -9472,7 +9526,8 @@ private:
             std::to_wstring(width) + L'\x1f' +
             std::to_wstring(static_cast<int>(metrics.acceleratorMode)) + L'\x1f' +
             std::to_wstring(static_cast<int>(metrics.fontWeight)) + L'\x1f' +
-            std::to_wstring(static_cast<int>(metrics.fontStyle));
+            std::to_wstring(static_cast<int>(metrics.fontStyle)) + L'\x1f' +
+            (IsRtlLanguage() ? L"rtl" : L"ltr");
         if (IDWriteTextLayout** cached = text_.Find(key)) {
             return *cached;
         }
@@ -9488,6 +9543,10 @@ private:
                 DWRITE_FONT_STRETCH_NORMAL, metrics.fontSize, L"", &format)) ||
             !format) {
             return nullptr;
+        }
+        format->SetTextAlignment(LeadingTextAlignment());
+        if (IsRtlLanguage()) {
+            format->SetReadingDirection(DWRITE_READING_DIRECTION_RIGHT_TO_LEFT);
         }
 
         const AcceleratorText accelerated = StripAccelerators(item.label);
@@ -9820,14 +9879,20 @@ void DrawSubmenuArrow(ID2D1DeviceContext* dc, const LayoutItem& item,
     if (FAILED(dc->CreateSolidColorBrush(ColorFromArgb(color), &brush)) || !brush) {
         return;
     }
-    const float right = static_cast<float>(panelWidth - ContentSideInset(metrics));
-    const float left = right - static_cast<float>(metrics.submenuArrowWidth) * 0.4f;
+    const bool rtl = IsRtlLanguage();
+    const float outer = rtl
+                            ? static_cast<float>(ContentSideInset(metrics))
+                            : static_cast<float>(panelWidth -
+                                                 ContentSideInset(metrics));
+    const float inner =
+        outer + (rtl ? 1.0f : -1.0f) *
+                    static_cast<float>(metrics.submenuArrowWidth) * 0.4f;
     const float midY = (static_cast<float>(item.rect.top) +
                         static_cast<float>(item.rect.bottom)) / 2.0f;
     const float half = static_cast<float>(metrics.submenuArrowWidth) * 0.22f;
-    dc->DrawLine(D2D1_POINT_2F{left, midY - half}, D2D1_POINT_2F{right, midY},
+    dc->DrawLine(D2D1_POINT_2F{inner, midY - half}, D2D1_POINT_2F{outer, midY},
                  brush, 1.5f);
-    dc->DrawLine(D2D1_POINT_2F{right, midY}, D2D1_POINT_2F{left, midY + half},
+    dc->DrawLine(D2D1_POINT_2F{outer, midY}, D2D1_POINT_2F{inner, midY + half},
                  brush, 1.5f);
     brush->Release();
 }
@@ -9890,6 +9955,9 @@ void DrawSettingsText(ID2D1DeviceContext* dc, const std::wstring& text,
         return;
     }
     format->SetTextAlignment(alignment);
+    if (IsRtlLanguage()) {
+        format->SetReadingDirection(DWRITE_READING_DIRECTION_RIGHT_TO_LEFT);
+    }
     format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
     IDWriteTextLayout* layout = nullptr;
     if (SUCCEEDED(dwrite->CreateTextLayout(
@@ -10009,17 +10077,20 @@ void DrawSettingsField(ID2D1DeviceContext* dc, const LayoutItem& item,
         text = std::to_wstring(state.dragValue);
     }
     DrawSettingsText(dc, text, item.fieldRect, metrics.textColor, metrics,
-                     DWRITE_TEXT_ALIGNMENT_TRAILING);
+                     TrailingTextAlignment());
     if (focused && state.caretVisible) {
         const std::wstring prefix =
             state.editBuffer.substr(0, std::min(state.caretPos,
                                                 state.editBuffer.size()));
         const float fullWidth = SettingsTextWidth(text, metrics);
         const float prefixWidth = SettingsTextWidth(prefix, metrics);
-        // The field text is right-aligned to the field's right edge, so the
-        // caret needs no extra inset; six pixels here was about one digit.
+        // LTR fields are right-aligned; RTL fields use the leading (left)
+        // edge, so the caret follows the text alignment.
         const float caretX =
-            static_cast<float>(item.fieldRect.right) - fullWidth + prefixWidth;
+            IsRtlLanguage()
+                ? static_cast<float>(item.fieldRect.left) + prefixWidth
+                : static_cast<float>(item.fieldRect.right) - fullWidth +
+                      prefixWidth;
         if (SUCCEEDED(dc->CreateSolidColorBrush(ColorFromArgb(metrics.textColor),
                                                 &brush)) &&
             brush) {
@@ -10079,7 +10150,7 @@ void DrawSettingsEnum(ID2D1DeviceContext* dc, const LayoutItem& item,
     // The row's submenu chevron is drawn by the shared submenu pass; only the
     // current value goes here.
     DrawSettingsText(dc, item.controlText, item.controlRect, metrics.textColor,
-                     metrics, DWRITE_TEXT_ALIGNMENT_TRAILING);
+                     metrics, TrailingTextAlignment());
 }
 
 void DrawSettingsSwatch(ID2D1DeviceContext* dc, const LayoutItem& item,
@@ -10234,7 +10305,7 @@ void DrawSettingsInfo(ID2D1DeviceContext* dc, const LayoutItem& item,
                       const LayoutMetrics& metrics) {
     DrawSettingsText(dc, item.controlText, item.controlRect,
                      metrics.disabledTextColor, metrics,
-                     DWRITE_TEXT_ALIGNMENT_TRAILING);
+                     TrailingTextAlignment());
 }
 
 // --- Menu overlays ---------------------------------------------------------
@@ -11383,6 +11454,9 @@ int MeasureTextWidthDirectWrite(const wchar_t* label, size_t length,
         !format) {
         return EstimateTextWidth(label, length, metrics);
     }
+    if (IsRtlLanguage()) {
+        format->SetReadingDirection(DWRITE_READING_DIRECTION_RIGHT_TO_LEFT);
+    }
     int width = EstimateTextWidth(label, length, metrics);
     IDWriteTextLayout* layout = nullptr;
     if (SUCCEEDED(dwrite->CreateTextLayout(label, static_cast<UINT32>(length),
@@ -12087,6 +12161,13 @@ bool SettingsHandleKey(MenuSession& session, UINT key, wchar_t ch) {
     }
     MenuInputState& state = session.states[session.active];
     const LayoutPanel& panel = *session.windows[session.active]->Panel();
+    if (IsRtlLanguage() && state.focusedControl.empty()) {
+        if (key == VK_LEFT) {
+            key = VK_RIGHT;
+        } else if (key == VK_RIGHT) {
+            key = VK_LEFT;
+        }
+    }
     if (!state.focusedControl.empty()) {
         const LayoutItem* item =
             SettingsFindItem(session, session.active, state.focusedControl);
@@ -12716,7 +12797,8 @@ void OpenSubmenu(MenuSession* session, int index, int itemIndex) {
                              topLeft.y + (item.rect.bottom - item.rect.top)};
     const RECT workArea = WorkAreaForPoint(topLeft);
     POINT childPos =
-        SubmenuPosition(itemScreen, childPanel.size, workArea, 4);
+        SubmenuPosition(itemScreen, childPanel.size, workArea, 4,
+                                   IsRtlLanguage());
     childPos.x -= session->margin;
     childPos.y -= session->margin;
     child->Move(childPos);
@@ -12954,6 +13036,13 @@ bool HandleMenuKey(MenuSession* session, UINT vk) {
     }
     const LayoutPanel& panel = *session->windows[level]->Panel();
     MenuInputState& state = session->states[level];
+    if (IsRtlLanguage()) {
+        if (vk == VK_LEFT) {
+            vk = VK_RIGHT;
+        } else if (vk == VK_RIGHT) {
+            vk = VK_LEFT;
+        }
+    }
 
     switch (vk) {
         case VK_ESCAPE:
@@ -13366,6 +13455,9 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
     if (!panel) {
         auto built = std::make_shared<LayoutPanel>(
             BuildLayoutPanel(model.items, metrics, &MeasureTextWidthDirectWrite));
+        if (key.rtl) {
+            MirrorLayoutPanel(*built);
+        }
         bool bound = false;
         ID2D1DeviceContext* bindDc = nullptr;
         if (SUCCEEDED(g_renderDevice.D2DDevice()->CreateDeviceContext(
@@ -13408,6 +13500,9 @@ CustomMenuResult ShowCustomMenu(const MenuModel& model, const LayoutKey& key,
                 auto built = std::make_shared<LayoutPanel>(BuildLayoutPanel(
                     model.items, metrics, &MeasureTextWidthDirectWrite,
                     altKey.topBarAtBottom));
+                if (altKey.rtl) {
+                    MirrorLayoutPanel(*built);
+                }
                 bool bound = false;
                 ID2D1DeviceContext* bindDc = nullptr;
                 if (SUCCEEDED(g_renderDevice.D2DDevice()->CreateDeviceContext(
@@ -13639,6 +13734,9 @@ void RelayoutSession(MenuSession& session) {
     }
     auto panel = std::make_shared<LayoutPanel>(BuildLayoutPanel(
         settings->model, session.metrics, &MeasureTextWidthDirectWrite));
+    if (IsRtlLanguage()) {
+        MirrorLayoutPanel(*panel);
+    }
     ID2D1DeviceContext* bindDc = nullptr;
     if (SUCCEEDED(g_renderDevice.D2DDevice()->CreateDeviceContext(
             D2D1_DEVICE_CONTEXT_OPTIONS_NONE, &bindDc)) &&
@@ -13701,7 +13799,8 @@ void RelayoutSession(MenuSession& session) {
             const RECT workArea =
                 WorkAreaForPoint(POINT{itemScreen.left, itemScreen.top});
             POINT childPos =
-                SubmenuPosition(itemScreen, levelPanel->size, workArea, 4);
+                SubmenuPosition(itemScreen, levelPanel->size, workArea, 4,
+                              IsRtlLanguage());
             childPos.x -= session.margin;
             childPos.y -= session.margin;
             pos = childPos;
@@ -13907,6 +14006,7 @@ void OpenSettingsMenu(HWND owner, POINT pt, bool activate = false) {
     LayoutKey key;
     key.dpi = owner ? DpiForWindow(owner) : 96;
     key.darkTheme = settings.darkSystemTheme;
+    key.rtl = IsRtlLanguage();
     settings.dpi = key.dpi;
     const CustomMenuResult result =
         ShowCustomMenu(model, key, owner, pt, &settings, activate);
@@ -14225,6 +14325,9 @@ void PrebuildLayoutsForWarmup(const std::vector<MenuModel>& models, uint32_t dpi
         auto panel =
             std::make_shared<LayoutPanel>(BuildLayoutPanel(
                 model.items, metrics, &MeasureTextWidthDirectWrite));
+        if (key.rtl) {
+            MirrorLayoutPanel(*panel);
+        }
         g_contentCaches->Bind(*panel, metrics, dc);
         g_layoutCache->Put(key, panel);
     }

@@ -87,6 +87,33 @@ class LocalizationSourceTests(unittest.TestCase):
         self.assertIn("Ouvrir\\037Couper", block)
         self.assertIn('{L"fr", false,', block)
 
+    def test_settings_parser_preserves_settings(self):
+        source = gen_localization.load_source(STRINGS_PATH)
+        mod_text = (REPO_ROOT / "custom-cached-context-menu.wh.cpp").read_text(
+            encoding="utf-8"
+        )
+        body, _, _ = gen_localization._settings_body(mod_text)
+        chunks = gen_localization.parse_settings_chunks(body)
+        self.assertGreaterEqual(len(chunks), 19)
+        keys = {gen_localization._setting_key(chunk["header"]) for chunk in chunks}
+        self.assertIn("theme", keys)
+        self.assertIn("language", keys)
+        self.assertIn("warmup", keys)
+
+    def test_metadata_block_is_localized(self):
+        source = gen_localization.load_source(STRINGS_PATH)
+        metadata = gen_localization.generate_windhawk_metadata_block(source)
+        self.assertIn("// @name:fr-FR", metadata)
+        self.assertIn("// @description:fr-FR", metadata)
+        mod_text = (REPO_ROOT / "custom-cached-context-menu.wh.cpp").read_text(
+            encoding="utf-8"
+        )
+        body, _, _ = gen_localization._settings_body(mod_text)
+        settings = gen_localization.generate_windhawk_settings_body(source, body)
+        self.assertIn("$name:fr-FR: Thème", settings)
+        self.assertIn("$options:fr-FR:", settings)
+        self.assertIn("Langue", settings)
+
     def test_proper_names_may_be_identity(self):
         data = {
             "languages": [

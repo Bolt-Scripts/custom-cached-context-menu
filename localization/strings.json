@@ -3,182 +3,218 @@
     {
       "tag": "ar",
       "windhawk": "ar",
-      "rtl": true
+      "rtl": true,
+      "native": "العربية"
     },
     {
       "tag": "az",
       "windhawk": "az",
-      "rtl": false
+      "rtl": false,
+      "native": "Azərbaycanca"
     },
     {
       "tag": "bn",
       "windhawk": "bn",
-      "rtl": false
+      "rtl": false,
+      "native": "বাংলা"
     },
     {
       "tag": "cs",
       "windhawk": "cs",
-      "rtl": false
+      "rtl": false,
+      "native": "Čeština"
     },
     {
       "tag": "da",
       "windhawk": "da",
-      "rtl": false
+      "rtl": false,
+      "native": "Dansk"
     },
     {
       "tag": "de",
       "windhawk": "de-DE",
-      "rtl": false
+      "rtl": false,
+      "native": "Deutsch"
     },
     {
       "tag": "el",
       "windhawk": "el",
-      "rtl": false
+      "rtl": false,
+      "native": "Ελληνικά"
     },
     {
       "tag": "en",
       "windhawk": "en",
-      "rtl": false
+      "rtl": false,
+      "native": "English"
     },
     {
       "tag": "es",
       "windhawk": "es-ES",
-      "rtl": false
+      "rtl": false,
+      "native": "Español"
     },
     {
       "tag": "fa",
       "windhawk": "fa",
-      "rtl": true
+      "rtl": true,
+      "native": "فارسی"
     },
     {
       "tag": "fr",
       "windhawk": "fr-FR",
-      "rtl": false
+      "rtl": false,
+      "native": "Français"
     },
     {
       "tag": "hi",
       "windhawk": "hi",
-      "rtl": false
+      "rtl": false,
+      "native": "हिन्दी"
     },
     {
       "tag": "hr",
       "windhawk": "hr",
-      "rtl": false
+      "rtl": false,
+      "native": "Hrvatski"
     },
     {
       "tag": "ht",
       "windhawk": "ht",
-      "rtl": false
+      "rtl": false,
+      "native": "Kreyòl ayisyen"
     },
     {
       "tag": "hu",
       "windhawk": "hu",
-      "rtl": false
+      "rtl": false,
+      "native": "Magyar"
     },
     {
       "tag": "id",
       "windhawk": "id-ID",
-      "rtl": false
+      "rtl": false,
+      "native": "Bahasa Indonesia"
     },
     {
       "tag": "it",
       "windhawk": "it-IT",
-      "rtl": false
+      "rtl": false,
+      "native": "Italiano"
     },
     {
       "tag": "ja",
       "windhawk": "ja-JP",
-      "rtl": false
+      "rtl": false,
+      "native": "日本語"
     },
     {
       "tag": "ko",
       "windhawk": "ko-KR",
-      "rtl": false
+      "rtl": false,
+      "native": "한국어"
     },
     {
       "tag": "nb",
       "windhawk": "nb",
-      "rtl": false
+      "rtl": false,
+      "native": "Norsk bokmål"
     },
     {
       "tag": "nl",
       "windhawk": "nl-NL",
-      "rtl": false
+      "rtl": false,
+      "native": "Nederlands"
     },
     {
       "tag": "or",
       "windhawk": "or",
-      "rtl": false
+      "rtl": false,
+      "native": "ଓଡ଼ିଆ"
     },
     {
       "tag": "pl",
       "windhawk": "pl-PL",
-      "rtl": false
+      "rtl": false,
+      "native": "Polski"
     },
     {
       "tag": "pt-BR",
       "windhawk": "pt-BR",
-      "rtl": false
+      "rtl": false,
+      "native": "Português (Brasil)"
     },
     {
       "tag": "pt-PT",
       "windhawk": "pt-PT",
-      "rtl": false
+      "rtl": false,
+      "native": "Português (Portugal)"
     },
     {
       "tag": "ro",
       "windhawk": "ro",
-      "rtl": false
+      "rtl": false,
+      "native": "Română"
     },
     {
       "tag": "ru",
       "windhawk": "ru-RU",
-      "rtl": false
+      "rtl": false,
+      "native": "Русский"
     },
     {
       "tag": "sv",
       "windhawk": "sv",
-      "rtl": false
+      "rtl": false,
+      "native": "Svenska"
     },
     {
       "tag": "ta",
       "windhawk": "ta",
-      "rtl": false
+      "rtl": false,
+      "native": "தமிழ்"
     },
     {
       "tag": "th",
       "windhawk": "th",
-      "rtl": false
+      "rtl": false,
+      "native": "ไทย"
     },
     {
       "tag": "tr",
       "windhawk": "tr-TR",
-      "rtl": false
+      "rtl": false,
+      "native": "Türkçe"
     },
     {
       "tag": "uk",
       "windhawk": "uk-UA",
-      "rtl": false
+      "rtl": false,
+      "native": "Українська"
     },
     {
       "tag": "uz",
       "windhawk": "uz",
-      "rtl": false
+      "rtl": false,
+      "native": "Oʻzbekcha"
     },
     {
       "tag": "vi",
       "windhawk": "vi-VN",
-      "rtl": false
+      "rtl": false,
+      "native": "Tiếng Việt"
     },
     {
       "tag": "zh-CN",
       "windhawk": "zh-CN",
-      "rtl": false
+      "rtl": false,
+      "native": "简体中文"
     },
     {
       "tag": "zh-TW",
       "windhawk": "zh-TW",
-      "rtl": false
+      "rtl": false,
+      "native": "繁體中文"
     }
   ],
   "keys": [
@@ -985,6 +1021,442 @@
     {
       "key": "@theme:High Contrast",
       "english": "@theme:High Contrast"
+    },
+    {
+      "key": "@meta:name",
+      "english": "Custom Cached Context Menu"
+    },
+    {
+      "key": "@meta:description",
+      "english": "Instantly-opening cached Explorer context menu that is fully customizable: themes, layout, colors, animations, rules, and custom commands."
+    },
+    {
+      "key": "@meta:setting.theme.name",
+      "english": "Theme"
+    },
+    {
+      "key": "@meta:setting.theme.description",
+      "english": "Loads the appearance from <storage>\\themes\\<name>.ini (created from the bundled preset on first use). menu.ini is never modified."
+    },
+    {
+      "key": "@meta:option.theme.Custom (menu.ini)",
+      "english": "Custom (menu.ini)"
+    },
+    {
+      "key": "@meta:option.theme.Windows 11 Dark",
+      "english": "Windows 11 Dark"
+    },
+    {
+      "key": "@meta:option.theme.Windows 11 Light",
+      "english": "Windows 11 Light"
+    },
+    {
+      "key": "@meta:option.theme.Windows 10 Dark",
+      "english": "Windows 10 Dark"
+    },
+    {
+      "key": "@meta:option.theme.Windows 10 Light",
+      "english": "Windows 10 Light"
+    },
+    {
+      "key": "@meta:option.theme.Nord",
+      "english": "Nord",
+      "identity": true
+    },
+    {
+      "key": "@meta:option.theme.Dracula",
+      "english": "Dracula",
+      "identity": true
+    },
+    {
+      "key": "@meta:option.theme.Solarized Dark",
+      "english": "Solarized Dark",
+      "identity": true
+    },
+    {
+      "key": "@meta:option.theme.Gruvbox Dark",
+      "english": "Gruvbox Dark",
+      "identity": true
+    },
+    {
+      "key": "@meta:option.theme.One Dark",
+      "english": "One Dark",
+      "identity": true
+    },
+    {
+      "key": "@meta:option.theme.Cyberpunk",
+      "english": "Cyberpunk",
+      "identity": true
+    },
+    {
+      "key": "@meta:option.theme.Synthwave",
+      "english": "Synthwave",
+      "identity": true
+    },
+    {
+      "key": "@meta:option.theme.Terminal Green",
+      "english": "Terminal Green",
+      "identity": true
+    },
+    {
+      "key": "@meta:option.theme.Amber CRT",
+      "english": "Amber CRT",
+      "identity": true
+    },
+    {
+      "key": "@meta:option.theme.Tokyo Night",
+      "english": "Tokyo Night",
+      "identity": true
+    },
+    {
+      "key": "@meta:option.theme.AMOLED Black",
+      "english": "AMOLED Black",
+      "identity": true
+    },
+    {
+      "key": "@meta:option.theme.High Contrast",
+      "english": "High Contrast"
+    },
+    {
+      "key": "@meta:setting.menuMode.name",
+      "english": "Menu mode"
+    },
+    {
+      "key": "@meta:setting.menuMode.description",
+      "english": "Custom draws the self-rendered menu and falls back to the classic menu after repeated failures. Classic always uses the owner-drawn menu."
+    },
+    {
+      "key": "@meta:option.menuMode.custom",
+      "english": "Custom (recommended)"
+    },
+    {
+      "key": "@meta:option.menuMode.classic",
+      "english": "Classic owner-drawn"
+    },
+    {
+      "key": "@meta:setting.language.name",
+      "english": "Language"
+    },
+    {
+      "key": "@meta:setting.language.description",
+      "english": "Language for the menu and the in-menu settings. Automatic follows the Windows display language and falls back to English when it is not one of the supported languages; this page itself follows Windhawk's language setting."
+    },
+    {
+      "key": "@meta:option.language.auto",
+      "english": "Automatic (match Windows)",
+      "identity": true
+    },
+    {
+      "key": "@meta:option.language.ar",
+      "english": "العربية",
+      "identity": true
+    },
+    {
+      "key": "@meta:option.language.az",
+      "english": "Azərbaycanca",
+      "identity": true
+    },
+    {
+      "key": "@meta:option.language.bn",
+      "english": "বাংলা",
+      "identity": true
+    },
+    {
+      "key": "@meta:option.language.cs",
+      "english": "Čeština",
+      "identity": true
+    },
+    {
+      "key": "@meta:option.language.da",
+      "english": "Dansk",
+      "identity": true
+    },
+    {
+      "key": "@meta:option.language.de",
+      "english": "Deutsch",
+      "identity": true
+    },
+    {
+      "key": "@meta:option.language.el",
+      "english": "Ελληνικά",
+      "identity": true
+    },
+    {
+      "key": "@meta:option.language.en",
+      "english": "English",
+      "identity": true
+    },
+    {
+      "key": "@meta:option.language.es",
+      "english": "Español",
+      "identity": true
+    },
+    {
+      "key": "@meta:option.language.fa",
+      "english": "فارسی",
+      "identity": true
+    },
+    {
+      "key": "@meta:option.language.fr",
+      "english": "Français",
+      "identity": true
+    },
+    {
+      "key": "@meta:option.language.hi",
+      "english": "हिन्दी",
+      "identity": true
+    },
+    {
+      "key": "@meta:option.language.hr",
+      "english": "Hrvatski",
+      "identity": true
+    },
+    {
+      "key": "@meta:option.language.ht",
+      "english": "Kreyòl ayisyen",
+      "identity": true
+    },
+    {
+      "key": "@meta:option.language.hu",
+      "english": "Magyar",
+      "identity": true
+    },
+    {
+      "key": "@meta:option.language.id",
+      "english": "Bahasa Indonesia",
+      "identity": true
+    },
+    {
+      "key": "@meta:option.language.it",
+      "english": "Italiano",
+      "identity": true
+    },
+    {
+      "key": "@meta:option.language.ja",
+      "english": "日本語",
+      "identity": true
+    },
+    {
+      "key": "@meta:option.language.ko",
+      "english": "한국어",
+      "identity": true
+    },
+    {
+      "key": "@meta:option.language.nb",
+      "english": "Norsk bokmål",
+      "identity": true
+    },
+    {
+      "key": "@meta:option.language.nl",
+      "english": "Nederlands",
+      "identity": true
+    },
+    {
+      "key": "@meta:option.language.or",
+      "english": "ଓଡ଼ିଆ",
+      "identity": true
+    },
+    {
+      "key": "@meta:option.language.pl",
+      "english": "Polski",
+      "identity": true
+    },
+    {
+      "key": "@meta:option.language.pt-BR",
+      "english": "Português (Brasil)",
+      "identity": true
+    },
+    {
+      "key": "@meta:option.language.pt-PT",
+      "english": "Português (Portugal)",
+      "identity": true
+    },
+    {
+      "key": "@meta:option.language.ro",
+      "english": "Română",
+      "identity": true
+    },
+    {
+      "key": "@meta:option.language.ru",
+      "english": "Русский",
+      "identity": true
+    },
+    {
+      "key": "@meta:option.language.sv",
+      "english": "Svenska",
+      "identity": true
+    },
+    {
+      "key": "@meta:option.language.ta",
+      "english": "தமிழ்",
+      "identity": true
+    },
+    {
+      "key": "@meta:option.language.th",
+      "english": "ไทย",
+      "identity": true
+    },
+    {
+      "key": "@meta:option.language.tr",
+      "english": "Türkçe",
+      "identity": true
+    },
+    {
+      "key": "@meta:option.language.uk",
+      "english": "Українська",
+      "identity": true
+    },
+    {
+      "key": "@meta:option.language.uz",
+      "english": "Oʻzbekcha",
+      "identity": true
+    },
+    {
+      "key": "@meta:option.language.vi",
+      "english": "Tiếng Việt",
+      "identity": true
+    },
+    {
+      "key": "@meta:option.language.zh-CN",
+      "english": "简体中文",
+      "identity": true
+    },
+    {
+      "key": "@meta:option.language.zh-TW",
+      "english": "繁體中文",
+      "identity": true
+    },
+    {
+      "key": "@meta:setting.enableShiftBypass.name",
+      "english": "Bypass keys"
+    },
+    {
+      "key": "@meta:setting.enableShiftBypass.description",
+      "english": "Hold Shift while right-clicking to bypass the mod and get the stock classic menu, or Ctrl for the untouched native menu."
+    },
+    {
+      "key": "@meta:setting.instantMenuFade.name",
+      "english": "Instant menu open"
+    },
+    {
+      "key": "@meta:setting.instantMenuFade.description",
+      "english": "Shows native fallback menus (classic mode, fallbacks) without the system open animation, via TPM_NOANIMATION."
+    },
+    {
+      "key": "@meta:setting.showMoreOptionsItem.name",
+      "english": "Show classic menu item"
+    },
+    {
+      "key": "@meta:setting.showMoreOptionsItem.description",
+      "english": "Add a \"Show classic menu\" entry at the bottom of the replacement menu."
+    },
+    {
+      "key": "@meta:setting.topBar.name",
+      "english": "Top action bar"
+    },
+    {
+      "key": "@meta:setting.topBar.description",
+      "english": "Moves Cut, Copy, Paste, Rename and Delete into an icon bar on the side of the menu nearest the cursor, like the Windows 11 menu. Custom menu mode only."
+    },
+    {
+      "key": "@meta:setting.submenuDelayMs.name",
+      "english": "Submenu open delay"
+    },
+    {
+      "key": "@meta:setting.submenuDelayMs.description",
+      "english": "Milliseconds before a hovered submenu opens while the replacement menu is shown. 0 opens instantly; -1 keeps the Windows setting."
+    },
+    {
+      "key": "@meta:setting.advancedSubmenuWindows.name",
+      "english": "Move Windows extras"
+    },
+    {
+      "key": "@meta:setting.advancedSubmenuWindows.description",
+      "english": "Move the configured Windows extras into the More options submenu."
+    },
+    {
+      "key": "@meta:setting.advancedSubmenuThirdParty.name",
+      "english": "Move third-party handlers"
+    },
+    {
+      "key": "@meta:setting.advancedSubmenuThirdParty.description",
+      "english": "Move third-party shell extension entries into the More options submenu."
+    },
+    {
+      "key": "@meta:setting.advancedSubmenuItems.name",
+      "english": "Windows items to move"
+    },
+    {
+      "key": "@meta:setting.advancedSubmenuItems.description",
+      "english": "Comma-separated labels or verbs of Windows items to move into the submenu. Verbs (for example setdesktopwallpaper) match on every language; labels match the menu's display language. GUID-verb commands also accept the aliases openterminal, editwithphotos, editwithpaint and editwithnotepad."
+    },
+    {
+      "key": "@meta:setting.advancedSubmenuExclude.name",
+      "english": "Keep in the main menu"
+    },
+    {
+      "key": "@meta:setting.advancedSubmenuExclude.description",
+      "english": "Comma-separated third-party labels or verbs that stay in the main menu instead of moving into the submenu."
+    },
+    {
+      "key": "@meta:setting.advancedSubmenuLabel.name",
+      "english": "More options submenu label"
+    },
+    {
+      "key": "@meta:setting.advancedSubmenuLabel.description",
+      "english": "Label of the submenu that collects extra items."
+    },
+    {
+      "key": "@meta:setting.settingsHotkey.name",
+      "english": "Settings hotkey"
+    },
+    {
+      "key": "@meta:setting.settingsHotkey.description",
+      "english": "Optional global hotkey that opens the appearance settings menu (for example Ctrl+Alt+M). Empty disables it."
+    },
+    {
+      "key": "@meta:setting.debugLogging.name",
+      "english": "Debug logging"
+    },
+    {
+      "key": "@meta:setting.debugLogging.description",
+      "english": "Log timing and diagnostics for troubleshooting."
+    },
+    {
+      "key": "@meta:setting.clearCache.name",
+      "english": "Clear cache"
+    },
+    {
+      "key": "@meta:setting.clearCache.description",
+      "english": "Turn on to delete the cached menu models; they rebuild on next use."
+    },
+    {
+      "key": "@meta:setting.warmup.name",
+      "english": "Background pre-build"
+    },
+    {
+      "key": "@meta:setting.warmup.description",
+      "english": "Warms common menus shortly after Explorer starts so their first open is instant. Turning it off skips loading every registered context-menu handler at startup (the stock menu's exposure), which avoids startup crashes from faulty third-party extensions; the first open of each context then builds on demand, like the stock menu. A handler that would crash the stock menu still crashes."
+    },
+    {
+      "key": "@meta:setting.warmupExtensions.name",
+      "english": "Warm-up extensions"
+    },
+    {
+      "key": "@meta:setting.warmupExtensions.description",
+      "english": "Comma-separated file types whose menus are pre-built at Explorer startup."
+    },
+    {
+      "key": "@meta:setting.warmupDelaySeconds.name",
+      "english": "Warm-up delay"
+    },
+    {
+      "key": "@meta:setting.warmupDelaySeconds.description",
+      "english": "Seconds to wait after Explorer starts before warming the cache."
+    },
+    {
+      "key": "@meta:language.auto",
+      "english": "Automatic (match Windows)"
     }
   ],
   "translations": {
@@ -1189,7 +1661,48 @@
       "@theme:Windows 11 Light": "Windows 11 clair",
       "@theme:Windows 10 Dark": "Windows 10 sombre",
       "@theme:Windows 10 Light": "Windows 10 clair",
-      "@theme:High Contrast": "Contraste élevé"
+      "@theme:High Contrast": "Contraste élevé",
+      "@meta:name": "Menu contextuel mis en cache",
+      "@meta:description": "Menu contextuel de l'Explorateur mis en cache et personnalisable : thèmes, disposition, couleurs, animations, règles et commandes personnalisées.",
+      "@meta:setting.theme.name": "Thème",
+      "@meta:option.theme.Custom (menu.ini)": "Personnalisé (menu.ini)",
+      "@meta:option.theme.Windows 11 Dark": "Windows 11 sombre",
+      "@meta:option.theme.Windows 11 Light": "Windows 11 clair",
+      "@meta:option.theme.Windows 10 Dark": "Windows 10 sombre",
+      "@meta:option.theme.Windows 10 Light": "Windows 10 clair",
+      "@meta:option.theme.Nord": "Nord",
+      "@meta:option.theme.Dracula": "Dracula",
+      "@meta:option.theme.Solarized Dark": "Solarized Dark",
+      "@meta:option.theme.Gruvbox Dark": "Gruvbox Dark",
+      "@meta:option.theme.One Dark": "One Dark",
+      "@meta:option.theme.Cyberpunk": "Cyberpunk",
+      "@meta:option.theme.Synthwave": "Synthwave",
+      "@meta:option.theme.Terminal Green": "Terminal Green",
+      "@meta:option.theme.Amber CRT": "Amber CRT",
+      "@meta:option.theme.Tokyo Night": "Tokyo Night",
+      "@meta:option.theme.AMOLED Black": "AMOLED Black",
+      "@meta:option.theme.High Contrast": "Contraste élevé",
+      "@meta:setting.menuMode.name": "Mode du menu",
+      "@meta:option.menuMode.custom": "Personnalisé (recommandé)",
+      "@meta:option.menuMode.classic": "Classique (dessiné par le système)",
+      "@meta:setting.language.name": "Langue",
+      "@meta:language.auto": "Automatique (selon Windows)",
+      "@meta:setting.enableShiftBypass.name": "Touches de contournement",
+      "@meta:setting.instantMenuFade.name": "Ouverture instantanée du menu",
+      "@meta:setting.showMoreOptionsItem.name": "Afficher l'élément du menu classique",
+      "@meta:setting.topBar.name": "Barre d'actions supérieure",
+      "@meta:setting.submenuDelayMs.name": "Délai des sous-menus",
+      "@meta:setting.advancedSubmenuWindows.name": "Déplacer les extras Windows",
+      "@meta:setting.advancedSubmenuThirdParty.name": "Déplacer les extensions tierces",
+      "@meta:setting.advancedSubmenuItems.name": "Éléments Windows à déplacer",
+      "@meta:setting.advancedSubmenuExclude.name": "Conserver dans le menu principal",
+      "@meta:setting.advancedSubmenuLabel.name": "Libellé du sous-menu Plus d'options",
+      "@meta:setting.settingsHotkey.name": "Raccourci des paramètres",
+      "@meta:setting.debugLogging.name": "Journalisation de débogage",
+      "@meta:setting.clearCache.name": "Vider le cache",
+      "@meta:setting.warmup.name": "Préconstruction en arrière-plan",
+      "@meta:setting.warmupExtensions.name": "Extensions à préchauffer",
+      "@meta:setting.warmupDelaySeconds.name": "Délai de préchauffage"
     },
     "de": {
       "Open": "Öffnen"

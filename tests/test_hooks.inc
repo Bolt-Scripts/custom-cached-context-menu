@@ -110,6 +110,11 @@ MenuModel BuildCoreMenuForTesting(Scope scope,
     return BuildCoreModel(scope, paths, shape);
 }
 
+std::vector<MenuItem> BuildSettingsTreeForTesting(
+    const SettingsModelInputs& inputs) {
+    return BuildSettingsTree(inputs);
+}
+
 MenuItem MakeCommandForTesting(const wchar_t* label) {
     MenuItem item{};
     item.id = 9000;

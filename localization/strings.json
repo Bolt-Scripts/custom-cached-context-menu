@@ -541,6 +541,398 @@
     {
       "key": "Animation",
       "english": "Animation"
+    },
+    {
+      "key": "Background",
+      "english": "Background"
+    },
+    {
+      "key": "Border",
+      "english": "Border"
+    },
+    {
+      "key": "Separator",
+      "english": "Separator"
+    },
+    {
+      "key": "Hover background",
+      "english": "Hover background"
+    },
+    {
+      "key": "Pressed background",
+      "english": "Pressed background"
+    },
+    {
+      "key": "Text color",
+      "english": "Text color"
+    },
+    {
+      "key": "Disabled text color",
+      "english": "Disabled text color"
+    },
+    {
+      "key": "Submenu arrow",
+      "english": "Submenu arrow"
+    },
+    {
+      "key": "Header color",
+      "english": "Header color"
+    },
+    {
+      "key": "Corner radius",
+      "english": "Corner radius"
+    },
+    {
+      "key": "Corner radii",
+      "english": "Corner radii"
+    },
+    {
+      "key": "Border width",
+      "english": "Border width"
+    },
+    {
+      "key": "Padding",
+      "english": "Padding"
+    },
+    {
+      "key": "Item padding",
+      "english": "Item padding"
+    },
+    {
+      "key": "Vertical padding",
+      "english": "Vertical padding"
+    },
+    {
+      "key": "Item height",
+      "english": "Item height"
+    },
+    {
+      "key": "Icon size",
+      "english": "Icon size"
+    },
+    {
+      "key": "Minimum width",
+      "english": "Minimum width"
+    },
+    {
+      "key": "Maximum width",
+      "english": "Maximum width"
+    },
+    {
+      "key": "Separator spacing",
+      "english": "Separator spacing"
+    },
+    {
+      "key": "Marker",
+      "english": "Marker"
+    },
+    {
+      "key": "Marker width",
+      "english": "Marker width"
+    },
+    {
+      "key": "Marker color",
+      "english": "Marker color"
+    },
+    {
+      "key": "Font",
+      "english": "Font"
+    },
+    {
+      "key": "Font weight",
+      "english": "Font weight"
+    },
+    {
+      "key": "Font style",
+      "english": "Font style"
+    },
+    {
+      "key": "Accelerator display",
+      "english": "Accelerator display"
+    },
+    {
+      "key": "Shadow size",
+      "english": "Shadow size"
+    },
+    {
+      "key": "Shadow offset X",
+      "english": "Shadow offset X"
+    },
+    {
+      "key": "Shadow offset Y",
+      "english": "Shadow offset Y"
+    },
+    {
+      "key": "Shadow opacity",
+      "english": "Shadow opacity"
+    },
+    {
+      "key": "Adapt shadow to backdrop",
+      "english": "Adapt shadow to backdrop"
+    },
+    {
+      "key": "Shadow color",
+      "english": "Shadow color"
+    },
+    {
+      "key": "Shadow blur",
+      "english": "Shadow blur"
+    },
+    {
+      "key": "Blur",
+      "english": "Blur"
+    },
+    {
+      "key": "Blur strength",
+      "english": "Blur strength"
+    },
+    {
+      "key": "Overlay effects",
+      "english": "Overlay effects"
+    },
+    {
+      "key": "Overlay intensity",
+      "english": "Overlay intensity"
+    },
+    {
+      "key": "Overlay speed",
+      "english": "Overlay speed"
+    },
+    {
+      "key": "Overlay size",
+      "english": "Overlay size"
+    },
+    {
+      "key": "Overlay frame interval",
+      "english": "Overlay frame interval"
+    },
+    {
+      "key": "Animate overlays while open",
+      "english": "Animate overlays while open"
+    },
+    {
+      "key": "Open animation",
+      "english": "Open animation"
+    },
+    {
+      "key": "Close animation",
+      "english": "Close animation"
+    },
+    {
+      "key": "Open duration",
+      "english": "Open duration"
+    },
+    {
+      "key": "Close duration",
+      "english": "Close duration"
+    },
+    {
+      "key": "Animation frame interval",
+      "english": "Animation frame interval"
+    },
+    {
+      "key": "Animation easing",
+      "english": "Animation easing"
+    },
+    {
+      "key": "Animation anchor",
+      "english": "Animation anchor"
+    },
+    {
+      "key": "Animate submenus",
+      "english": "Animate submenus"
+    },
+    {
+      "key": "Slide offset X",
+      "english": "Slide offset X"
+    },
+    {
+      "key": "Slide offset Y",
+      "english": "Slide offset Y"
+    },
+    {
+      "key": "Scale from",
+      "english": "Scale from"
+    },
+    {
+      "key": "Saturation / value",
+      "english": "Saturation / value"
+    },
+    {
+      "key": "Hue",
+      "english": "Hue"
+    },
+    {
+      "key": "Alpha",
+      "english": "Alpha"
+    },
+    {
+      "key": "Red",
+      "english": "Red"
+    },
+    {
+      "key": "Green",
+      "english": "Green"
+    },
+    {
+      "key": "Blue",
+      "english": "Blue"
+    },
+    {
+      "key": "Alpha value",
+      "english": "Alpha value"
+    },
+    {
+      "key": "Top left",
+      "english": "Top left"
+    },
+    {
+      "key": "Top right",
+      "english": "Top right"
+    },
+    {
+      "key": "Bottom right",
+      "english": "Bottom right"
+    },
+    {
+      "key": "Bottom left",
+      "english": "Bottom left"
+    },
+    {
+      "key": "@option:fontWeight:normal",
+      "english": "@option:fontWeight:normal"
+    },
+    {
+      "key": "@option:fontWeight:semibold",
+      "english": "@option:fontWeight:semibold"
+    },
+    {
+      "key": "@option:fontWeight:bold",
+      "english": "@option:fontWeight:bold"
+    },
+    {
+      "key": "@option:fontStyle:normal",
+      "english": "@option:fontStyle:normal"
+    },
+    {
+      "key": "@option:fontStyle:italic",
+      "english": "@option:fontStyle:italic"
+    },
+    {
+      "key": "@option:marker:dot",
+      "english": "@option:marker:dot"
+    },
+    {
+      "key": "@option:marker:check",
+      "english": "@option:marker:check"
+    },
+    {
+      "key": "@option:marker:bar",
+      "english": "@option:marker:bar"
+    },
+    {
+      "key": "@option:marker:none",
+      "english": "@option:marker:none"
+    },
+    {
+      "key": "@option:showAccelerators:underline",
+      "english": "@option:showAccelerators:underline"
+    },
+    {
+      "key": "@option:showAccelerators:strip",
+      "english": "@option:showAccelerators:strip"
+    },
+    {
+      "key": "@option:showAccelerators:raw",
+      "english": "@option:showAccelerators:raw"
+    },
+    {
+      "key": "@option:animationEasing:linear",
+      "english": "@option:animationEasing:linear"
+    },
+    {
+      "key": "@option:animationEasing:easeOut",
+      "english": "@option:animationEasing:easeOut"
+    },
+    {
+      "key": "@option:animationEasing:easeInOut",
+      "english": "@option:animationEasing:easeInOut"
+    },
+    {
+      "key": "@option:animationEasing:back",
+      "english": "@option:animationEasing:back"
+    },
+    {
+      "key": "@option:animationEasing:bounce",
+      "english": "@option:animationEasing:bounce"
+    },
+    {
+      "key": "@option:animationEasing:elastic",
+      "english": "@option:animationEasing:elastic"
+    },
+    {
+      "key": "@option:animationAnchor:cursor",
+      "english": "@option:animationAnchor:cursor"
+    },
+    {
+      "key": "@option:animationAnchor:center",
+      "english": "@option:animationAnchor:center"
+    },
+    {
+      "key": "@effect:none",
+      "english": "@effect:none"
+    },
+    {
+      "key": "@effect:fade",
+      "english": "@effect:fade"
+    },
+    {
+      "key": "@effect:slide",
+      "english": "@effect:slide"
+    },
+    {
+      "key": "@effect:scale",
+      "english": "@effect:scale"
+    },
+    {
+      "key": "@effect:dissolve",
+      "english": "@effect:dissolve"
+    },
+    {
+      "key": "@effect:crt",
+      "english": "@effect:crt"
+    },
+    {
+      "key": "@effect:unfold",
+      "english": "@effect:unfold"
+    },
+    {
+      "key": "@overlay:none",
+      "english": "@overlay:none"
+    },
+    {
+      "key": "@overlay:noise",
+      "english": "@overlay:noise"
+    },
+    {
+      "key": "@overlay:plasma",
+      "english": "@overlay:plasma"
+    },
+    {
+      "key": "@overlay:hue",
+      "english": "@overlay:hue"
+    },
+    {
+      "key": "@overlay:glow",
+      "english": "@overlay:glow"
+    },
+    {
+      "key": "@overlay:scanlines",
+      "english": "@overlay:scanlines"
+    },
+    {
+      "key": "@overlay:vignette",
+      "english": "@overlay:vignette"
     }
   ],
   "translations": {
@@ -632,7 +1024,107 @@
       "Text": "Texte",
       "Shadow": "Ombre",
       "Effects": "Effets",
-      "Animation": "Animation"
+      "Animation": "Animation",
+      "Background": "Arrière-plan",
+      "Border": "Bordure",
+      "Separator": "Séparateur",
+      "Hover background": "Arrière-plan au survol",
+      "Pressed background": "Arrière-plan pressé",
+      "Text color": "Couleur du texte",
+      "Disabled text color": "Couleur du texte désactivé",
+      "Submenu arrow": "Flèche du sous-menu",
+      "Header color": "Couleur de l'en-tête",
+      "Corner radius": "Rayon des coins",
+      "Corner radii": "Rayons des coins",
+      "Border width": "Épaisseur de la bordure",
+      "Padding": "Marge intérieure",
+      "Item padding": "Marge des éléments",
+      "Vertical padding": "Marge verticale",
+      "Item height": "Hauteur des éléments",
+      "Icon size": "Taille des icônes",
+      "Minimum width": "Largeur minimale",
+      "Maximum width": "Largeur maximale",
+      "Separator spacing": "Espacement des séparateurs",
+      "Marker": "Marqueur",
+      "Marker width": "Largeur du marqueur",
+      "Marker color": "Couleur du marqueur",
+      "Font": "Police",
+      "Font weight": "Graisse de la police",
+      "Font style": "Style de la police",
+      "Accelerator display": "Affichage des accélérateurs",
+      "Shadow size": "Taille de l'ombre",
+      "Shadow offset X": "Décalage horizontal de l'ombre",
+      "Shadow offset Y": "Décalage vertical de l'ombre",
+      "Shadow opacity": "Opacité de l'ombre",
+      "Adapt shadow to backdrop": "Adapter l'ombre à l'arrière-plan",
+      "Shadow color": "Couleur de l'ombre",
+      "Shadow blur": "Flou de l'ombre",
+      "Blur": "Flou",
+      "Blur strength": "Intensité du flou",
+      "Overlay effects": "Effets de superposition",
+      "Overlay intensity": "Intensité de la superposition",
+      "Overlay speed": "Vitesse de la superposition",
+      "Overlay size": "Taille de la superposition",
+      "Overlay frame interval": "Intervalle des images de superposition",
+      "Animate overlays while open": "Animer les superpositions à l'ouverture",
+      "Open animation": "Animation d'ouverture",
+      "Close animation": "Animation de fermeture",
+      "Open duration": "Durée d'ouverture",
+      "Close duration": "Durée de fermeture",
+      "Animation frame interval": "Intervalle des images d'animation",
+      "Animation easing": "Courbe d'animation",
+      "Animation anchor": "Ancre d'animation",
+      "Animate submenus": "Animer les sous-menus",
+      "Slide offset X": "Décalage horizontal du glissement",
+      "Slide offset Y": "Décalage vertical du glissement",
+      "Scale from": "Échelle de départ",
+      "Saturation / value": "Saturation / valeur",
+      "Hue": "Teinte",
+      "Alpha": "Alpha",
+      "Red": "Rouge",
+      "Green": "Vert",
+      "Blue": "Bleu",
+      "Alpha value": "Valeur alpha",
+      "Top left": "En haut à gauche",
+      "Top right": "En haut à droite",
+      "Bottom right": "En bas à droite",
+      "Bottom left": "En bas à gauche",
+      "Save failed": "Échec de l'enregistrement",
+      "Font not found": "Police introuvable",
+      "@option:fontWeight:normal": "Normal",
+      "@option:fontWeight:semibold": "Demi-gras",
+      "@option:fontWeight:bold": "Gras",
+      "@option:fontStyle:normal": "Normal",
+      "@option:fontStyle:italic": "Italique",
+      "@option:marker:dot": "Point",
+      "@option:marker:check": "Coche",
+      "@option:marker:bar": "Barre",
+      "@option:marker:none": "Aucun",
+      "@option:showAccelerators:underline": "Souligné",
+      "@option:showAccelerators:strip": "Supprimer",
+      "@option:showAccelerators:raw": "Brut",
+      "@option:animationEasing:linear": "Linéaire",
+      "@option:animationEasing:easeOut": "Sortie progressive",
+      "@option:animationEasing:easeInOut": "Entrée-sortie progressive",
+      "@option:animationEasing:back": "Retour",
+      "@option:animationEasing:bounce": "Rebond",
+      "@option:animationEasing:elastic": "Élastique",
+      "@option:animationAnchor:cursor": "Curseur",
+      "@option:animationAnchor:center": "Centre",
+      "@effect:none": "Aucun",
+      "@effect:fade": "Fondu",
+      "@effect:slide": "Glissement",
+      "@effect:scale": "Mise à l'échelle",
+      "@effect:dissolve": "Dissolution",
+      "@effect:crt": "CRT",
+      "@effect:unfold": "Dépliage",
+      "@overlay:none": "Aucun",
+      "@overlay:noise": "Bruit",
+      "@overlay:plasma": "Plasma",
+      "@overlay:hue": "Teinte",
+      "@overlay:glow": "Lueur",
+      "@overlay:scanlines": "Lignes de balayage",
+      "@overlay:vignette": "Vignettage"
     },
     "de": {
       "Open": "Öffnen"

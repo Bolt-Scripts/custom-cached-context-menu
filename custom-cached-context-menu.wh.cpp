@@ -549,6 +549,104 @@ const LocalizationKey kLocalizationKeys[] = {
     {L"Shadow", L"Shadow"},
     {L"Effects", L"Effects"},
     {L"Animation", L"Animation"},
+    {L"Background", L"Background"},
+    {L"Border", L"Border"},
+    {L"Separator", L"Separator"},
+    {L"Hover background", L"Hover background"},
+    {L"Pressed background", L"Pressed background"},
+    {L"Text color", L"Text color"},
+    {L"Disabled text color", L"Disabled text color"},
+    {L"Submenu arrow", L"Submenu arrow"},
+    {L"Header color", L"Header color"},
+    {L"Corner radius", L"Corner radius"},
+    {L"Corner radii", L"Corner radii"},
+    {L"Border width", L"Border width"},
+    {L"Padding", L"Padding"},
+    {L"Item padding", L"Item padding"},
+    {L"Vertical padding", L"Vertical padding"},
+    {L"Item height", L"Item height"},
+    {L"Icon size", L"Icon size"},
+    {L"Minimum width", L"Minimum width"},
+    {L"Maximum width", L"Maximum width"},
+    {L"Separator spacing", L"Separator spacing"},
+    {L"Marker", L"Marker"},
+    {L"Marker width", L"Marker width"},
+    {L"Marker color", L"Marker color"},
+    {L"Font", L"Font"},
+    {L"Font weight", L"Font weight"},
+    {L"Font style", L"Font style"},
+    {L"Accelerator display", L"Accelerator display"},
+    {L"Shadow size", L"Shadow size"},
+    {L"Shadow offset X", L"Shadow offset X"},
+    {L"Shadow offset Y", L"Shadow offset Y"},
+    {L"Shadow opacity", L"Shadow opacity"},
+    {L"Adapt shadow to backdrop", L"Adapt shadow to backdrop"},
+    {L"Shadow color", L"Shadow color"},
+    {L"Shadow blur", L"Shadow blur"},
+    {L"Blur", L"Blur"},
+    {L"Blur strength", L"Blur strength"},
+    {L"Overlay effects", L"Overlay effects"},
+    {L"Overlay intensity", L"Overlay intensity"},
+    {L"Overlay speed", L"Overlay speed"},
+    {L"Overlay size", L"Overlay size"},
+    {L"Overlay frame interval", L"Overlay frame interval"},
+    {L"Animate overlays while open", L"Animate overlays while open"},
+    {L"Open animation", L"Open animation"},
+    {L"Close animation", L"Close animation"},
+    {L"Open duration", L"Open duration"},
+    {L"Close duration", L"Close duration"},
+    {L"Animation frame interval", L"Animation frame interval"},
+    {L"Animation easing", L"Animation easing"},
+    {L"Animation anchor", L"Animation anchor"},
+    {L"Animate submenus", L"Animate submenus"},
+    {L"Slide offset X", L"Slide offset X"},
+    {L"Slide offset Y", L"Slide offset Y"},
+    {L"Scale from", L"Scale from"},
+    {L"Saturation / value", L"Saturation / value"},
+    {L"Hue", L"Hue"},
+    {L"Alpha", L"Alpha"},
+    {L"Red", L"Red"},
+    {L"Green", L"Green"},
+    {L"Blue", L"Blue"},
+    {L"Alpha value", L"Alpha value"},
+    {L"Top left", L"Top left"},
+    {L"Top right", L"Top right"},
+    {L"Bottom right", L"Bottom right"},
+    {L"Bottom left", L"Bottom left"},
+    {L"@option:fontWeight:normal", L"@option:fontWeight:normal"},
+    {L"@option:fontWeight:semibold", L"@option:fontWeight:semibold"},
+    {L"@option:fontWeight:bold", L"@option:fontWeight:bold"},
+    {L"@option:fontStyle:normal", L"@option:fontStyle:normal"},
+    {L"@option:fontStyle:italic", L"@option:fontStyle:italic"},
+    {L"@option:marker:dot", L"@option:marker:dot"},
+    {L"@option:marker:check", L"@option:marker:check"},
+    {L"@option:marker:bar", L"@option:marker:bar"},
+    {L"@option:marker:none", L"@option:marker:none"},
+    {L"@option:showAccelerators:underline", L"@option:showAccelerators:underline"},
+    {L"@option:showAccelerators:strip", L"@option:showAccelerators:strip"},
+    {L"@option:showAccelerators:raw", L"@option:showAccelerators:raw"},
+    {L"@option:animationEasing:linear", L"@option:animationEasing:linear"},
+    {L"@option:animationEasing:easeOut", L"@option:animationEasing:easeOut"},
+    {L"@option:animationEasing:easeInOut", L"@option:animationEasing:easeInOut"},
+    {L"@option:animationEasing:back", L"@option:animationEasing:back"},
+    {L"@option:animationEasing:bounce", L"@option:animationEasing:bounce"},
+    {L"@option:animationEasing:elastic", L"@option:animationEasing:elastic"},
+    {L"@option:animationAnchor:cursor", L"@option:animationAnchor:cursor"},
+    {L"@option:animationAnchor:center", L"@option:animationAnchor:center"},
+    {L"@effect:none", L"@effect:none"},
+    {L"@effect:fade", L"@effect:fade"},
+    {L"@effect:slide", L"@effect:slide"},
+    {L"@effect:scale", L"@effect:scale"},
+    {L"@effect:dissolve", L"@effect:dissolve"},
+    {L"@effect:crt", L"@effect:crt"},
+    {L"@effect:unfold", L"@effect:unfold"},
+    {L"@overlay:none", L"@overlay:none"},
+    {L"@overlay:noise", L"@overlay:noise"},
+    {L"@overlay:plasma", L"@overlay:plasma"},
+    {L"@overlay:hue", L"@overlay:hue"},
+    {L"@overlay:glow", L"@overlay:glow"},
+    {L"@overlay:scanlines", L"@overlay:scanlines"},
+    {L"@overlay:vignette", L"@overlay:vignette"},
 };
 
 const LocalizationLanguage kLocalizationLanguages[] = {
@@ -559,10 +657,10 @@ const LocalizationLanguage kLocalizationLanguages[] = {
     {L"da", false, ""},
     {L"de", false, "Öffnen"},
     {L"el", false, ""},
-    {L"en", false, "Open\037Reset %s…\037Compressed (zipped) Folder\037Folder\037Shortcut\037About\037Align icons to grid\037Auto arrange icons\037Content\037Copy\037Copy as path\037Create shortcut\037Cut\037Default (unset)\037Delete\037Details\037Display settings\037Extra large icons\037Face\037Group by\037Hex\037Large icons\037List\037Medium icons\037Menu settings\037Menu settings…\037New\037Open Windhawk\037Open in new process\037Open in new window\037Open menu.ini\037Open theme file\037Open with\037Paste\037Paste shortcut\037Personalize\037Pin to Quick access\037Properties\037Refresh\037Rename\037Replay open animation\037Reset all appearance\037Reset all appearance…\037Scale options…\037Send to\037Size\037Slide options…\037Small icons\037Sort by\037Status\037Target\037Theme\037Tiles\037Use cornerRadius (unset)\037View\037Windhawk settings…\037Show classic menu\037More options\037Ascending\037Descending\037(None)\037Name\037Date modified\037Type\037Text Document\037Bitmap image\037Rich Text Document\037on\037off\037custom\037default\037Saved\037Save failed\037Font not found\037Base appearance\037Light appearance\037Dark appearance\037deprecated — use animationOpen/Close\037Theme: %s — editing theme file\037schema %d\037Menu mode\037Custom\037Classic\037Color\037Colors\037Layout\037Text\037Shadow\037Effects\037Animation"},
+    {L"en", false, "Open\037Reset %s…\037Compressed (zipped) Folder\037Folder\037Shortcut\037About\037Align icons to grid\037Auto arrange icons\037Content\037Copy\037Copy as path\037Create shortcut\037Cut\037Default (unset)\037Delete\037Details\037Display settings\037Extra large icons\037Face\037Group by\037Hex\037Large icons\037List\037Medium icons\037Menu settings\037Menu settings…\037New\037Open Windhawk\037Open in new process\037Open in new window\037Open menu.ini\037Open theme file\037Open with\037Paste\037Paste shortcut\037Personalize\037Pin to Quick access\037Properties\037Refresh\037Rename\037Replay open animation\037Reset all appearance\037Reset all appearance…\037Scale options…\037Send to\037Size\037Slide options…\037Small icons\037Sort by\037Status\037Target\037Theme\037Tiles\037Use cornerRadius (unset)\037View\037Windhawk settings…\037Show classic menu\037More options\037Ascending\037Descending\037(None)\037Name\037Date modified\037Type\037Text Document\037Bitmap image\037Rich Text Document\037on\037off\037custom\037default\037Saved\037Save failed\037Font not found\037Base appearance\037Light appearance\037Dark appearance\037deprecated — use animationOpen/Close\037Theme: %s — editing theme file\037schema %d\037Menu mode\037Custom\037Classic\037Color\037Colors\037Layout\037Text\037Shadow\037Effects\037Animation\037Background\037Border\037Separator\037Hover background\037Pressed background\037Text color\037Disabled text color\037Submenu arrow\037Header color\037Corner radius\037Corner radii\037Border width\037Padding\037Item padding\037Vertical padding\037Item height\037Icon size\037Minimum width\037Maximum width\037Separator spacing\037Marker\037Marker width\037Marker color\037Font\037Font weight\037Font style\037Accelerator display\037Shadow size\037Shadow offset X\037Shadow offset Y\037Shadow opacity\037Adapt shadow to backdrop\037Shadow color\037Shadow blur\037Blur\037Blur strength\037Overlay effects\037Overlay intensity\037Overlay speed\037Overlay size\037Overlay frame interval\037Animate overlays while open\037Open animation\037Close animation\037Open duration\037Close duration\037Animation frame interval\037Animation easing\037Animation anchor\037Animate submenus\037Slide offset X\037Slide offset Y\037Scale from\037Saturation / value\037Hue\037Alpha\037Red\037Green\037Blue\037Alpha value\037Top left\037Top right\037Bottom right\037Bottom left\037@option:fontWeight:normal\037@option:fontWeight:semibold\037@option:fontWeight:bold\037@option:fontStyle:normal\037@option:fontStyle:italic\037@option:marker:dot\037@option:marker:check\037@option:marker:bar\037@option:marker:none\037@option:showAccelerators:underline\037@option:showAccelerators:strip\037@option:showAccelerators:raw\037@option:animationEasing:linear\037@option:animationEasing:easeOut\037@option:animationEasing:easeInOut\037@option:animationEasing:back\037@option:animationEasing:bounce\037@option:animationEasing:elastic\037@option:animationAnchor:cursor\037@option:animationAnchor:center\037@effect:none\037@effect:fade\037@effect:slide\037@effect:scale\037@effect:dissolve\037@effect:crt\037@effect:unfold\037@overlay:none\037@overlay:noise\037@overlay:plasma\037@overlay:hue\037@overlay:glow\037@overlay:scanlines\037@overlay:vignette"},
     {L"es", false, ""},
     {L"fa", true, ""},
-    {L"fr", false, "Ouvrir\037Réinitialiser %s…\037Dossier compressé (zippé)\037Dossier\037Raccourci\037À propos\037Aligner les icônes sur la grille\037Réorganiser automatiquement les icônes\037Contenu\037Copier\037Copier le chemin d'accès\037Créer un raccourci\037Couper\037Par défaut (non défini)\037Supprimer\037Détails\037Paramètres d'affichage\037Très grandes icônes\037Police\037Grouper par\037Hex\037Grandes icônes\037Liste\037Icônes moyennes\037Paramètres du menu\037Paramètres du menu…\037Nouveau\037Ouvrir Windhawk\037Ouvrir dans un nouveau processus\037Ouvrir dans une nouvelle fenêtre\037Ouvrir menu.ini\037Ouvrir le fichier de thème\037Ouvrir avec\037Coller\037Coller le raccourci\037Personnaliser\037Épingler à Accès rapide\037Propriétés\037Actualiser\037Renommer\037Rejouer l'animation d'ouverture\037Réinitialiser toute l'apparence\037Réinitialiser toute l'apparence…\037Options de mise à l'échelle…\037Envoyer vers\037Taille\037Options de glissement…\037Petites icônes\037Trier par\037Statut\037Cible\037Thème\037Tuiles\037Utiliser cornerRadius (non défini)\037Affichage\037Paramètres Windhawk…\037Afficher le menu classique\037Plus d'options\037Croissant\037Décroissant\037(Aucun)\037Nom\037Date de modification\037Type\037Document texte\037Image bitmap\037Document en texte enrichi\037activé\037désactivé\037personnalisé\037par défaut\037Enregistré\037\037\037Apparence de base\037Apparence claire\037Apparence sombre\037obsolète — utilisez animationOpen/Close\037Thème : %s — modification du fichier de thème\037schéma %d\037Mode du menu\037Personnalisé\037Classique\037Couleur\037Couleurs\037Disposition\037Texte\037Ombre\037Effets\037Animation"},
+    {L"fr", false, "Ouvrir\037Réinitialiser %s…\037Dossier compressé (zippé)\037Dossier\037Raccourci\037À propos\037Aligner les icônes sur la grille\037Réorganiser automatiquement les icônes\037Contenu\037Copier\037Copier le chemin d'accès\037Créer un raccourci\037Couper\037Par défaut (non défini)\037Supprimer\037Détails\037Paramètres d'affichage\037Très grandes icônes\037Police\037Grouper par\037Hex\037Grandes icônes\037Liste\037Icônes moyennes\037Paramètres du menu\037Paramètres du menu…\037Nouveau\037Ouvrir Windhawk\037Ouvrir dans un nouveau processus\037Ouvrir dans une nouvelle fenêtre\037Ouvrir menu.ini\037Ouvrir le fichier de thème\037Ouvrir avec\037Coller\037Coller le raccourci\037Personnaliser\037Épingler à Accès rapide\037Propriétés\037Actualiser\037Renommer\037Rejouer l'animation d'ouverture\037Réinitialiser toute l'apparence\037Réinitialiser toute l'apparence…\037Options de mise à l'échelle…\037Envoyer vers\037Taille\037Options de glissement…\037Petites icônes\037Trier par\037Statut\037Cible\037Thème\037Tuiles\037Utiliser cornerRadius (non défini)\037Affichage\037Paramètres Windhawk…\037Afficher le menu classique\037Plus d'options\037Croissant\037Décroissant\037(Aucun)\037Nom\037Date de modification\037Type\037Document texte\037Image bitmap\037Document en texte enrichi\037activé\037désactivé\037personnalisé\037par défaut\037Enregistré\037Échec de l'enregistrement\037Police introuvable\037Apparence de base\037Apparence claire\037Apparence sombre\037obsolète — utilisez animationOpen/Close\037Thème : %s — modification du fichier de thème\037schéma %d\037Mode du menu\037Personnalisé\037Classique\037Couleur\037Couleurs\037Disposition\037Texte\037Ombre\037Effets\037Animation\037Arrière-plan\037Bordure\037Séparateur\037Arrière-plan au survol\037Arrière-plan pressé\037Couleur du texte\037Couleur du texte désactivé\037Flèche du sous-menu\037Couleur de l'en-tête\037Rayon des coins\037Rayons des coins\037Épaisseur de la bordure\037Marge intérieure\037Marge des éléments\037Marge verticale\037Hauteur des éléments\037Taille des icônes\037Largeur minimale\037Largeur maximale\037Espacement des séparateurs\037Marqueur\037Largeur du marqueur\037Couleur du marqueur\037Police\037Graisse de la police\037Style de la police\037Affichage des accélérateurs\037Taille de l'ombre\037Décalage horizontal de l'ombre\037Décalage vertical de l'ombre\037Opacité de l'ombre\037Adapter l'ombre à l'arrière-plan\037Couleur de l'ombre\037Flou de l'ombre\037Flou\037Intensité du flou\037Effets de superposition\037Intensité de la superposition\037Vitesse de la superposition\037Taille de la superposition\037Intervalle des images de superposition\037Animer les superpositions à l'ouverture\037Animation d'ouverture\037Animation de fermeture\037Durée d'ouverture\037Durée de fermeture\037Intervalle des images d'animation\037Courbe d'animation\037Ancre d'animation\037Animer les sous-menus\037Décalage horizontal du glissement\037Décalage vertical du glissement\037Échelle de départ\037Saturation / valeur\037Teinte\037Alpha\037Rouge\037Vert\037Bleu\037Valeur alpha\037En haut à gauche\037En haut à droite\037En bas à droite\037En bas à gauche\037Normal\037Demi-gras\037Gras\037Normal\037Italique\037Point\037Coche\037Barre\037Aucun\037Souligné\037Supprimer\037Brut\037Linéaire\037Sortie progressive\037Entrée-sortie progressive\037Retour\037Rebond\037Élastique\037Curseur\037Centre\037Aucun\037Fondu\037Glissement\037Mise à l'échelle\037Dissolution\037CRT\037Dépliage\037Aucun\037Bruit\037Plasma\037Teinte\037Lueur\037Lignes de balayage\037Vignettage"},
     {L"hi", false, ""},
     {L"hr", false, ""},
     {L"ht", false, ""},
@@ -811,6 +909,112 @@ std::wstring FormatTr(const wchar_t* key,
         result.replace(at, 2, arg);
     }
     return result;
+}
+
+std::wstring OptionEnglishLabel(const wchar_t* schemaKey,
+                                const wchar_t* value) {
+    const std::wstring key = schemaKey ? schemaKey : L"";
+    const std::wstring raw = value ? value : L"";
+    auto is = [&](const wchar_t* text) {
+        return _wcsicmp(raw.c_str(), text) == 0;
+    };
+    auto title = [&](const wchar_t* text) {
+        std::wstring out(text);
+        if (!out.empty()) {
+            out[0] = static_cast<wchar_t>(towupper(out[0]));
+        }
+        return out;
+    };
+
+    if (_wcsicmp(key.c_str(), L"fontWeight") == 0) {
+        if (is(L"semibold")) return L"Semibold";
+        if (is(L"bold")) return L"Bold";
+        return L"Normal";
+    }
+    if (_wcsicmp(key.c_str(), L"fontStyle") == 0) {
+        return is(L"italic") ? L"Italic" : L"Normal";
+    }
+    if (_wcsicmp(key.c_str(), L"marker") == 0) {
+        if (is(L"check")) return L"Check";
+        if (is(L"bar")) return L"Bar";
+        if (is(L"none")) return L"None";
+        return L"Dot";
+    }
+    if (_wcsicmp(key.c_str(), L"showAccelerators") == 0) {
+        if (is(L"strip")) return L"Strip";
+        if (is(L"raw")) return L"Raw";
+        return L"Underline";
+    }
+    if (_wcsicmp(key.c_str(), L"animationEasing") == 0) {
+        if (is(L"easeOut")) return L"Ease out";
+        if (is(L"easeInOut")) return L"Ease in-out";
+        if (is(L"back")) return L"Back";
+        if (is(L"bounce")) return L"Bounce";
+        if (is(L"elastic")) return L"Elastic";
+        return L"Linear";
+    }
+    if (_wcsicmp(key.c_str(), L"animationAnchor") == 0) {
+        return is(L"center") ? L"Center" : L"Cursor";
+    }
+    return title(raw.c_str());
+}
+
+std::wstring TrOption(const wchar_t* schemaKey, const wchar_t* value) {
+    const std::wstring key = std::wstring(L"@option:") +
+                             (schemaKey ? schemaKey : L"") + L":" +
+                             (value ? value : L"");
+    return Tr(key.c_str(), OptionEnglishLabel(schemaKey, value).c_str());
+}
+
+std::wstring OptionDisplayLabel(const wchar_t* schemaKey,
+                                const wchar_t* value) {
+    return TrOption(schemaKey, value);
+}
+
+std::wstring EffectEnglishLabel(const wchar_t* value) {
+    const std::wstring raw = value ? value : L"";
+    auto is = [&](const wchar_t* text) {
+        return _wcsicmp(raw.c_str(), text) == 0;
+    };
+    if (is(L"crt")) return L"CRT";
+    if (is(L"unfold")) return L"Unfold";
+    if (is(L"fade")) return L"Fade";
+    if (is(L"slide")) return L"Slide";
+    if (is(L"scale")) return L"Scale";
+    if (is(L"dissolve")) return L"Dissolve";
+    return L"None";
+}
+
+std::wstring OverlayEnglishLabel(const wchar_t* value) {
+    const std::wstring raw = value ? value : L"";
+    auto is = [&](const wchar_t* text) {
+        return _wcsicmp(raw.c_str(), text) == 0;
+    };
+    if (is(L"noise")) return L"Noise";
+    if (is(L"plasma")) return L"Plasma";
+    if (is(L"hue")) return L"Hue";
+    if (is(L"glow")) return L"Glow";
+    if (is(L"scanlines")) return L"Scanlines";
+    if (is(L"vignette")) return L"Vignette";
+    return L"None";
+}
+
+std::wstring TrEffect(const wchar_t* value) {
+    const std::wstring key = std::wstring(L"@effect:") + (value ? value : L"");
+    return Tr(key.c_str(), EffectEnglishLabel(value).c_str());
+}
+
+std::wstring TrOverlay(const wchar_t* value) {
+    const std::wstring key = std::wstring(L"@overlay:") + (value ? value : L"");
+    return Tr(key.c_str(), OverlayEnglishLabel(value).c_str());
+}
+
+std::wstring TrTheme(const wchar_t* value) {
+    if (!value || !*value) {
+        return std::wstring();
+    }
+    const std::wstring key = std::wstring(L"@theme:") + value;
+    return Tr(key.c_str(), value);
 }
 
 bool IsRtlLanguage() {
@@ -2237,6 +2441,43 @@ std::wstring OverlayEffectsText(uint32_t effects) {
     append(kOverlayScanlines, L"scanlines");
     append(kOverlayVignette, L"vignette");
     return text.empty() ? std::wstring(L"none") : text;
+}
+
+// Display-only counterpart: canonical values still go through
+// AnimationEffectsText/OverlayEffectsText when written to config files.
+std::wstring DisplayEffectsText(uint32_t effects, bool overlay) {
+    std::wstring text;
+    auto append = [&](uint32_t bit, const wchar_t* name) {
+        if ((effects & bit) == 0) {
+            return;
+        }
+        if (!text.empty()) {
+            text += L", ";
+        }
+        text += overlay ? TrOverlay(name) : TrEffect(name);
+    };
+    if (overlay) {
+        append(kOverlayNoise, L"noise");
+        append(kOverlayPlasma, L"plasma");
+        append(kOverlayHue, L"hue");
+        append(kOverlayGlow, L"glow");
+        append(kOverlayScanlines, L"scanlines");
+        append(kOverlayVignette, L"vignette");
+        if (text.empty()) {
+            text = TrOverlay(L"none");
+        }
+    } else {
+        append(kAnimFade, L"fade");
+        append(kAnimSlide, L"slide");
+        append(kAnimScale, L"scale");
+        append(kAnimDissolve, L"dissolve");
+        append(kAnimCrt, L"crt");
+        append(kAnimUnfold, L"unfold");
+        if (text.empty()) {
+            text = TrEffect(L"none");
+        }
+    }
+    return text;
 }
 
 bool ParseAnimEasing(const std::wstring& text, AnimEasing& easing) {
@@ -6401,13 +6642,18 @@ struct SettingsModelInputs {
     std::vector<std::pair<std::wstring, std::wstring>> windhawkHints;
 };
 
-MenuItem MakeSettingsItem(ItemKind kind, std::wstring label) {
+MenuItem MakeSettingsItemRaw(ItemKind kind, std::wstring label) {
     MenuItem item;
     item.kind = kind;
     item.action = ActionKind::Builtin;
     item.builtinAction = BuiltinAction::None;
     item.label = std::move(label);
     return item;
+}
+
+MenuItem MakeSettingsItem(ItemKind kind, std::wstring label) {
+    return MakeSettingsItemRaw(
+        kind, Tr(label.c_str(), label.c_str()));
 }
 
 struct SettingsEffectName {
@@ -6522,7 +6768,8 @@ MenuItem BuildSettingsRow(const Appearance& working,
         MenuItem row = MakeSettingsItem(ItemKind::Command, entry.key);
         row.control.kind = ControlKind::Info;
         row.control.key = entry.key;
-        row.controlText = L"deprecated \u2014 use animationOpen/Close";
+        row.controlText =
+            Tr(L"deprecated \u2014 use animationOpen/Close");
         return row;
     }
     const ControlSpec spec = MakeControlSpec(entry);
@@ -6579,7 +6826,7 @@ MenuItem BuildSettingsRow(const Appearance& working,
             const bool has = key == L"markercolor" ? working.hasMarkerColor
                                                    : working.hasHeaderColor;
             unset.controlValue = has ? 0 : 1;
-            unset.controlText = has ? L"off" : L"on";
+            unset.controlText = has ? Tr(L"off") : Tr(L"on");
             row.children.push_back(std::move(unset));
         }
         return row;
@@ -6591,9 +6838,11 @@ MenuItem BuildSettingsRow(const Appearance& working,
         row.control = spec;
         std::wstring current;
         AppearanceValueText(working, entry, current);
-        row.controlText = current;
+        row.controlText = OptionDisplayLabel(entry.key, current.c_str());
         for (const std::wstring& option : spec.options) {
-            MenuItem child = MakeSettingsItem(ItemKind::Command, option);
+            MenuItem child = MakeSettingsItemRaw(
+                ItemKind::Command,
+                OptionDisplayLabel(entry.key, option.c_str()));
             child.control.kind = ControlKind::Action;
             child.control.key =
                 L"@enum:" + std::wstring(entry.key) + L":" + option;
@@ -6614,15 +6863,16 @@ MenuItem BuildSettingsRow(const Appearance& working,
         const uint32_t effects =
             overlay ? working.overlay
                     : (opening ? working.animationOpen : working.animationClose);
-        row.controlText = overlay ? OverlayEffectsText(effects)
-                                  : AnimationEffectsText(effects);
+        row.controlText = DisplayEffectsText(effects, overlay);
         const SettingsEffectName* names =
             overlay ? kSettingsOverlayNames : kSettingsEffectNames;
         const size_t nameCount = overlay ? ARRAYSIZE(kSettingsOverlayNames)
                                          : ARRAYSIZE(kSettingsEffectNames);
         for (size_t i = 0; i < nameCount; ++i) {
             const SettingsEffectName& effect = names[i];
-            MenuItem child = MakeSettingsItem(ItemKind::Command, effect.name);
+            MenuItem child = MakeSettingsItemRaw(
+                ItemKind::Command,
+                overlay ? TrOverlay(effect.name) : TrEffect(effect.name));
             child.control.kind = ControlKind::Action;
             child.control.key =
                 std::wstring(overlay
@@ -6648,7 +6898,7 @@ MenuItem BuildSettingsRow(const Appearance& working,
         if (!working.hasCornerRadii) {
             ParseCornerRadii(entry.defaultValue, radii);
         }
-        row.controlText = working.hasCornerRadii ? L"custom" : L"default";
+        row.controlText = working.hasCornerRadii ? Tr(L"custom") : Tr(L"default");
         const wchar_t* ids[] = {L"tl", L"tr", L"br", L"bl"};
         const wchar_t* labels[] = {L"Top left", L"Top right", L"Bottom right",
                                    L"Bottom left"};
@@ -6665,7 +6915,7 @@ MenuItem BuildSettingsRow(const Appearance& working,
         unset.control.kind = ControlKind::Toggle;
         unset.control.key = L"@cornerRadii:unset";
         unset.controlValue = working.hasCornerRadii ? 0 : 1;
-        unset.controlText = working.hasCornerRadii ? L"off" : L"on";
+        unset.controlText = working.hasCornerRadii ? Tr(L"off") : Tr(L"on");
         row.children.push_back(std::move(unset));
         return row;
     }
@@ -6693,12 +6943,19 @@ MenuItem BuildSettingsRow(const Appearance& working,
     if (spec.kind == ControlKind::Toggle) {
         const bool value = AppearanceBoolValue(working, entry.key);
         row.controlValue = value ? 1 : 0;
-        row.controlText = value ? L"on" : L"off";
+        row.controlText = value ? Tr(L"on") : Tr(L"off");
     } else if (spec.kind == ControlKind::IntSlider) {
         row.controlValue = AppearanceIntValue(working, entry.key);
         row.controlText = std::to_wstring(row.controlValue);
     }
     return row;
+}
+
+std::wstring SettingsStatusLabel(const std::wstring& english) {
+    if (english.empty()) {
+        return Tr(L"Saved");
+    }
+    return Tr(english.c_str(), english.c_str());
 }
 
 std::vector<MenuItem> BuildSettingsTree(const SettingsModelInputs& inputs) {
@@ -6710,16 +6967,16 @@ std::vector<MenuItem> BuildSettingsTree(const SettingsModelInputs& inputs) {
     MenuItem status = MakeSettingsItem(ItemKind::Command, L"Status");
     status.control.kind = ControlKind::Info;
     status.control.key = L"@status";
-    status.controlText =
-        inputs.statusText.empty() ? L"Saved" : inputs.statusText;
+    status.controlText = SettingsStatusLabel(inputs.statusText);
     root.push_back(std::move(status));
 
     if (inputs.themeActive) {
         MenuItem theme = MakeSettingsItem(ItemKind::Command, L"Theme");
         theme.control.kind = ControlKind::Info;
         theme.control.key = L"@target";
-        theme.controlText =
-            inputs.themeName + L" \u2014 editing theme file";
+        theme.controlText = FormatTr(
+            L"Theme: %s \u2014 editing theme file",
+            {TrTheme(inputs.themeName.c_str())});
         root.push_back(std::move(theme));
     } else {
         MenuItem target = MakeSettingsItem(ItemKind::Submenu, L"Target");
@@ -6745,7 +7002,7 @@ std::vector<MenuItem> BuildSettingsTree(const SettingsModelInputs& inputs) {
             child.control.key = choice.id;
             if (choice.kind == inputs.target.kind) {
                 child.flags |= kModelChecked;
-                target.controlText = choice.label;
+                target.controlText = child.label;
             }
             target.children.push_back(std::move(child));
         }
@@ -6815,8 +7072,9 @@ std::vector<MenuItem> BuildSettingsTree(const SettingsModelInputs& inputs) {
             replay.control.key = L"@preview-open";
             groupItem.children.push_back(std::move(replay));
         }
-        MenuItem reset =
-            MakeSettingsItem(ItemKind::Command, L"Reset " + group + L"\u2026");
+        MenuItem reset = MakeSettingsItemRaw(
+            ItemKind::Command,
+            FormatTr(L"Reset %s\u2026", {Tr(group.c_str(), group.c_str())}));
         reset.control.kind = ControlKind::Action;
         reset.control.key = L"@reset:" + group;
         groupItem.children.push_back(std::move(reset));
@@ -6831,7 +7089,9 @@ std::vector<MenuItem> BuildSettingsTree(const SettingsModelInputs& inputs) {
         MenuItem row = MakeSettingsItem(ItemKind::Command, hint.first);
         row.control.kind = ControlKind::Info;
         row.control.key = L"@hint:" + hint.first;
-        row.controlText = hint.second;
+        row.controlText = _wcsicmp(hint.first.c_str(), L"Theme") == 0
+                              ? TrTheme(hint.second.c_str())
+                              : Tr(hint.second.c_str(), hint.second.c_str());
         windhawk.children.push_back(std::move(row));
     }
     MenuItem openWindhawk = MakeSettingsItem(ItemKind::Command, L"Open Windhawk");
@@ -6866,7 +7126,8 @@ std::vector<MenuItem> BuildSettingsTree(const SettingsModelInputs& inputs) {
     MenuItem about = MakeSettingsItem(ItemKind::Command, L"About");
     about.control.kind = ControlKind::Info;
     about.control.key = L"@about";
-    about.controlText = L"schema " + std::to_wstring(kConfigSchemaVersion);
+    about.controlText =
+        FormatTr(L"schema %d", {std::to_wstring(kConfigSchemaVersion)});
     root.push_back(std::move(about));
 
     return root;

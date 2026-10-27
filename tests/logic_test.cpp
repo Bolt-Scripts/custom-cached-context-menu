@@ -248,10 +248,46 @@ static void TestLocalizationDedup() {
     cmo::SelectLanguage(L"en");
 }
 
+static void TestLocalizationSettings() {
+    cmo::SelectLanguage(L"fr-FR");
+    cmo::SettingsModelInputs inputs;
+    inputs.working = cmo::Appearance{};
+    inputs.target = cmo::ResolveSettingsTarget(
+        0, cmo::SettingsTargetKind::MenuIniBase);
+    inputs.statusText = L"Saved";
+    inputs.windhawkHints = {{L"Menu mode", L"Custom"}};
+    auto tree = cmo::BuildSettingsTreeForTesting(inputs);
+
+    CHECK(cmo::FindItemByLabel(tree, L"Paramètres du menu") != nullptr);
+    auto status = cmo::FindItemByLabel(tree, L"Statut");
+    CHECK(status != nullptr);
+    if (status) {
+        CHECK(status->controlText == L"Enregistré");
+    }
+    CHECK(cmo::FindItemByLabel(tree, L"Couleurs") != nullptr);
+    auto menuMode = cmo::FindItemByLabel(tree, L"Mode du menu");
+    CHECK(menuMode != nullptr);
+    if (menuMode) {
+        CHECK(menuMode->controlText == L"Personnalisé");
+    }
+    CHECK(cmo::FindItemByLabel(tree, L"Réinitialiser Couleurs…") != nullptr);
+
+    auto entry = cmo::SchemaFind(L"fontWeight");
+    std::wstring canonical;
+    CHECK(cmo::AppearanceValueText(inputs.working, *entry, canonical));
+    CHECK(canonical == L"normal");
+    CHECK(cmo::OptionDisplayLabel(L"fontWeight", L"semibold") == L"Demi-gras");
+    CHECK(cmo::DisplayEffectsText(cmo::kAnimFade | cmo::kAnimSlide, false) ==
+          L"Fondu, Glissement");
+
+    cmo::SelectLanguage(L"en");
+}
+
 int main() {
     TestLocalizationCore();
     TestLocalizationMenu();
     TestLocalizationDedup();
+    TestLocalizationSettings();
 
     // The Windhawk metadata blocks must stay balanced: an unclosed readme
     // block makes the app show "Mod details are missing".

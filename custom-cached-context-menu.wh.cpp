@@ -14186,7 +14186,112 @@ bool IsOpenGroupItem(const MenuItem& item) {
     return normalized.rfind(L"Open", 0) == 0;
 }
 
-MenuModel MergeCoreWithCached(const MenuModel& core, const MenuModel& cached) {
+struct KnownCachedRoles {
+    std::wstring displayLabel;
+    std::wstring personalizeLabel;
+    const std::vector<MenuItem>* sendToChildren = nullptr;
+};
+
+// Forward declarations: these registry/MUI helpers are defined later in the
+// discovery section, while the merge lives here.
+std::wstring ReadClassesString(const std::wstring& subKey,
+                               const wchar_t* valueName);
+std::wstring ResolveIndirectString(const std::wstring& value);
+
+const MenuItem* FindCoreRole(const std::vector<MenuItem>& items,
+                             BuiltinRole role) {
+    for (const MenuItem& item : items) {
+        if (item.builtinRole == role) {
+            return &item;
+        }
+    }
+    return nullptr;
+}
+
+size_t CountChildLabelOverlap(const MenuItem& cached,
+                              const std::vector<MenuItem>& coreChildren) {
+    size_t overlap = 0;
+    for (const MenuItem& cachedChild : cached.children) {
+        if (cachedChild.kind == ItemKind::Separator) {
+            continue;
+        }
+        for (const MenuItem& coreChild : coreChildren) {
+            if (coreChild.kind == ItemKind::Separator) {
+                continue;
+            }
+            if (LabelsMatchIgnoreCase(cachedChild.label, coreChild.label)) {
+                ++overlap;
+                break;
+            }
+        }
+    }
+    return overlap;
+}
+
+BuiltinRole InferCachedSubmenuRole(const MenuItem& cached,
+                                   const std::vector<MenuItem>& coreItems,
+                                   const KnownCachedRoles& known) {
+    if (cached.kind != ItemKind::Submenu) {
+        return BuiltinRole::None;
+    }
+
+    auto hasOverlap = [&](BuiltinRole role) {
+        const MenuItem* coreItem = FindCoreRole(coreItems, role);
+        return coreItem && CountChildLabelOverlap(cached, coreItem->children) >= 2;
+    };
+
+    if (_wcsicmp(cached.canonicalVerb.c_str(), L"new") == 0 ||
+        hasOverlap(BuiltinRole::New)) {
+        return BuiltinRole::New;
+    }
+    if (_wcsicmp(cached.canonicalVerb.c_str(), L"sendto") == 0 ||
+        (known.sendToChildren &&
+         CountChildLabelOverlap(cached, *known.sendToChildren) >= 2)) {
+        return BuiltinRole::SendTo;
+    }
+    if (hasOverlap(BuiltinRole::View)) {
+        return BuiltinRole::View;
+    }
+    if (hasOverlap(BuiltinRole::SortBy)) {
+        return BuiltinRole::SortBy;
+    }
+    if (hasOverlap(BuiltinRole::GroupBy)) {
+        return BuiltinRole::GroupBy;
+    }
+
+    const MenuItem* sendTo = FindCoreRole(coreItems, BuiltinRole::SendTo);
+    if (sendTo && LabelsMatchIgnoreCase(cached.label, sendTo->label)) {
+        return BuiltinRole::SendTo;
+    }
+    return BuiltinRole::None;
+}
+
+std::wstring ReadDesktopShellLabel(const wchar_t* key) {
+    const std::wstring verbKey =
+        std::wstring(L"DesktopBackground\\shell\\") + key;
+    std::wstring label = ReadClassesString(verbKey, L"MUIVerb");
+    if (label.empty()) {
+        label = ReadClassesString(verbKey, nullptr);
+    }
+    label = ResolveIndirectString(label);
+    label.erase(std::remove(label.begin(), label.end(), L'&'), label.end());
+    return label;
+}
+
+KnownCachedRoles BuildKnownCachedRoles(const ContextSignature& signature,
+                                       const std::vector<MenuItem>* sendTo) {
+    KnownCachedRoles known;
+    known.sendToChildren = sendTo;
+    if (signature.scope == Scope::Desktop ||
+        signature.scope == Scope::Background) {
+        known.displayLabel = ReadDesktopShellLabel(L"Display");
+        known.personalizeLabel = ReadDesktopShellLabel(L"Personalize");
+    }
+    return known;
+}
+
+MenuModel MergeCoreWithCached(const MenuModel& core, const MenuModel& cached,
+                              const KnownCachedRoles& known = {}) {
     MenuModel result = core;
 
     MenuItem fallback{};
@@ -14197,26 +14302,43 @@ MenuModel MergeCoreWithCached(const MenuModel& core, const MenuModel& cached) {
         hadFallback = true;
     }
 
-    auto matches = [](const MenuItem& left, const MenuItem& right) {
-        if (LabelsMatchIgnoreCase(left.label, right.label)) {
-            return true;
+    auto findCommandByVerb = [&](const MenuItem& native) -> MenuItem* {
+        if (native.canonicalVerb.empty()) {
+            return nullptr;
         }
-        return !left.canonicalVerb.empty() && left.canonicalVerb == right.canonicalVerb;
-    };
-
-    std::unordered_set<std::wstring> coreLabels;
-    std::unordered_set<std::wstring> coreVerbs;
-    for (const MenuItem& item : result.items) {
-        if (!item.label.empty()) {
-            const std::wstring normalized = NormalizeMenuLabel(item.label);
-            if (!normalized.empty()) {
-                coreLabels.insert(normalized);
+        for (MenuItem& item : result.items) {
+            if (item.kind != ItemKind::Command || item.canonicalVerb.empty()) {
+                continue;
+            }
+            if (_wcsicmp(item.canonicalVerb.c_str(),
+                         native.canonicalVerb.c_str()) == 0) {
+                return &item;
             }
         }
-        if (!item.canonicalVerb.empty()) {
-            coreVerbs.insert(item.canonicalVerb);
+        return nullptr;
+    };
+    auto findByCanonicalLabel = [&](const wchar_t* label) -> MenuItem* {
+        for (MenuItem& item : result.items) {
+            if (!item.canonicalLabel.empty() &&
+                _wcsicmp(item.canonicalLabel.c_str(), label) == 0) {
+                return &item;
+            }
         }
-    }
+        return nullptr;
+    };
+    auto adoptDescriptor = [](MenuItem& item, const MenuItem& native) {
+        if (item.action != ActionKind::ShellVerb ||
+            native.action != ActionKind::ShellVerb) {
+            return;
+        }
+        if (!native.canonicalVerb.empty()) {
+            item.canonicalVerb = native.canonicalVerb;
+        }
+        if ((native.flags & kModelHasOffset) != 0 || native.verbOffset != 0) {
+            item.verbOffset = native.verbOffset;
+            item.flags |= kModelHasOffset;
+        }
+    };
 
     std::vector<MenuItem> added;
     std::vector<MenuItem> addedOpen;
@@ -14225,43 +14347,72 @@ MenuModel MergeCoreWithCached(const MenuModel& core, const MenuModel& cached) {
             continue;
         }
 
-        bool matchedCore = false;
-        for (MenuItem& coreItem : result.items) {
-            // A matching submenu donates its children (e.g. the shell's Send
-            // to list) instead of being dropped as a duplicate, which would
-            // leave the core submenu empty and pruned.
-            if (item.kind == ItemKind::Submenu &&
-                coreItem.kind == ItemKind::Submenu &&
-                coreItem.children.empty() && matches(coreItem, item)) {
-                coreItem.children = item.children;
-                matchedCore = true;
-                break;
+        MenuItem* matched = nullptr;
+        if (item.kind == ItemKind::Submenu) {
+            const BuiltinRole role =
+                InferCachedSubmenuRole(item, result.items, known);
+            if (role != BuiltinRole::None) {
+                matched = const_cast<MenuItem*>(
+                    FindCoreRole(result.items, role));
             }
-            // Only invokable commands donate a descriptor; a matching submenu
-            // has none and would otherwise clear the core verb and point the
-            // item at offset 0.
-            if (coreItem.action != ActionKind::ShellVerb ||
-                item.action != ActionKind::ShellVerb ||
-                item.kind != ItemKind::Command || !matches(coreItem, item)) {
-                continue;
+            if (matched) {
+                // New/View/Sort/Group own their children and keep them;
+                // Send to is empty in the core model and takes the native
+                // children. If a core submenu has no children, use the
+                // native ones rather than losing the menu to pruning.
+                if (role == BuiltinRole::SendTo || matched->children.empty()) {
+                    matched->children = item.children;
+                }
+            } else {
+                for (MenuItem& coreItem : result.items) {
+                    if (coreItem.kind != ItemKind::Submenu) {
+                        continue;
+                    }
+                    if (!LabelsMatchIgnoreCase(coreItem.label, item.label) &&
+                        (coreItem.canonicalLabel.empty() ||
+                         !LabelsMatchIgnoreCase(coreItem.canonicalLabel,
+                                                item.label))) {
+                        continue;
+                    }
+                    matched = &coreItem;
+                    if (matched->children.empty()) {
+                        matched->children = item.children;
+                    }
+                    break;
+                }
             }
-            // Adopt the native invocation descriptor: the shell rejects some
-            // canonical verb strings but its own offsets always dispatch.
-            coreItem.canonicalVerb = item.canonicalVerb;
-            coreItem.verbOffset = item.verbOffset;
-            coreItem.flags |= kModelHasOffset;
-            matchedCore = true;
-            break;
+        } else {
+            matched = findCommandByVerb(item);
+            if (!matched && !known.displayLabel.empty() &&
+                LabelsMatchIgnoreCase(item.label, known.displayLabel)) {
+                matched = findByCanonicalLabel(L"Display settings");
+            }
+            if (!matched && !known.personalizeLabel.empty() &&
+                LabelsMatchIgnoreCase(item.label, known.personalizeLabel)) {
+                matched = findByCanonicalLabel(L"Personalize");
+            }
+            if (!matched) {
+                for (MenuItem& coreItem : result.items) {
+                    if (coreItem.kind != ItemKind::Command) {
+                        continue;
+                    }
+                    if (LabelsMatchIgnoreCase(coreItem.label, item.label) ||
+                        (!coreItem.canonicalLabel.empty() &&
+                         LabelsMatchIgnoreCase(coreItem.canonicalLabel,
+                                               item.label))) {
+                        matched = &coreItem;
+                        break;
+                    }
+                }
+            }
+            if (matched) {
+                adoptDescriptor(*matched, item);
+            }
         }
-        if (matchedCore) {
+        if (matched) {
             continue;
         }
 
-        const std::wstring normalizedLabel = NormalizeMenuLabel(item.label);
-        if ((!normalizedLabel.empty() && coreLabels.count(normalizedLabel)) ||
-            (!item.canonicalVerb.empty() && coreVerbs.count(item.canonicalVerb))) {
-            continue;
-        }
         if (IsOpenGroupItem(item)) {
             addedOpen.push_back(item);
         } else {
@@ -14282,9 +14433,6 @@ MenuModel MergeCoreWithCached(const MenuModel& core, const MenuModel& cached) {
             result.items.insert(result.items.begin() + insertAt,
                                 addedOpen.begin(), addedOpen.end());
         } else {
-            // No open group to attach to (for example a background menu):
-            // keep these with the other extras at the bottom of the list
-            // instead of putting them at the very top.
             added.insert(added.end(), addedOpen.begin(), addedOpen.end());
         }
     }
@@ -16095,6 +16243,16 @@ void BuildItemsFromHMenu(HMENU menu, UINT idCmdFirst, IContextMenu* context,
         if (info.hSubMenu) {
             item.kind = ItemKind::Submenu;
             item.action = ActionKind::Submenu;
+            if (context && info.wID >= idCmdFirst) {
+                wchar_t verbBuffer[256] = {};
+                if (SUCCEEDED(context->GetCommandString(
+                        static_cast<UINT_PTR>(info.wID - idCmdFirst),
+                        GCS_VERBW, nullptr,
+                        reinterpret_cast<LPSTR>(verbBuffer),
+                        ARRAYSIZE(verbBuffer)))) {
+                    item.canonicalVerb = verbBuffer;
+                }
+            }
             BuildItemsFromHMenu(info.hSubMenu, idCmdFirst, context, nextId, item.children,
                                 ownerDraw);
         } else {
@@ -20798,6 +20956,15 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
 
     g_warmup.SetMenuOpen(true);
 
+    std::vector<MenuItem> sendToChildren;
+    const bool wantsSendTo = scope == Scope::Files || scope == Scope::Folders ||
+                             scope == Scope::Drive;
+    if (wantsSendTo) {
+        sendToChildren = GetSendToChildren();
+    }
+    const KnownCachedRoles knownRoles =
+        BuildKnownCachedRoles(signature, wantsSendTo ? &sendToChildren : nullptr);
+
     while (true) {
         std::optional<MenuModel> cached;
         bool needsDiscovery = false;
@@ -20875,7 +21042,7 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
             }
             model = cached
                         ? MergeCoreWithCached(BuildCoreModel(scope, paths, shape),
-                                              *cached)
+                                              *cached, knownRoles)
                         : BuildCoreModel(scope, paths, shape);
         }
         if (!g_settings->showMoreOptionsItem) {
@@ -20908,7 +21075,7 @@ bool ShowReplacementMenu(PendingCapture& capture, ShellViewKind kind, HWND owner
             if (item.kind == ItemKind::Submenu &&
                 item.builtinRole == BuiltinRole::SendTo &&
                 item.children.empty()) {
-                item.children = GetSendToChildren();
+                item.children = sendToChildren;
             }
         }
 

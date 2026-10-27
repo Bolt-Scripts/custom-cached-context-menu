@@ -181,9 +181,77 @@ static void TestLocalizationMenu() {
     cmo::SelectLanguage(L"en");
 }
 
+static void TestLocalizationDedup() {
+    cmo::SelectLanguage(L"fr-FR");
+    cmo::ResetNewTemplatesForTesting();
+    cmo::EnsureNewTemplates();
+    auto core = cmo::BuildCoreMenuForTesting(
+        cmo::Scope::Desktop, {}, cmo::Shape::Single);
+
+    cmo::MenuModel cached;
+    cmo::MenuItem newItem = cmo::MakeSubmenuForTesting(L"Nouveau");
+    newItem.children.push_back(cmo::MakeCommandForTesting(L"Document texte"));
+    newItem.children.push_back(cmo::MakeCommandForTesting(L"Dossier"));
+    newItem.children.push_back(cmo::MakeCommandForTesting(L"Raccourci"));
+    cached.items.push_back(newItem);
+    cached.items.push_back(cmo::MakeCommandForTesting(
+        L"Ouvrir dans le Terminal"));
+    cached.items.push_back(cmo::MakeCommandForTesting(
+        L"Paramètres d'affichage"));
+    cached.items.push_back(cmo::MakeCommandForTesting(L"Personnaliser"));
+
+    cmo::KnownCachedRoles known;
+    known.displayLabel = L"Paramètres d'affichage";
+    known.personalizeLabel = L"Personnaliser";
+    auto merged = cmo::MergeCoreWithCached(core, cached, known);
+    CHECK(cmo::CountItemsByRole(merged, cmo::BuiltinRole::New) == 1);
+    CHECK(cmo::CountItemsByLabel(merged, L"Paramètres d'affichage") == 1);
+    CHECK(cmo::CountItemsByLabel(merged, L"Personnaliser") == 1);
+    CHECK(cmo::CountItemsByLabel(merged, L"Ouvrir dans le Terminal") == 1);
+
+    auto newMenu = cmo::FindItemByRole(merged, cmo::BuiltinRole::New);
+    CHECK(newMenu != nullptr);
+    if (newMenu) {
+        CHECK(cmo::FindItemByLabelInItem(*newMenu, L"Document texte") != nullptr);
+    }
+
+    // A third-party one-child submenu is not New.
+    cmo::MenuModel falsePositive = core;
+    falsePositive.items.push_back(cmo::MakeSubmenuForTesting(L"Outils"));
+    falsePositive.items.back().children.push_back(
+        cmo::MakeCommandForTesting(L"Dossier"));
+    CHECK(cmo::InferCachedSubmenuRole(falsePositive.items.back(),
+                                      core.items, known) ==
+          cmo::BuiltinRole::None);
+
+    // Send to: child overlap identifies the native submenu and donates its
+    // children instead of duplicating it.
+    std::vector<cmo::MenuItem> sendTo;
+    sendTo.push_back(cmo::MakeCommandForTesting(L"Bureau"));
+    sendTo.push_back(cmo::MakeCommandForTesting(L"Documents"));
+    cmo::KnownCachedRoles sendKnown;
+    sendKnown.sendToChildren = &sendTo;
+    auto sendCore = cmo::BuildCoreMenuForTesting(
+        cmo::Scope::Folders, {L"C:\\folder"}, cmo::Shape::Single);
+    cmo::MenuModel sendCached;
+    cmo::MenuItem sendNative = cmo::MakeSubmenuForTesting(L"Envoyer vers");
+    sendNative.children = sendTo;
+    sendCached.items.push_back(sendNative);
+    auto sendMerged = cmo::MergeCoreWithCached(sendCore, sendCached, sendKnown);
+    CHECK(cmo::CountItemsByRole(sendMerged, cmo::BuiltinRole::SendTo) == 1);
+    auto sendItem = cmo::FindItemByRole(sendMerged, cmo::BuiltinRole::SendTo);
+    CHECK(sendItem != nullptr);
+    if (sendItem) {
+        CHECK(sendItem->children.size() == 2);
+    }
+
+    cmo::SelectLanguage(L"en");
+}
+
 int main() {
     TestLocalizationCore();
     TestLocalizationMenu();
+    TestLocalizationDedup();
 
     // The Windhawk metadata blocks must stay balanced: an unclosed readme
     // block makes the app show "Mod details are missing".

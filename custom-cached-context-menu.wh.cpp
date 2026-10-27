@@ -438,6 +438,278 @@ void LoadSettings() {
     g_settings.Publish(std::move(next));
 }
 
+// ===========================================================================
+// [CMO:Localization] Runtime language selection and display strings.
+// ===========================================================================
+
+struct LocalizationKey {
+    const wchar_t* key;
+    const wchar_t* english;
+};
+
+struct LocalizationLanguage {
+    const wchar_t* tag;
+    bool rtl;
+    const char* data;  // UTF-8 entries separated by '\x1F'
+};
+
+// [CMO:LocalizationData]
+// The generator replaces this table; the temporary rows keep the runtime
+// tests meaningful until the catalog is generated.
+const LocalizationKey kLocalizationKeys[] = {
+    {L"Open", L"Open"},
+    {L"Reset %s…", L"Reset %s…"},
+};
+
+const LocalizationLanguage kLocalizationLanguages[] = {
+    {L"en", false, "Open\x1FReset %s…"},
+    {L"fr", false, "Ouvrir\x1FRéinitialiser %s…"},
+    {L"de", false, "Öffnen\x1F"},
+    {L"ar", true, "فتح\x1F"},
+    {L"zh-CN", false, ""},
+    {L"zh-TW", false, ""},
+    {L"pt-BR", false, ""},
+    {L"pt-PT", false, ""},
+    {L"nb", false, ""},
+};
+// [/CMO:LocalizationData]
+
+struct TranslationTable {
+    std::wstring tag;
+    bool rtl = false;
+    std::unordered_map<std::wstring, std::wstring> values;
+};
+
+inline std::atomic<std::shared_ptr<const TranslationTable>> g_translation;
+
+std::shared_ptr<const TranslationTable> CurrentTranslation() {
+    return g_translation.load(std::memory_order_acquire);
+}
+
+size_t PrimaryTagLength(const wchar_t* tag) {
+    size_t length = 0;
+    while (tag[length] && tag[length] != L'-') {
+        ++length;
+    }
+    return length;
+}
+
+bool TagEquals(const wchar_t* left, const wchar_t* right) {
+    while (*left && *right) {
+        if (towlower(*left) != towlower(*right)) {
+            return false;
+        }
+        ++left;
+        ++right;
+    }
+    return *left == *right;
+}
+
+bool TagHasSubtag(const wchar_t* tag, const wchar_t* subtag) {
+    for (const wchar_t* cursor = tag; *cursor; ++cursor) {
+        if (cursor != tag && cursor[-1] != L'-') {
+            continue;
+        }
+        size_t index = 0;
+        while (subtag[index] &&
+               towlower(cursor[index]) == towlower(subtag[index])) {
+            ++index;
+        }
+        if (!subtag[index] &&
+            (cursor[index] == 0 || cursor[index] == L'-')) {
+            return true;
+        }
+    }
+    return false;
+}
+
+const LocalizationLanguage* FindLanguage(const wchar_t* tag) {
+    if (!tag || !*tag) {
+        return nullptr;
+    }
+    for (const LocalizationLanguage& language : kLocalizationLanguages) {
+        if (TagEquals(tag, language.tag)) {
+            return &language;
+        }
+    }
+
+    // Chinese needs the script, not just the language: Hong Kong and Macau use
+    // traditional characters like Taiwan.
+    const size_t primary = PrimaryTagLength(tag);
+    if (primary == 2 && towlower(tag[0]) == L'z' && towlower(tag[1]) == L'h') {
+        const bool traditional = TagHasSubtag(tag, L"Hant") ||
+                                 TagHasSubtag(tag, L"TW") ||
+                                 TagHasSubtag(tag, L"HK") ||
+                                 TagHasSubtag(tag, L"MO");
+        return FindLanguage(traditional ? L"zh-TW" : L"zh-CN");
+    }
+
+    for (const LocalizationLanguage& language : kLocalizationLanguages) {
+        if (PrimaryTagLength(language.tag) != primary) {
+            continue;
+        }
+        size_t index = 0;
+        while (index < primary &&
+               towlower(tag[index]) == towlower(language.tag[index])) {
+            ++index;
+        }
+        if (index == primary) {
+            return &language;
+        }
+    }
+    return nullptr;
+}
+
+const LocalizationLanguage* SystemLanguage() {
+    ULONG count = 0;
+    ULONG chars = 0;
+    if (GetUserPreferredUILanguages(MUI_LANGUAGE_NAME, &count, nullptr, &chars) &&
+        chars > 0) {
+        std::vector<wchar_t> buffer(chars);
+        if (GetUserPreferredUILanguages(MUI_LANGUAGE_NAME, &count, buffer.data(),
+                                        &chars)) {
+            for (const wchar_t* cursor = buffer.data(); *cursor;
+                 cursor += wcslen(cursor) + 1) {
+                if (const LocalizationLanguage* language =
+                        FindLanguage(cursor)) {
+                    return language;
+                }
+            }
+        }
+    }
+
+    wchar_t locale[LOCALE_NAME_MAX_LENGTH] = {};
+    if (LCIDToLocaleName(MAKELCID(GetUserDefaultUILanguage(), SORT_DEFAULT),
+                         locale, ARRAYSIZE(locale), 0)) {
+        if (const LocalizationLanguage* language = FindLanguage(locale)) {
+            return language;
+        }
+    }
+    return nullptr;
+}
+
+std::wstring Utf8ToWide(const char* text) {
+    if (!text || !*text) {
+        return std::wstring();
+    }
+    const int length =
+        MultiByteToWideChar(CP_UTF8, 0, text, -1, nullptr, 0);
+    if (length <= 1) {
+        return std::wstring();
+    }
+    std::wstring result(static_cast<size_t>(length - 1), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, text, -1, result.data(), length);
+    return result;
+}
+
+std::shared_ptr<const TranslationTable> BuildTranslationTable(
+    const LocalizationLanguage& language) {
+    auto table = std::make_shared<TranslationTable>();
+    table->tag = language.tag;
+    table->rtl = language.rtl;
+
+    std::vector<std::wstring> entries;
+    if (language.data && *language.data) {
+        const char* cursor = language.data;
+        while (true) {
+            const char* separator = strchr(cursor, '\x1F');
+            const size_t length = separator
+                                      ? static_cast<size_t>(separator - cursor)
+                                      : strlen(cursor);
+            std::string slice(cursor, length);
+            entries.push_back(Utf8ToWide(slice.c_str()));
+            if (!separator) {
+                break;
+            }
+            cursor = separator + 1;
+        }
+    }
+
+    const size_t keyCount = ARRAYSIZE(kLocalizationKeys);
+    for (size_t index = 0; index < keyCount; ++index) {
+        const LocalizationKey& key = kLocalizationKeys[index];
+        if (index < entries.size() && !entries[index].empty()) {
+            table->values[key.key] = entries[index];
+        }
+    }
+    return table;
+}
+
+void SelectLanguage(const std::wstring& setting) {
+    const LocalizationLanguage* language = nullptr;
+    if (setting.empty() || _wcsicmp(setting.c_str(), L"auto") == 0) {
+        language = SystemLanguage();
+    } else {
+        language = FindLanguage(setting.c_str());
+    }
+    if (!language) {
+        language = FindLanguage(L"en");
+    }
+    if (!language) {
+        return;
+    }
+    std::shared_ptr<const TranslationTable> table =
+        BuildTranslationTable(*language);
+    g_translation.store(std::move(table), std::memory_order_release);
+}
+
+std::wstring Tr(const wchar_t* key, const wchar_t* fallback = nullptr) {
+    if (!key) {
+        return fallback ? fallback : std::wstring();
+    }
+    const std::shared_ptr<const TranslationTable> table = CurrentTranslation();
+    if (table) {
+        const auto found = table->values.find(key);
+        if (found != table->values.end() && !found->second.empty()) {
+            return found->second;
+        }
+    }
+    if (fallback) {
+        return fallback;
+    }
+    for (const LocalizationKey& entry : kLocalizationKeys) {
+        if (_wcsicmp(entry.key, key) == 0) {
+            return entry.english;
+        }
+    }
+    return key;
+}
+
+std::wstring FormatTr(const wchar_t* key,
+                      std::initializer_list<std::wstring> args) {
+    std::wstring result = Tr(key, key);
+    for (const std::wstring& arg : args) {
+        const size_t stringAt = result.find(L"%s");
+        const size_t numberAt = result.find(L"%d");
+        size_t at = std::wstring::npos;
+        if (stringAt != std::wstring::npos &&
+            (numberAt == std::wstring::npos || stringAt < numberAt)) {
+            at = stringAt;
+        } else {
+            at = numberAt;
+        }
+        if (at == std::wstring::npos) {
+            break;
+        }
+        result.replace(at, 2, arg);
+    }
+    return result;
+}
+
+bool IsRtlLanguage() {
+    const std::shared_ptr<const TranslationTable> table = CurrentTranslation();
+    return table && table->rtl;
+}
+
+const wchar_t* CurrentLanguageTag() {
+    static thread_local std::wstring tag;
+    const std::shared_ptr<const TranslationTable> table = CurrentTranslation();
+    tag = table ? table->tag : L"en";
+    return tag.c_str();
+}
+
+// [/CMO:Localization]
+
 }  // namespace cmo
 
 // ===========================================================================

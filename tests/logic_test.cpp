@@ -109,7 +109,34 @@ public:
     }
 };
 
+static void TestLocalizationCore() {
+    CHECK(cmo::FindLanguage(L"fr-CA") != nullptr);
+    CHECK(std::wstring(cmo::FindLanguage(L"fr-CA")->tag) == L"fr");
+    CHECK(std::wstring(cmo::FindLanguage(L"de-AT")->tag) == L"de");
+    CHECK(std::wstring(cmo::FindLanguage(L"zh-HK")->tag) == L"zh-TW");
+    CHECK(std::wstring(cmo::FindLanguage(L"zh-CN")->tag) == L"zh-CN");
+    CHECK(std::wstring(cmo::FindLanguage(L"pt-BR")->tag) == L"pt-BR");
+    CHECK(std::wstring(cmo::FindLanguage(L"pt-PT")->tag) == L"pt-PT");
+    CHECK(std::wstring(cmo::FindLanguage(L"nb-NO")->tag) == L"nb");
+    CHECK(cmo::FindLanguage(L"xx-YY") == nullptr);
+
+    cmo::SelectLanguage(L"fr-FR");
+    CHECK(cmo::Tr(L"Open") == L"Ouvrir");
+    CHECK(cmo::Tr(L"Missing key", L"Fallback") == L"Fallback");
+    CHECK(cmo::Tr(L"Missing key") == L"Missing key");
+    CHECK(cmo::FormatTr(L"Reset %s…", {L"Colors"}) == L"Réinitialiser Colors…");
+    CHECK(!cmo::IsRtlLanguage());
+
+    cmo::SelectLanguage(L"ar");
+    CHECK(cmo::IsRtlLanguage());
+    CHECK(cmo::Tr(L"Open") == L"فتح");
+    cmo::SelectLanguage(L"en");
+    CHECK(cmo::Tr(L"Open") == L"Open");
+}
+
 int main() {
+    TestLocalizationCore();
+
     // The Windhawk metadata blocks must stay balanced: an unclosed readme
     // block makes the app show "Mod details are missing".
     {

@@ -51,9 +51,10 @@ native menu. **Show classic menu** does the same from the menu itself.
   fields, an HSV color picker, font-face validation, and instant preview.
 - **No code needed** — `menu.ini` supports rules (`hide`/`keep`/`move`),
   custom commands, custom submenus, per-item overrides, and an icon library.
-- **36 languages** — the menu, the in-menu settings and the Windhawk settings
-  page follow the Windows display language, with an override in the settings.
-  Third-party shell-extension labels stay in their own language.
+- **36 languages** — the menu and the in-menu settings follow the Windows
+  display language, with an override in the settings; the Windhawk settings
+  page follows Windhawk's own language. Third-party shell-extension labels
+  stay in their own language.
 
 ## Install
 
@@ -353,8 +354,8 @@ every key next to it, with commented examples for each section.
   company/product, ignoring generic vendor words).
 - Full per-item discovery dumps and handler-candidate listings require
   **Debug logging**.
-- Core menu labels are English; cached extension labels come from the shell and
-  are localized.
+- The menu is localized; cached extension labels come from the shell and stay
+  in the language the extension supplies.
 - "Paste shortcut" falls back to the untouched native menu on builds where
   the shell object rejects that verb. Sort by and Group by are real submenus
   implemented with the documented `IFolderView2` sort/group APIs. New is a

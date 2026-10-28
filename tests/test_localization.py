@@ -137,6 +137,14 @@ class LocalizationSourceTests(unittest.TestCase):
                     catalog_key = f"@effect:{value}"
                 self.assertIn(catalog_key, keys)
 
+        groups = set()
+        for match in re.finditer(
+            r'\{L"appearance", L"([^"]+)", L"([^"]+)"', body
+        ):
+            groups.add(match.group(2))
+        for group in groups:
+            self.assertIn(group, keys)
+
         for match in re.finditer(r'\{L"appearance", L"([^"]+)"', body):
             key = match.group(1)
             lower = key.lower()
@@ -150,11 +158,41 @@ class LocalizationSourceTests(unittest.TestCase):
                 label = label[0].upper() + label[1:]
             self.assertIn(label, keys)
 
+        for entry in source["keys"]:
+            key = entry["key"]
+            if key.startswith(("@option:", "@effect:", "@overlay:", "@theme:")):
+                self.assertFalse(
+                    entry["english"].startswith("@"),
+                    f"special key {key} has an internal English label",
+                )
+
+    def test_generated_settings_block_is_valid_yaml(self):
+        try:
+            import yaml
+        except ImportError:
+            self.skipTest("PyYAML is not installed")
+        mod_text = (REPO_ROOT / "custom-cached-context-menu.wh.cpp").read_text(
+            encoding="utf-8"
+        )
+        body, _, _ = gen_localization._settings_body(mod_text)
+        parsed = yaml.safe_load(body)
+        self.assertIsInstance(parsed, list)
+        self.assertGreaterEqual(len(parsed), 19)
+        theme = next(item for item in parsed if "theme" in item)
+        self.assertIn("$options", theme)
+        self.assertIn("$options:fr-FR", theme)
+        self.assertEqual(len(theme["$options"]), 17)
+        language = next(item for item in parsed if "language" in item)
+        self.assertEqual(len(language["$options"]), 37)
+        self.assertEqual(len(language["$options:fr-FR"]), 37)
+
     def test_metadata_block_is_localized(self):
         source = gen_localization.load_source(STRINGS_PATH)
         metadata = gen_localization.generate_windhawk_metadata_block(source)
         self.assertIn("// @name:fr-FR", metadata)
         self.assertIn("// @description:fr-FR", metadata)
+        self.assertEqual(metadata.count("// @name:"), 35)
+        self.assertEqual(metadata.count("// @description:"), 35)
         mod_text = (REPO_ROOT / "custom-cached-context-menu.wh.cpp").read_text(
             encoding="utf-8"
         )

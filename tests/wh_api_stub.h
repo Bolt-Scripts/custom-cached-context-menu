@@ -33,9 +33,10 @@ inline int Wh_GetIntSetting(const wchar_t* name, ...) {
 }
 
 inline const wchar_t* Wh_GetStringSetting(const wchar_t* name, ...) {
-    (void)name;
-    static const wchar_t empty[] = L"";
-    return empty;
+    static thread_local std::wstring value;
+    const auto it = WhStubValues().find(name ? name : L"");
+    value = it == WhStubValues().end() ? std::wstring() : it->second;
+    return value.c_str();
 }
 
 inline void Wh_FreeStringSetting(const wchar_t* string) {

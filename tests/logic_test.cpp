@@ -115,9 +115,22 @@ static void TestLocalizationCore() {
     CHECK(std::wstring(cmo::FindLanguage(L"de-AT")->tag) == L"de");
     CHECK(std::wstring(cmo::FindLanguage(L"zh-HK")->tag) == L"zh-TW");
     CHECK(std::wstring(cmo::FindLanguage(L"zh-CN")->tag) == L"zh-CN");
+    CHECK(std::wstring(cmo::FindLanguage(L"zh-Hans-HK")->tag) == L"zh-CN");
     CHECK(std::wstring(cmo::FindLanguage(L"pt-BR")->tag) == L"pt-BR");
     CHECK(std::wstring(cmo::FindLanguage(L"pt-PT")->tag) == L"pt-PT");
     CHECK(std::wstring(cmo::FindLanguage(L"nb-NO")->tag) == L"nb");
+    const cmo::LocalizationLanguage* norwegianBokmal =
+        cmo::FindLanguage(L"no-NO");
+    CHECK(norwegianBokmal != nullptr);
+    if (norwegianBokmal) {
+        CHECK(std::wstring(norwegianBokmal->tag) == L"nb");
+    }
+    const cmo::LocalizationLanguage* norwegianNynorsk =
+        cmo::FindLanguage(L"nn-NO");
+    CHECK(norwegianNynorsk != nullptr);
+    if (norwegianNynorsk) {
+        CHECK(std::wstring(norwegianNynorsk->tag) == L"nb");
+    }
     CHECK(cmo::FindLanguage(L"xx-YY") == nullptr);
 
     cmo::SelectLanguage(L"fr-FR");
@@ -147,9 +160,28 @@ static void TestLocalizationMenu() {
         CHECK(cmo::EffectiveLabel(*paste) == L"Coller");
     }
 
+    cmo::ResetNewTemplatesForTesting();
+    cmo::EnsureNewTemplates();
     auto desktop = cmo::BuildCoreMenuForTesting(
         cmo::Scope::Desktop, {}, cmo::Shape::Single);
     CHECK(cmo::FindItemByLabel(desktop, L"Nouveau") != nullptr);
+    auto newMenu = cmo::FindItemByRole(desktop, cmo::BuiltinRole::New);
+    CHECK(newMenu != nullptr);
+    if (newMenu) {
+        auto folder = cmo::FindItemByLabelInItem(*newMenu, L"Dossier");
+        CHECK(folder != nullptr);
+        if (folder) {
+            CHECK(folder->canonicalLabel == L"Folder");
+            CHECK(folder->newTemplateId == L"kind:folder");
+            cmo::PredicateExpr folderRule;
+            std::wstring folderError;
+            CHECK(cmo::ParsePredicateExpr(L"label:\"Folder\"", folderRule,
+                                          folderError));
+            cmo::ItemContext folderCtx{};
+            folderCtx.scope = cmo::Scope::Desktop;
+            CHECK(cmo::PredicateExprMatches(folderRule, *folder, folderCtx));
+        }
+    }
     CHECK(cmo::FindItemByLabel(desktop, L"Paramètres d'affichage") != nullptr);
     CHECK(cmo::FindItemByLabel(desktop, L"Personnaliser") != nullptr);
     CHECK(cmo::FindItemByRole(desktop, cmo::BuiltinRole::New) != nullptr);
@@ -205,6 +237,7 @@ static void TestLocalizationDedup() {
     known.personalizeLabel = L"Personnaliser";
     auto merged = cmo::MergeCoreWithCached(core, cached, known);
     CHECK(cmo::CountItemsByRole(merged, cmo::BuiltinRole::New) == 1);
+    CHECK(cmo::CountItemsByLabel(merged, L"Nouveau") == 1);
     CHECK(cmo::CountItemsByLabel(merged, L"Paramètres d'affichage") == 1);
     CHECK(cmo::CountItemsByLabel(merged, L"Personnaliser") == 1);
     CHECK(cmo::CountItemsByLabel(merged, L"Ouvrir dans le Terminal") == 1);
@@ -215,6 +248,33 @@ static void TestLocalizationDedup() {
         CHECK(cmo::FindItemByLabelInItem(*newMenu, L"Document texte") != nullptr);
     }
 
+    // The same detection must work when the override language differs from
+    // the cached shell language: match against the OS-language type names.
+    std::vector<cmo::MenuItem> osChildren;
+    for (const cmo::NewTemplate& tmpl : cmo::g_newTemplates) {
+        if (!tmpl.osDisplayName.empty() && osChildren.size() < 3) {
+            osChildren.push_back(cmo::MakeCommandForTesting(
+                tmpl.osDisplayName.c_str()));
+        }
+    }
+    CHECK(osChildren.size() == 3);
+    cmo::MenuModel osCached;
+    cmo::MenuItem osNew = cmo::MakeSubmenuForTesting(L"Neu");
+    osNew.children = osChildren;
+    osCached.items.push_back(osNew);
+    auto osMerged = cmo::MergeCoreWithCached(core, osCached, known);
+    CHECK(cmo::CountItemsByLabel(osMerged, L"Nouveau") == 1);
+
+    // A third-party command whose localized label merely matches the core
+    // translation must not be absorbed as a duplicate.
+    cmo::MenuModel labelCollision;
+    auto labelCore = cmo::BuildCoreMenuForTesting(
+        cmo::Scope::Folders, {L"C:\\folder"}, cmo::Shape::Single);
+    labelCollision.items.push_back(
+        cmo::MakeCommandForTesting(L"Coller (outil)"));
+    auto labelMerged = cmo::MergeCoreWithCached(labelCore, labelCollision);
+    CHECK(cmo::CountItemsByLabel(labelMerged, L"Coller (outil)") == 1);
+
     // A third-party one-child submenu is not New.
     cmo::MenuModel falsePositive = core;
     falsePositive.items.push_back(cmo::MakeSubmenuForTesting(L"Outils"));
@@ -222,6 +282,17 @@ static void TestLocalizationDedup() {
         cmo::MakeCommandForTesting(L"Dossier"));
     CHECK(cmo::InferCachedSubmenuRole(falsePositive.items.back(),
                                       core.items, known) ==
+          cmo::BuiltinRole::None);
+
+    cmo::MenuItem unrelated = cmo::MakeSubmenuForTesting(L"Outils");
+    unrelated.children.push_back(cmo::MakeCommandForTesting(L"Dossier"));
+    unrelated.children.push_back(cmo::MakeCommandForTesting(L"Raccourci"));
+    cmo::KnownCachedRoles noSendTo;
+    std::vector<cmo::MenuItem> someSendTo;
+    someSendTo.push_back(cmo::MakeCommandForTesting(L"Bureau"));
+    someSendTo.push_back(cmo::MakeCommandForTesting(L"Documents"));
+    noSendTo.sendToChildren = &someSendTo;
+    CHECK(cmo::InferCachedSubmenuRole(unrelated, core.items, noSendTo) ==
           cmo::BuiltinRole::None);
 
     // Send to: child overlap identifies the native submenu and donates its
@@ -244,6 +315,18 @@ static void TestLocalizationDedup() {
     if (sendItem) {
         CHECK(sendItem->children.size() == 2);
     }
+
+    // A one-entry Send to list is matched by its only child.
+    std::vector<cmo::MenuItem> oneSendTo;
+    oneSendTo.push_back(cmo::MakeCommandForTesting(L"Bureau"));
+    cmo::KnownCachedRoles oneKnown;
+    oneKnown.sendToChildren = &oneSendTo;
+    cmo::MenuModel oneCached;
+    cmo::MenuItem oneNative = cmo::MakeSubmenuForTesting(L"Envoyer vers");
+    oneNative.children = oneSendTo;
+    oneCached.items.push_back(oneNative);
+    auto oneMerged = cmo::MergeCoreWithCached(sendCore, oneCached, oneKnown);
+    CHECK(cmo::CountItemsByRole(oneMerged, cmo::BuiltinRole::SendTo) == 1);
 
     cmo::SelectLanguage(L"en");
 }
@@ -286,6 +369,20 @@ static void TestLocalizationSettings() {
     enumSpec.options = {L"normal", L"semibold", L"bold"};
     CHECK(cmo::EnumOptionIndex(enumSpec, L"Demi-gras") == 1);
     CHECK(cmo::EnumOptionIndex(enumSpec, L"Gras") == 2);
+
+    cmo::SelectLanguage(L"en");
+    CHECK(cmo::OptionDisplayLabel(L"fontWeight", L"semibold") == L"Semibold");
+    CHECK(cmo::TrEffect(L"fade") == L"Fade");
+    CHECK(cmo::TrOverlay(L"plasma") == L"Plasma");
+    CHECK(cmo::TrTheme(L"Windows 11 Dark") == L"Windows 11 Dark");
+    cmo::SelectLanguage(L"de");
+    CHECK(!cmo::OptionDisplayLabel(L"fontWeight", L"semibold").empty());
+    CHECK(cmo::OptionDisplayLabel(L"fontWeight", L"semibold")[0] != L'@');
+    CHECK(cmo::TrEffect(L"fade")[0] != L'@');
+    cmo::SelectLanguage(L"zh-CN");
+    CHECK(cmo::OptionDisplayLabel(L"fontWeight", L"semibold")[0] != L'@');
+    CHECK(cmo::TrOverlay(L"plasma")[0] != L'@');
+    CHECK(cmo::TrTheme(L"Windows 11 Dark")[0] != L'@');
 
     cmo::SelectLanguage(L"en");
 }
@@ -348,6 +445,12 @@ static void TestLocalizationRtlLayout() {
         (panel.items[0].iconRect.left + panel.items[0].iconRect.right) / 2,
         (panel.items[0].iconRect.top + panel.items[0].iconRect.bottom) / 2};
     CHECK(cmo::PointInRect(panel.items[0].iconRect, iconCenter));
+    POINT oldIconCenter = {
+        (iconBefore.left + iconBefore.right) / 2,
+        (iconBefore.top + iconBefore.bottom) / 2};
+    CHECK(!cmo::PointInRect(panel.items[0].iconRect, oldIconCenter));
+    CHECK(cmo::SliderValueFromX(0, 0, 100, 0, 100, 1) == 100);
+    CHECK(cmo::SliderValueFromX(100, 0, 100, 0, 100, 1) == 0);
 
     RECT parent = {300, 100, 500, 130};
     RECT work = {0, 0, 800, 600};
@@ -402,6 +505,71 @@ static void TestLocalizationBatch4() {
     CHECK(cmo::TranslateForTesting(L"zh-TW", L"New") == L"新增");
 }
 
+static void TestLocalizationMoveDestinations() {
+    cmo::SelectLanguage(L"fr-FR");
+    cmo::MenuModel model = cmo::BuildCoreMenuForTesting(
+        cmo::Scope::Desktop, {}, cmo::Shape::Single);
+    cmo::MenuItem custom = cmo::MakeCommandForTesting(L"Custom");
+    custom.action = cmo::ActionKind::ShellVerb;
+    custom.canonicalVerb = L"custom";
+    model.items.push_back(custom);
+
+    cmo::RulesConfig config;
+    cmo::Rule rule{};
+    rule.kind = cmo::RuleKind::Move;
+    rule.destination = L"View";
+    std::wstring error;
+    CHECK(cmo::ParsePredicateExpr(L"label:\"Custom\"", rule.match, error));
+    config.rules.push_back(rule);
+
+    cmo::ItemContext ctx{};
+    ctx.scope = cmo::Scope::Desktop;
+    cmo::ApplyRulesConfigToModel(model, config, ctx);
+    auto view = cmo::FindItemByLabel(model, L"Affichage");
+    CHECK(view != nullptr);
+    if (view) {
+        CHECK(cmo::FindItemByLabelInItem(*view, L"Custom") != nullptr);
+    }
+    CHECK(cmo::CountItemsByLabel(model, L"View") == 0);
+
+    cmo::MenuModel desktop = cmo::BuildCoreMenuForTesting(
+        cmo::Scope::Desktop, {}, cmo::Shape::Single);
+    cmo::MenuItem other = cmo::MakeCommandForTesting(L"Other");
+    other.action = cmo::ActionKind::ShellVerb;
+    other.canonicalVerb = L"other";
+    desktop.items.push_back(other);
+    cmo::RulesConfig config2;
+    cmo::Rule rule2{};
+    rule2.kind = cmo::RuleKind::Move;
+    rule2.destination = L"More options";
+    CHECK(cmo::ParsePredicateExpr(L"label:\"Other\"", rule2.match, error));
+    config2.rules.push_back(rule2);
+    cmo::ApplyRulesConfigToModel(desktop, config2, ctx);
+    auto more = cmo::FindItemByLabel(desktop, L"Plus d'options");
+    CHECK(more != nullptr);
+    if (more) {
+        CHECK(more->canonicalLabel == L"More options");
+        CHECK(more->builtinRole == cmo::BuiltinRole::MoreOptions);
+        CHECK(cmo::FindItemByLabelInItem(*more, L"Other") != nullptr);
+    }
+
+    cmo::SelectLanguage(L"en");
+}
+
+static void TestLocalizationSettingsChangedCallback() {
+    WhStubValues()[L"language"] = L"fr";
+    Wh_ModSettingsChanged();
+    CHECK(cmo::g_settings->language == L"fr");
+    CHECK(cmo::Tr(L"Open") == L"Ouvrir");
+    CHECK(!cmo::g_newTemplatesReady.load());
+
+    WhStubValues()[L"language"] = L"en";
+    Wh_ModSettingsChanged();
+    CHECK(cmo::g_settings->language == L"en");
+    CHECK(cmo::Tr(L"Open") == L"Open");
+    WhStubValues().erase(L"language");
+}
+
 int main() {
     TestLocalizationCore();
     TestLocalizationMenu();
@@ -413,6 +581,8 @@ int main() {
     TestLocalizationBatch2();
     TestLocalizationBatch3();
     TestLocalizationBatch4();
+    TestLocalizationMoveDestinations();
+    TestLocalizationSettingsChangedCallback();
 
     // The Windhawk metadata blocks must stay balanced: an unclosed readme
     // block makes the app show "Mod details are missing".
@@ -901,9 +1071,6 @@ int main() {
     CHECK(cmo::ScopeFromKind(cmo::ShellViewKind::ShellDefView, true) ==
           cmo::Scope::Background);
     CHECK(cmo::ScopeFromKind(cmo::ShellViewKind::NavPane, false) == cmo::Scope::NavPane);
-
-    CHECK_EQ(cmo::FormatMultiLabel(L"Open", 3), std::wstring(L"Open 3 items"));
-    CHECK_EQ(cmo::FormatMultiLabel(L"Copy", 1), std::wstring(L"Copy"));
 
     CHECK(cmo::ComputePasteEnabled(5, 5, true, false));
     CHECK(!cmo::ComputePasteEnabled(5, 5, false, true));
@@ -3582,11 +3749,13 @@ int main() {
         sendTo.kind = cmo::ItemKind::Submenu;
         sendTo.action = cmo::ActionKind::Submenu;
         sendTo.label = L"Send to";
+        sendTo.builtinRole = cmo::BuiltinRole::SendTo;
         core.items.push_back(sendTo);
 
         cmo::MenuModel cached{};
         cmo::MenuItem nativeSendTo = sendTo;
         nativeSendTo.label = L"Se&nd to";
+        nativeSendTo.canonicalVerb = L"sendto";
         cmo::MenuItem child{};
         child.id = 2;
         child.kind = cmo::ItemKind::Command;

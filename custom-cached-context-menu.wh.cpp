@@ -4243,10 +4243,12 @@ struct TranslationTable {
     std::unordered_map<std::wstring, std::wstring> values;
 };
 
-inline std::atomic<std::shared_ptr<const TranslationTable>> g_translation;
+std::mutex g_translationMutex;
+std::shared_ptr<const TranslationTable> g_translation;
 
 std::shared_ptr<const TranslationTable> CurrentTranslation() {
-    return g_translation.load(std::memory_order_acquire);
+    std::lock_guard<std::mutex> lock(g_translationMutex);
+    return g_translation;
 }
 
 size_t PrimaryTagLength(const wchar_t* tag) {
@@ -4447,7 +4449,10 @@ void SelectLanguage(const std::wstring& setting) {
     }
     std::shared_ptr<const TranslationTable> table =
         BuildTranslationTable(*language);
-    g_translation.store(std::move(table), std::memory_order_release);
+    {
+        std::lock_guard<std::mutex> lock(g_translationMutex);
+        g_translation = std::move(table);
+    }
     if (g_settings->debugLogging) {
         Wh_Log(L"language: %s", language->tag);
     }

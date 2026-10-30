@@ -21,8 +21,9 @@ DEFAULT_MOD = REPO_ROOT / "custom-cached-context-menu.wh.cpp"
 
 RUNTIME_START = "// [CMO:LocalizationData]"
 RUNTIME_END = "// [/CMO:LocalizationData]"
-METADATA_START = "// [CMO:WindhawkMetadata]"
-METADATA_END = "// [/CMO:WindhawkMetadata]"
+# Windhawk only accepts "// @key value" lines inside the mod metadata block,
+# so localized @name/@description lines are inserted without marker comments.
+
 
 FULL_LANGUAGE_TAGS = [
     "ar",
@@ -349,16 +350,31 @@ def replace_region(text: str, start: str, end: str, body: str) -> str:
     return text[:start_at] + "\n" + body.rstrip() + "\n" + text[end_at:]
 
 
+def replace_metadata_annotations(source_text: str,
+                                 data: dict[str, Any]) -> str:
+    start = source_text.index("// ==WindhawkMod==")
+    end = source_text.index("// ==/WindhawkMod==", start)
+    lines = source_text[start:end].splitlines()
+    kept = []
+    for line in lines:
+        if re.match(r"^// \[(/?)(CMO:WindhawkMetadata)\]", line):
+            continue
+        if re.match(r"^// @(name|description):[A-Za-z-]+ ", line):
+            continue
+        kept.append(line)
+    generated = generate_metadata_block(data)
+    body = "\n".join(kept).rstrip()
+    if generated:
+        body += "\n" + generated
+    return source_text[:start] + body + "\n" + source_text[end:]
+
+
 def generate_mod_text(source_text: str, data: dict[str, Any]) -> str:
     source_text = replace_region(
         source_text, RUNTIME_START, RUNTIME_END,
         generate_localization_block(data),
     )
-    if METADATA_START in source_text and METADATA_END in source_text:
-        source_text = replace_region(
-            source_text, METADATA_START, METADATA_END,
-            generate_metadata_block(data),
-        )
+    source_text = replace_metadata_annotations(source_text, data)
     body, body_start, body_end = _settings_body(source_text)
     generated_body = generate_windhawk_settings_body(data, body)
     source_text = (

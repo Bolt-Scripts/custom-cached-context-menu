@@ -186,6 +186,19 @@ class LocalizationSourceTests(unittest.TestCase):
         self.assertEqual(len(language["$options"]), 37)
         self.assertEqual(len(language["$options:fr-FR"]), 37)
 
+    def test_metadata_block_has_only_annotations(self):
+        mod_text = (REPO_ROOT / "custom-cached-context-menu.wh.cpp").read_text(
+            encoding="utf-8"
+        )
+        start = mod_text.index("// ==WindhawkMod==")
+        end = mod_text.index("// ==/WindhawkMod==", start)
+        for line in mod_text[start:end].splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("// =="):
+                continue
+            if not stripped.startswith("// @"):
+                self.fail(f"metadata block line is not an annotation: {line!r}")
+
     def test_metadata_block_is_localized(self):
         source = gen_localization.load_source(STRINGS_PATH)
         metadata = gen_localization.generate_windhawk_metadata_block(source)

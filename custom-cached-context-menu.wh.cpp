@@ -9,7 +9,6 @@
 // @license         MIT
 // @author          BOLT
 // @github          https://github.com/Bolt-Scripts
-// [CMO:WindhawkMetadata]
 // @name:ar قائمة السياق المخصصة المخزنة مؤقتًا
 // @description:ar فتح قائمة سياقات Explorer المخزنة مؤقتًا على الفور والقابلة للتخصيص بالكامل: السمات والتخطيط والألوان والرسوم المتحركة والقواعد والأوامر المخصصة.
 // @name:az Xüsusi Keşlənmiş Kontekst Menyu
@@ -80,7 +79,6 @@
 // @description:zh-CN 立即打开缓存的 Explorer 上下文菜单，可完全自定义：主题、布局、颜色、动画、规则和自定义命令。
 // @name:zh-TW 自訂快取上下文選單
 // @description:zh-TW 立即開啟快取的 Explorer 上下文選單，可完全自訂：主題、佈局、顏色、動畫、規則和自訂命令。
-// [/CMO:WindhawkMetadata]
 // ==/WindhawkMod==
 
 // ==WindhawkModReadme==

@@ -1276,6 +1276,18 @@
     {
       "key": "Selection marker",
       "english": "Selection marker"
+    },
+    {
+      "key": "New %s",
+      "english": "New %s"
+    },
+    {
+      "key": "New folder",
+      "english": "New folder"
+    },
+    {
+      "key": "New shortcut",
+      "english": "New shortcut"
     }
   ],
   "translations": {
@@ -1541,15 +1553,18 @@
       "@meta:setting.warmup.description": "Réchauffe les menus communs peu de temps après le démarrage d'Explorer afin que leur première ouverture soit instantanée. Le désactiver ignore le chargement de chaque gestionnaire de menu contextuel enregistré au démarrage (l'exposition du menu d'origine), ce qui évite les plantages de démarrage dus à des extensions tierces défectueuses ; la première ouverture de chaque contexte se construit ensuite à la demande, comme le menu d'origine. Un gestionnaire qui ferait planter le menu d'origine plante toujours.",
       "@meta:setting.warmupExtensions.description": "Types de fichiers séparés par des virgules dont les menus sont prédéfinis au démarrage d'Explorer.",
       "@meta:setting.warmupDelaySeconds.description": "Quelques secondes à attendre après le démarrage d'Explorer avant de réchauffer le cache.",
-      "Selection marker": "Marqueur de sélection"
+      "Selection marker": "Marqueur de sélection",
+      "New %s": "Nouveau %s",
+      "New folder": "Nouveau dossier",
+      "New shortcut": "Nouveau raccourci"
     },
     "de": {
       "Open": "Öffnen",
       "New": "Neu",
       "Reset %s…": "%s zurücksetzen…",
-      "Compressed (zipped) Folder": "Komprimierter (komprimierter) Ordner",
+      "Compressed (zipped) Folder": "Komprimierter (gezippter) Ordner",
       "Folder": "Ordner",
-      "Shortcut": "Abkürzung",
+      "Shortcut": "Verknüpfung",
       "About": "Über",
       "Align icons to grid": "Symbole am Raster ausrichten",
       "Auto arrange icons": "Symbole automatisch anordnen",
@@ -1596,7 +1611,7 @@
       "Status": "Status",
       "Target": "Ziel",
       "Theme": "Thema",
-      "Tiles": "Fliesen",
+      "Tiles": "Kacheln",
       "Use cornerRadius (unset)": "CornerRadius verwenden (nicht gesetzt)",
       "View": "Ansicht",
       "Windhawk settings…": "Windhawk-Einstellungen…",
@@ -1794,7 +1809,10 @@
       "@overlay:glow": "Glühen",
       "@overlay:scanlines": "Scanlinien",
       "@overlay:vignette": "Vignette",
-      "Selection marker": "Auswahlmarkierung"
+      "Selection marker": "Auswahlmarkierung",
+      "New %s": "Neuer %s",
+      "New folder": "Neuer Ordner",
+      "New shortcut": "Neue Verknüpfung"
     },
     "ar": {
       "Open": "فتح",
@@ -2047,7 +2065,10 @@
       "@overlay:glow": "توهج",
       "@overlay:scanlines": "خطوط المسح",
       "@overlay:vignette": "المقالة القصيرة",
-      "Selection marker": "علامة الاختيار"
+      "Selection marker": "علامة الاختيار",
+      "New %s": "جديد %s",
+      "New folder": "مجلد جديد",
+      "New shortcut": "اختصار جديد"
     },
     "es": {
       "New": "Nuevo",
@@ -2055,7 +2076,7 @@
       "Reset %s…": "Restablecer %s…",
       "Compressed (zipped) Folder": "Carpeta comprimida (en zip)",
       "Folder": "Carpeta",
-      "Shortcut": "Atajo",
+      "Shortcut": "Acceso directo",
       "About": "Acerca de",
       "Align icons to grid": "Alinear iconos a la cuadrícula",
       "Auto arrange icons": "Organizar iconos automáticamente",
@@ -2300,7 +2321,10 @@
       "@overlay:glow": "Resplandor",
       "@overlay:scanlines": "Líneas de exploración",
       "@overlay:vignette": "viñeta",
-      "Selection marker": "Marcador de selección"
+      "Selection marker": "Marcador de selección",
+      "New %s": "Nuevo %s",
+      "New folder": "Nueva carpeta",
+      "New shortcut": "Nuevo atajo"
     },
     "it": {
       "New": "Nuovo",
@@ -2308,8 +2332,8 @@
       "Reset %s…": "Ripristina %s…",
       "Compressed (zipped) Folder": "Cartella compressa (zippata).",
       "Folder": "Cartella",
-      "Shortcut": "Scorciatoia",
-      "About": "Circa",
+      "Shortcut": "Collegamento",
+      "About": "Informazioni",
       "Align icons to grid": "Allinea le icone alla griglia",
       "Auto arrange icons": "Disporre automaticamente le icone",
       "Content": "Contenuto",
@@ -2553,7 +2577,10 @@
       "@overlay:glow": "Bagliore",
       "@overlay:scanlines": "Linee di scansione",
       "@overlay:vignette": "Vignetta",
-      "Selection marker": "Indicatore di selezione"
+      "Selection marker": "Indicatore di selezione",
+      "New %s": "Nuovo %s",
+      "New folder": "Nuova cartella",
+      "New shortcut": "Nuova scorciatoia"
     },
     "pt-BR": {
       "New": "Novo",
@@ -2806,7 +2833,10 @@
       "@overlay:glow": "Brilho",
       "@overlay:scanlines": "Linhas de varredura",
       "@overlay:vignette": "Vinheta",
-      "Selection marker": "Marcador de seleção"
+      "Selection marker": "Marcador de seleção",
+      "New %s": "Novo %s",
+      "New folder": "Nova pasta",
+      "New shortcut": "Novo atalho"
     },
     "pt-PT": {
       "New": "Novo",
@@ -3059,7 +3089,10 @@
       "@overlay:glow": "Brilho",
       "@overlay:scanlines": "Linhas de varrimento",
       "@overlay:vignette": "Vinheta",
-      "Selection marker": "Marcador de seleção"
+      "Selection marker": "Marcador de seleção",
+      "New %s": "Novo %s",
+      "New folder": "Nova pasta",
+      "New shortcut": "Novo atalho"
     },
     "pl": {
       "New": "Nowy",
@@ -3312,7 +3345,10 @@
       "@overlay:glow": "Blask",
       "@overlay:scanlines": "Scanlines",
       "@overlay:vignette": "Winieta",
-      "Selection marker": "Znacznik wyboru"
+      "Selection marker": "Znacznik wyboru",
+      "New %s": "Nowy %s",
+      "New folder": "Nowy folder",
+      "New shortcut": "Nowy skrót"
     },
     "tr": {
       "New": "Yeni",
@@ -3565,7 +3601,10 @@
       "@overlay:glow": "Parıltı",
       "@overlay:scanlines": "Tarama çizgileri",
       "@overlay:vignette": "Skeç",
-      "Selection marker": "Seçim işaretçisi"
+      "Selection marker": "Seçim işaretçisi",
+      "New %s": "Yeni %s",
+      "New folder": "Yeni klasör",
+      "New shortcut": "Yeni kısayol"
     },
     "cs": {
       "New": "Nový",
@@ -3818,7 +3857,10 @@
       "@overlay:glow": "Záře",
       "@overlay:scanlines": "Scanlines",
       "@overlay:vignette": "Viněta",
-      "Selection marker": "Značka výběru"
+      "Selection marker": "Značka výběru",
+      "New %s": "Nový %s",
+      "New folder": "Nová složka",
+      "New shortcut": "Nová zkratka"
     },
     "ro": {
       "New": "Nou",
@@ -4071,7 +4113,10 @@
       "@overlay:glow": "Strălucire",
       "@overlay:scanlines": "Linii de scanare",
       "@overlay:vignette": "Vigneta",
-      "Selection marker": "Marker de selecție"
+      "Selection marker": "Marker de selecție",
+      "New %s": "%s nou",
+      "New folder": "Dosar nou",
+      "New shortcut": "Comandă rapidă nouă"
     },
     "ru": {
       "New": "Создать",
@@ -4218,7 +4263,7 @@
       "Slide offset Y": "Смещение слайда Y",
       "Scale from": "Масштабировать от",
       "Saturation / value": "Насыщенность/значение",
-      "Hue": "Хюэ",
+      "Hue": "Оттенок",
       "Alpha": "Альфа",
       "Red": "Красный",
       "Green": "Зеленый",
@@ -4241,9 +4286,9 @@
       "@meta:setting.theme.description": "Загружает внешний вид из <storage>\\themes\\<name>.ini (созданный из встроенного пресета при первом использовании). menu.ini никогда не модифицируется.",
       "@meta:option.theme.Custom (menu.ini)": "Пользовательский (menu.ini)",
       "@meta:option.theme.Windows 11 Dark": "Windows 11 Темный",
-      "@meta:option.theme.Windows 11 Light": "Windows 11 Свет",
+      "@meta:option.theme.Windows 11 Light": "Windows 11 Светлая",
       "@meta:option.theme.Windows 10 Dark": "Windows 10 Темный",
-      "@meta:option.theme.Windows 10 Light": "Windows 10 Свет",
+      "@meta:option.theme.Windows 10 Light": "Windows 10 Светлая",
       "@meta:option.theme.High Contrast": "Высокая контрастность",
       "@meta:setting.menuMode.name": "Режим меню",
       "@meta:setting.menuMode.description": "Custom рисует самостоятельно отображаемое меню и возвращается к классическому меню после повторяющихся сбоев. Classic всегда использует меню, нарисованное владельцем.",
@@ -4286,9 +4331,9 @@
       "@meta:language.auto": "Автоматически (соответствует Windows)",
       "@theme:Custom (menu.ini)": "Пользовательский (menu.ini)",
       "@theme:Windows 11 Dark": "Windows 11 Темный",
-      "@theme:Windows 11 Light": "Windows 11 Свет",
+      "@theme:Windows 11 Light": "Windows 11 Светлая",
       "@theme:Windows 10 Dark": "Windows 10 Темный",
-      "@theme:Windows 10 Light": "Windows 10 Свет",
+      "@theme:Windows 10 Light": "Windows 10 Светлая",
       "@theme:High Contrast": "Высокая контрастность",
       "@option:fontWeight:normal": "Нормальный",
       "@option:fontWeight:semibold": "Полужирный",
@@ -4324,7 +4369,10 @@
       "@overlay:glow": "Свечение",
       "@overlay:scanlines": "Развертки",
       "@overlay:vignette": "Виньетка",
-      "Selection marker": "Маркер выбора"
+      "Selection marker": "Маркер выбора",
+      "New %s": "Новый %s",
+      "New folder": "Новая папка",
+      "New shortcut": "Новый ярлык"
     },
     "uk": {
       "New": "Створити",
@@ -4577,7 +4625,10 @@
       "@overlay:glow": "Світіння",
       "@overlay:scanlines": "Сканлайни",
       "@overlay:vignette": "Віньєтка",
-      "Selection marker": "Маркер виділення"
+      "Selection marker": "Маркер виділення",
+      "New %s": "Новий %s",
+      "New folder": "Нова папка",
+      "New shortcut": "Новий ярлик"
     },
     "fa": {
       "New": "جدید",
@@ -4747,9 +4798,9 @@
       "@meta:setting.theme.description": "ظاهر را از <storage>\\themes\\<name>.ini بارگیری می‌کند (ایجاد شده از پیش تنظیم همراه در اولین استفاده). menu.ini هرگز اصلاح نمی شود.",
       "@meta:option.theme.Custom (menu.ini)": "سفارشی (menu.ini)",
       "@meta:option.theme.Windows 11 Dark": "Windows 11 تیره",
-      "@meta:option.theme.Windows 11 Light": "چراغ Windows 11",
+      "@meta:option.theme.Windows 11 Light": "Windows 11 روشن",
       "@meta:option.theme.Windows 10 Dark": "Windows 10 تیره",
-      "@meta:option.theme.Windows 10 Light": "چراغ Windows 10",
+      "@meta:option.theme.Windows 10 Light": "Windows 10 روشن",
       "@meta:option.theme.High Contrast": "کنتراست بالا",
       "@meta:setting.menuMode.name": "حالت منو",
       "@meta:setting.menuMode.description": "سفارشی منوی خود رندر شده را ترسیم می کند و پس از شکست های مکرر به منوی کلاسیک بازمی گردد. کلاسیک همیشه از منوی طراحی شده توسط مالک استفاده می کند.",
@@ -4792,9 +4843,9 @@
       "@meta:language.auto": "خودکار (مطابقت با ویندوز)",
       "@theme:Custom (menu.ini)": "سفارشی (menu.ini)",
       "@theme:Windows 11 Dark": "Windows 11 تیره",
-      "@theme:Windows 11 Light": "چراغ Windows 11",
+      "@theme:Windows 11 Light": "Windows 11 روشن",
       "@theme:Windows 10 Dark": "Windows 10 تیره",
-      "@theme:Windows 10 Light": "چراغ Windows 10",
+      "@theme:Windows 10 Light": "Windows 10 روشن",
       "@theme:High Contrast": "کنتراست بالا",
       "@option:fontWeight:normal": "عادی",
       "@option:fontWeight:semibold": "نیمه پررنگ",
@@ -4830,7 +4881,10 @@
       "@overlay:glow": "درخشش",
       "@overlay:scanlines": "اسکن لاین ها",
       "@overlay:vignette": "وینیت",
-      "Selection marker": "نشانگر انتخاب"
+      "Selection marker": "نشانگر انتخاب",
+      "New %s": "%s جدید",
+      "New folder": "پوشه جدید",
+      "New shortcut": "میانبر جدید"
     },
     "ja": {
       "New": "新規",
@@ -5083,7 +5137,10 @@
       "@overlay:glow": "グロー",
       "@overlay:scanlines": "走査線",
       "@overlay:vignette": "ビネット",
-      "Selection marker": "選択マーカー"
+      "Selection marker": "選択マーカー",
+      "New %s": "新しい%s",
+      "New folder": "新しいフォルダー",
+      "New shortcut": "新しいショートカット"
     },
     "ko": {
       "New": "새로 만들기",
@@ -5336,7 +5393,10 @@
       "@overlay:glow": "글로우",
       "@overlay:scanlines": "스캔라인",
       "@overlay:vignette": "비네트",
-      "Selection marker": "선택 마커"
+      "Selection marker": "선택 마커",
+      "New %s": "새로운 %s",
+      "New folder": "새 폴더",
+      "New shortcut": "새로운 단축키"
     },
     "zh-CN": {
       "New": "新建",
@@ -5589,7 +5649,10 @@
       "@overlay:glow": "发光",
       "@overlay:scanlines": "扫描线",
       "@overlay:vignette": "小插图",
-      "Selection marker": "选择标记"
+      "Selection marker": "选择标记",
+      "New %s": "新建 %s",
+      "New folder": "新建文件夹",
+      "New shortcut": "新建快捷方式"
     },
     "zh-TW": {
       "New": "新增",
@@ -5842,7 +5905,10 @@
       "@overlay:glow": "發光",
       "@overlay:scanlines": "掃描線",
       "@overlay:vignette": "小插圖",
-      "Selection marker": "選擇標記"
+      "Selection marker": "選擇標記",
+      "New %s": "新增 %s",
+      "New folder": "新增資料夾",
+      "New shortcut": "新增捷徑"
     },
     "th": {
       "New": "ใหม่",
@@ -6095,7 +6161,10 @@
       "@overlay:glow": "เรืองแสง",
       "@overlay:scanlines": "สแกนไลน์",
       "@overlay:vignette": "บทความสั้น",
-      "Selection marker": "เครื่องหมายการเลือก"
+      "Selection marker": "เครื่องหมายการเลือก",
+      "New %s": "%s ใหม่",
+      "New folder": "โฟลเดอร์ใหม่",
+      "New shortcut": "ทางลัดใหม่"
     },
     "da": {
       "Open": "Åbn",
@@ -6348,7 +6417,10 @@
       "@overlay:glow": "Glød",
       "@overlay:scanlines": "Scanlines",
       "@overlay:vignette": "Vignette",
-      "Selection marker": "Markeringsmarkør"
+      "Selection marker": "Markeringsmarkør",
+      "New %s": "Ny %s",
+      "New folder": "Ny mappe",
+      "New shortcut": "Ny genvej"
     },
     "nb": {
       "Open": "Åpne",
@@ -6601,7 +6673,10 @@
       "@overlay:glow": "Glød",
       "@overlay:scanlines": "Scanlines",
       "@overlay:vignette": "Vignett",
-      "Selection marker": "Markeringsmarkør"
+      "Selection marker": "Markeringsmarkør",
+      "New %s": "Ny %s",
+      "New folder": "Ny mappe",
+      "New shortcut": "Ny snarvei"
     },
     "nl": {
       "Open": "Openen",
@@ -6854,7 +6929,10 @@
       "@overlay:glow": "Gloed",
       "@overlay:scanlines": "Scanlijnen",
       "@overlay:vignette": "Vignet",
-      "Selection marker": "Selectiemarkering"
+      "Selection marker": "Selectiemarkering",
+      "New %s": "Nieuwe %s",
+      "New folder": "Nieuwe map",
+      "New shortcut": "Nieuwe snelkoppeling"
     },
     "sv": {
       "Open": "Öppna",
@@ -7107,7 +7185,10 @@
       "@overlay:glow": "Glöd",
       "@overlay:scanlines": "Scanlines",
       "@overlay:vignette": "Vinjett",
-      "Selection marker": "Urvalsmarkör"
+      "Selection marker": "Urvalsmarkör",
+      "New %s": "Ny %s",
+      "New folder": "Ny mapp",
+      "New shortcut": "Ny genväg"
     },
     "hu": {
       "New": "Új",
@@ -7116,7 +7197,7 @@
       "Compressed (zipped) Folder": "Tömörített (cipzáras) mappa",
       "Folder": "Mappa",
       "Shortcut": "Parancsikon",
-      "About": "Körülbelül",
+      "About": "Névjegy",
       "Align icons to grid": "Igazítsa az ikonokat a rácshoz",
       "Auto arrange icons": "Az ikonok automatikus elrendezése",
       "Content": "Tartalom",
@@ -7277,9 +7358,9 @@
       "@meta:setting.theme.description": "Betölti a <storage>\\themes\\<name>.ini megjelenését (az első használatkor a mellékelt előbeállításból készült). A menu.ini-t soha nem módosítják.",
       "@meta:option.theme.Custom (menu.ini)": "Egyéni (menu.ini)",
       "@meta:option.theme.Windows 11 Dark": "Windows 11 Sötét",
-      "@meta:option.theme.Windows 11 Light": "Windows 11 lámpa",
+      "@meta:option.theme.Windows 11 Light": "Windows 11 Világos",
       "@meta:option.theme.Windows 10 Dark": "Windows 10 Sötét",
-      "@meta:option.theme.Windows 10 Light": "Windows 10 lámpa",
+      "@meta:option.theme.Windows 10 Light": "Windows 10 Világos",
       "@meta:option.theme.High Contrast": "Magas kontraszt",
       "@meta:setting.menuMode.name": "Menü mód",
       "@meta:setting.menuMode.description": "Az Egyéni megrajzolja a saját készítésű menüt, és ismételt meghibásodások után visszatér a klasszikus menühöz. A Classic mindig a tulajdonos által készített menüt használja.",
@@ -7322,9 +7403,9 @@
       "@meta:language.auto": "Automatikus (egyezik a Windows rendszerrel)",
       "@theme:Custom (menu.ini)": "Egyéni (menu.ini)",
       "@theme:Windows 11 Dark": "Windows 11 Sötét",
-      "@theme:Windows 11 Light": "Windows 11 lámpa",
+      "@theme:Windows 11 Light": "Windows 11 Világos",
       "@theme:Windows 10 Dark": "Windows 10 Sötét",
-      "@theme:Windows 10 Light": "Windows 10 lámpa",
+      "@theme:Windows 10 Light": "Windows 10 Világos",
       "@theme:High Contrast": "Magas kontraszt",
       "@option:fontWeight:normal": "Normális",
       "@option:fontWeight:semibold": "Semibold",
@@ -7360,7 +7441,10 @@
       "@overlay:glow": "Ragyog",
       "@overlay:scanlines": "Scanlines",
       "@overlay:vignette": "Vignetta",
-      "Selection marker": "Kiválasztás marker"
+      "Selection marker": "Kiválasztás marker",
+      "New %s": "Új %s",
+      "New folder": "Új mappa",
+      "New shortcut": "Új parancsikon"
     },
     "hr": {
       "New": "Novo",
@@ -7613,7 +7697,10 @@
       "@overlay:glow": "Sjaj",
       "@overlay:scanlines": "Scanlines",
       "@overlay:vignette": "Vinjeta",
-      "Selection marker": "Marker odabira"
+      "Selection marker": "Marker odabira",
+      "New %s": "Novi %s",
+      "New folder": "Nova mapa",
+      "New shortcut": "Novi prečac"
     },
     "az": {
       "New": "Yeni",
@@ -7866,7 +7953,10 @@
       "@overlay:glow": "Parıltı",
       "@overlay:scanlines": "Skan xətləri",
       "@overlay:vignette": "Vinyet",
-      "Selection marker": "Seçim markeri"
+      "Selection marker": "Seçim markeri",
+      "New %s": "Yeni %s",
+      "New folder": "Yeni qovluq",
+      "New shortcut": "Yeni qısayol"
     },
     "uz": {
       "New": "Yangi",
@@ -8119,7 +8209,10 @@
       "@overlay:glow": "Yorqin",
       "@overlay:scanlines": "Skanerlar",
       "@overlay:vignette": "Vinyetka",
-      "Selection marker": "Tanlash belgisi"
+      "Selection marker": "Tanlash belgisi",
+      "New %s": "Yangi %s",
+      "New folder": "Yangi jild",
+      "New shortcut": "Yangi yorliq"
     },
     "el": {
       "New": "Νέο",
@@ -8128,7 +8221,7 @@
       "Compressed (zipped) Folder": "Συμπιεσμένος (φερμουάρ) φάκελος",
       "Folder": "Φάκελος",
       "Shortcut": "Συντόμευση",
-      "About": "Περίπου",
+      "About": "Πληροφορίες",
       "Align icons to grid": "Ευθυγραμμίστε τα εικονίδια στο πλέγμα",
       "Auto arrange icons": "Αυτόματη τακτοποίηση εικονιδίων",
       "Content": "περιεχόμενο",
@@ -8372,7 +8465,10 @@
       "@overlay:glow": "Λάμψη",
       "@overlay:scanlines": "Scanlines",
       "@overlay:vignette": "Βινιέτα",
-      "Selection marker": "Δείκτης επιλογής"
+      "Selection marker": "Δείκτης επιλογής",
+      "New %s": "Νέο %s",
+      "New folder": "Νέος φάκελος",
+      "New shortcut": "Νέα συντόμευση"
     },
     "hi": {
       "New": "नया",
@@ -8625,7 +8721,10 @@
       "@overlay:glow": "चमक",
       "@overlay:scanlines": "स्कैनलाइन",
       "@overlay:vignette": "विगनेट",
-      "Selection marker": "चयन मार्कर"
+      "Selection marker": "चयन मार्कर",
+      "New %s": "नया %s",
+      "New folder": "नया फ़ोल्डर",
+      "New shortcut": "नया शॉर्टकट"
     },
     "bn": {
       "New": "নতুন",
@@ -8878,12 +8977,15 @@
       "@overlay:glow": "দীপ্তি",
       "@overlay:scanlines": "স্ক্যানলাইন",
       "@overlay:vignette": "ভিগনেট",
-      "Selection marker": "নির্বাচন মার্কার"
+      "Selection marker": "নির্বাচন মার্কার",
+      "New %s": "নতুন %s",
+      "New folder": "নতুন ফোল্ডার",
+      "New shortcut": "নতুন শর্টকাট"
     },
     "or": {
       "New": "ନୂତନ",
       "Open": "ଖୋଲନ୍ତୁ",
-      "Reset %s…": "%s ପୁନ Res ସେଟ୍ କରନ୍ତୁ…",
+      "Reset %s…": "%s ପୁନଃସେଟ୍ କରନ୍ତୁ…",
       "Compressed (zipped) Folder": "ସଙ୍କୋଚିତ (ଜିପ୍) ଫୋଲ୍ଡର୍",
       "Folder": "ଫୋଲ୍ଡର",
       "Shortcut": "ସର୍ଟକଟ୍",
@@ -8922,8 +9024,8 @@
       "Refresh": "ସତେଜ",
       "Rename": "ନାମ ପରିବର୍ତ୍ତନ କରନ୍ତୁ",
       "Replay open animation": "ଖୋଲା ଆନିମେସନ୍ ରିପ୍ଲେ କରନ୍ତୁ",
-      "Reset all appearance": "ସମସ୍ତ ରୂପ ପୁନ Res ସେଟ୍ କରନ୍ତୁ",
-      "Reset all appearance…": "ସମସ୍ତ ରୂପ ପୁନ Res ସେଟ୍ କରନ୍ତୁ…",
+      "Reset all appearance": "ସମସ୍ତ ରୂପ ପୁନଃସେଟ୍ କରନ୍ତୁ",
+      "Reset all appearance…": "ସମସ୍ତ ରୂପ ପୁନଃସେଟ୍ କରନ୍ତୁ…",
       "Scale options…": "ମାପକାଠି ବିକଳ୍ପ…",
       "Send to": "ପଠାନ୍ତୁ",
       "Size": "ଆକାର",
@@ -8957,7 +9059,7 @@
       "Font not found": "ଫଣ୍ଟ ମିଳିଲା ନାହିଁ",
       "Base appearance": "ମୂଳ ରୂପ",
       "Light appearance": "ହାଲୁକା ରୂପ",
-      "Dark appearance": "ଗା ark ରୂପ",
+      "Dark appearance": "ଅନ୍ଧାର ରୂପ",
       "deprecated — use animationOpen/Close": "ପୁରୁଣା - animationOpen/Close ବ୍ୟବହାର କରନ୍ତୁ",
       "Theme: %s — editing theme file": "ଥିମ୍: %s - ଥିମ୍ ଫାଇଲ୍ ଏଡିଟ୍ କରିବା",
       "schema %d": "ସ୍କିମା %d",
@@ -8996,7 +9098,7 @@
       "Marker color": "ମାର୍କର ରଙ୍ଗ",
       "Font": "ଫଣ୍ଟ",
       "Font weight": "ଫଣ୍ଟ ଓଜନ",
-      "Font style": "ଫଣ୍ଟ ଶ style ଳୀ",
+      "Font style": "ଫଣ୍ଟ ଶୈଳୀ",
       "Accelerator display": "ତ୍ୱରଣକାରୀ ପ୍ରଦର୍ଶନ",
       "Shadow size": "ଛାୟା ଆକାର",
       "Shadow offset X": "ଛାୟା ଅଫସେଟ୍ X",
@@ -9025,7 +9127,7 @@
       "Slide offset Y": "ସ୍ଲାଇଡ୍ ଅଫସେଟ୍ Y",
       "Scale from": "ଠାରୁ ମାପ",
       "Saturation / value": "ପରିପୃଷ୍ଠା / ମୂଲ୍ୟ",
-      "Hue": "ହୁ",
+      "Hue": "ରଙ୍ଗ",
       "Alpha": "ଆଲଫା",
       "Red": "ଲାଲ୍",
       "Green": "ସବୁଜ",
@@ -9047,10 +9149,10 @@
       "@meta:setting.theme.name": "ଥିମ୍",
       "@meta:setting.theme.description": "<storage>\\themes\\<name>.ini ରୁ ଦୃଶ୍ୟ ଲୋଡ୍ କରେ (ପ୍ରଥମ ବ୍ୟବହାରରେ ବଣ୍ଡଲ୍ ପ୍ରିସେଟରୁ ସୃଷ୍ଟି) | menu.ini କଦାପି ପରିବର୍ତ୍ତିତ ହୁଏ ନାହିଁ",
       "@meta:option.theme.Custom (menu.ini)": "କଷ୍ଟମ୍ (menu.ini)",
-      "@meta:option.theme.Windows 11 Dark": "Windows 11 ଗା ark",
-      "@meta:option.theme.Windows 11 Light": "Windows 11 ଆଲୋକ",
-      "@meta:option.theme.Windows 10 Dark": "Windows 10 ଗା ark",
-      "@meta:option.theme.Windows 10 Light": "Windows 10 ଆଲୋକ",
+      "@meta:option.theme.Windows 11 Dark": "Windows 11 ଅନ୍ଧାର",
+      "@meta:option.theme.Windows 11 Light": "Windows 11 ଉଜ୍ଜ୍ୱଳ",
+      "@meta:option.theme.Windows 10 Dark": "Windows 10 ଅନ୍ଧାର",
+      "@meta:option.theme.Windows 10 Light": "Windows 10 ଉଜ୍ଜ୍ୱଳ",
       "@meta:option.theme.High Contrast": "ଉଚ୍ଚ କଣ୍ଟ୍ରାସ୍",
       "@meta:setting.menuMode.name": "ମେନୁ ମୋଡ୍",
       "@meta:setting.menuMode.description": "କଷ୍ଟମ୍ ସ୍ୱ-ରେଣ୍ଡେଡ୍ ମେନୁ ଆଙ୍କିଥାଏ ଏବଂ ବାରମ୍ବାର ବିଫଳତା ପରେ କ୍ଲାସିକ୍ ମେନୁକୁ ଫେରିଯାଏ | କ୍ଲାସିକ୍ ସର୍ବଦା ମାଲିକ-ଅଙ୍କିତ ମେନୁ ବ୍ୟବହାର କରେ",
@@ -9065,7 +9167,7 @@
       "@meta:setting.showMoreOptionsItem.name": "କ୍ଲାସିକ୍ ମେନୁ ଆଇଟମ୍ ଦେଖାନ୍ତୁ",
       "@meta:setting.showMoreOptionsItem.description": "ପ୍ରତିସ୍ଥାପନ ମେନୁର ତଳେ ଏକ “କ୍ଲାସିକ୍ ମେନୁ ଦେଖାନ୍ତୁ” ଏଣ୍ଟ୍ରି ଯୋଡନ୍ତୁ",
       "@meta:setting.topBar.name": "ଶୀର୍ଷ ଆକ୍ସନ୍ ବାର୍",
-      "@meta:setting.topBar.description": "Windows 11 ମେନୁ ପରି କର୍ସର୍ ନିକଟ ମେନୁ ପାର୍ଶ୍ୱରେ ଥିବା ଏକ ଆଇକନ୍ ବାର୍ ରେ କଟ୍, କପି, ଲେପନ, ପୁନ ame ନାମ ଏବଂ ଡିଲିଟ୍ କୁ ଘୁଞ୍ଚାଏ | କେବଳ କଷ୍ଟମ୍ ମେନୁ ମୋଡ୍",
+      "@meta:setting.topBar.description": "Windows 11 ମେନୁ ପରି କର୍ସର୍ ନିକଟ ମେନୁ ପାର୍ଶ୍ୱରେ ଥିବା ଏକ ଆଇକନ୍ ବାର୍ ରେ କଟ୍, କପି, ଲେପନ, ପୁନଃନାମ ଏବଂ ଡିଲିଟ୍ କୁ ଘୁଞ୍ଚାଏ | କେବଳ କଷ୍ଟମ୍ ମେନୁ ମୋଡ୍",
       "@meta:setting.submenuDelayMs.name": "ସବମେନୁ ଖୋଲା ବିଳମ୍ବ",
       "@meta:setting.submenuDelayMs.description": "ପ୍ରତିସ୍ଥାପନ ମେନୁ ଦେଖାଯାଉଥିବାବେଳେ ଏକ ହୋଭର୍ ସବମେନୁ ଖୋଲିବା ପୂର୍ବରୁ ମିଲିସେକେଣ୍ଡ | 0 ତତକ୍ଷଣାତ୍ ଖୋଲିବ; -1 ୱିଣ୍ଡୋଜ୍ ସେଟିଂ ରଖେ",
       "@meta:setting.advancedSubmenuWindows.name": "ୱିଣ୍ଡୋଜ୍ ଅତିରିକ୍ତଗୁଡିକ ଘୁଞ୍ଚାନ୍ତୁ",
@@ -9079,11 +9181,11 @@
       "@meta:setting.advancedSubmenuLabel.name": "ଅଧିକ ବିକଳ୍ପ ସବମେନୁ ଲେବଲ୍",
       "@meta:setting.advancedSubmenuLabel.description": "ସବମେନୁର ଲେବଲ୍ ଯାହା ଅତିରିକ୍ତ ଆଇଟମ୍ ସଂଗ୍ରହ କରେ",
       "@meta:setting.settingsHotkey.name": "ସେଟିଂସମୂହ ହଟ୍କି",
-      "@meta:setting.settingsHotkey.description": "ବ Global କଳ୍ପିକ ଗ୍ଲୋବାଲ୍ ହଟ୍କି ଯାହା ଦୃଶ୍ୟ ସେଟିଙ୍ଗ୍ ମେନୁ ଖୋଲିଥାଏ (ଉଦାହରଣ ସ୍ୱରୂପ Ctrl + Alt + M) | ଖାଲି ଏହାକୁ ଅକ୍ଷମ କରିଥାଏ",
+      "@meta:setting.settingsHotkey.description": "ବୈକଳ୍ପିକ ଗ୍ଲୋବାଲ୍ ହଟ୍କି ଯାହା ଦୃଶ୍ୟ ସେଟିଙ୍ଗ୍ ମେନୁ ଖୋଲିଥାଏ (ଉଦାହରଣ ସ୍ୱରୂପ Ctrl + Alt + M) | ଖାଲି ଏହାକୁ ଅକ୍ଷମ କରିଥାଏ",
       "@meta:setting.debugLogging.name": "ତ୍ରୁଟି ନିବାରଣ",
       "@meta:setting.debugLogging.description": "ତ୍ରୁଟି ନିବାରଣ ପାଇଁ ଟାଇମିଂ ଏବଂ ଡାଇଗ୍ନୋଷ୍ଟିକ୍ ଲଗ୍ କରନ୍ତୁ",
       "@meta:setting.clearCache.name": "କ୍ୟାଚ୍ ସଫା କରନ୍ତୁ",
-      "@meta:setting.clearCache.description": "କ୍ୟାଚ୍ ହୋଇଥିବା ମେନୁ ମଡେଲଗୁଡିକ ବିଲୋପ କରିବାକୁ ଟର୍ନ୍ ଅନ୍ କରନ୍ତୁ; ସେମାନେ ପରବର୍ତ୍ତୀ ବ୍ୟବହାରରେ ପୁନ build ନିର୍ମାଣ କରନ୍ତି",
+      "@meta:setting.clearCache.description": "କ୍ୟାଚ୍ ହୋଇଥିବା ମେନୁ ମଡେଲଗୁଡିକ ବିଲୋପ କରିବାକୁ ଟର୍ନ୍ ଅନ୍ କରନ୍ତୁ; ସେମାନେ ପରବର୍ତ୍ତୀ ବ୍ୟବହାରରେ ପୁନଃ ନିର୍ମାଣ କରନ୍ତି",
       "@meta:setting.warmup.name": "ପୃଷ୍ଠଭୂମି ପୂର୍ବ-ନିର୍ମାଣ",
       "@meta:setting.warmup.description": "Explorer ଆରମ୍ଭ ହେବାର କିଛି ସମୟ ପରେ ସାଧାରଣ ମେନୁ ଗରମ କରେ ତେଣୁ ସେମାନଙ୍କର ପ୍ରଥମ ଖୋଲା ତତକ୍ଷଣାତ୍ | ଏହାକୁ ଷ୍ଟାର୍ଟଅପ୍ ରେ ପ୍ରତ୍ୟେକ ପଞ୍ଜୀକୃତ ପ୍ରସଙ୍ଗ-ମେନୁ ହ୍ୟାଣ୍ଡେଲର୍ ଲୋଡ୍ କରିବା ବନ୍ଦ କରିଦିଏ (ଷ୍ଟକ୍ ମେନୁର ଏକ୍ସପୋଜର୍), ଯାହା ତ୍ରୁଟିପୂର୍ଣ୍ଣ ତୃତୀୟ-ପକ୍ଷ ବିସ୍ତାରରୁ ଷ୍ଟାର୍ଟଅପ୍ କ୍ରାସ୍କୁ ଏଡାଇଥାଏ | ପ୍ରତ୍ୟେକ ପ୍ରସଙ୍ଗର ପ୍ରଥମ ଖୋଲା ତା’ପରେ ଷ୍ଟକ୍ ମେନୁ ପରି ଚାହିଦା ଉପରେ ନିର୍ଭର କରେ | ଏକ ହ୍ୟାଣ୍ଡଲର୍ ଯାହା ଷ୍ଟକ୍ ମେନୁକୁ କ୍ରାସ୍ କରିବ ତଥାପି କ୍ରାସ୍",
       "@meta:setting.warmupExtensions.name": "ୱାର୍ମ ଅପ୍ ଏକ୍ସଟେନ୍ସନ୍",
@@ -9092,46 +9194,49 @@
       "@meta:setting.warmupDelaySeconds.description": "କ୍ୟାଚ୍ ଗରମ କରିବା ପୂର୍ବରୁ Explorer ଆରମ୍ଭ ହେବା ପରେ ସେକେଣ୍ଡ୍",
       "@meta:language.auto": "ସ୍ୱୟଂଚାଳିତ (ୱିଣ୍ଡୋଜ୍ ସହିତ ମେଳ)",
       "@theme:Custom (menu.ini)": "କଷ୍ଟମ୍ (menu.ini)",
-      "@theme:Windows 11 Dark": "Windows 11 ଗା ark",
-      "@theme:Windows 11 Light": "Windows 11 ଆଲୋକ",
-      "@theme:Windows 10 Dark": "Windows 10 ଗା ark",
-      "@theme:Windows 10 Light": "Windows 10 ଆଲୋକ",
+      "@theme:Windows 11 Dark": "Windows 11 ଅନ୍ଧାର",
+      "@theme:Windows 11 Light": "Windows 11 ଉଜ୍ଜ୍ୱଳ",
+      "@theme:Windows 10 Dark": "Windows 10 ଅନ୍ଧାର",
+      "@theme:Windows 10 Light": "Windows 10 ଉଜ୍ଜ୍ୱଳ",
       "@theme:High Contrast": "ଉଚ୍ଚ କଣ୍ଟ୍ରାସ୍",
       "@option:fontWeight:normal": "ସାଧାରଣ",
-      "@option:fontWeight:semibold": "ସେମିବୋଲ୍ଡ |",
-      "@option:fontWeight:bold": "ବୋଲ୍ଡ |",
+      "@option:fontWeight:semibold": "ସେମିବୋଲ୍ଡ",
+      "@option:fontWeight:bold": "ବୋଲ୍ଡ",
       "@option:fontStyle:normal": "ସାଧାରଣ",
-      "@option:fontStyle:italic": "ଇଟାଲିକ୍ |",
+      "@option:fontStyle:italic": "ଇଟାଲିକ୍",
       "@option:marker:dot": "ବିନ୍ଦୁ",
-      "@option:marker:check": "ଯାଞ୍ଚ କରନ୍ତୁ |",
+      "@option:marker:check": "ଯାଞ୍ଚ କରନ୍ତୁ",
       "@option:marker:bar": "ବାର୍",
-      "@option:marker:none": "କିଛି ନୁହେଁ |",
-      "@option:showAccelerators:underline": "ଅଣ୍ଡରଲାଇନ୍ |",
+      "@option:marker:none": "କିଛି ନୁହେଁ",
+      "@option:showAccelerators:underline": "ଅଣ୍ଡରଲାଇନ୍",
       "@option:showAccelerators:strip": "ଷ୍ଟ୍ରିପ୍",
       "@option:showAccelerators:raw": "କଞ୍ଚା",
-      "@option:animationEasing:linear": "ରେଖା |",
-      "@option:animationEasing:easeOut": "ସହଜ କରନ୍ତୁ |",
-      "@option:animationEasing:easeInOut": "ଇନ୍-ଆଉଟ୍ ସହଜ କରନ୍ତୁ |",
+      "@option:animationEasing:linear": "ରେଖା",
+      "@option:animationEasing:easeOut": "ସହଜ କରନ୍ତୁ",
+      "@option:animationEasing:easeInOut": "ଇନ୍-ଆଉଟ୍ ସହଜ କରନ୍ତୁ",
       "@option:animationEasing:back": "ପଛକୁ",
-      "@option:animationEasing:bounce": "ବାଉନ୍ସ |",
-      "@option:animationEasing:elastic": "ଇଲଷ୍ଟିକ୍ |",
+      "@option:animationEasing:bounce": "ବାଉନ୍ସ",
+      "@option:animationEasing:elastic": "ଇଲଷ୍ଟିକ୍",
       "@option:animationAnchor:cursor": "କର୍ସର୍",
       "@option:animationAnchor:center": "କେନ୍ଦ୍ର",
-      "@effect:none": "କିଛି ନୁହେଁ |",
-      "@effect:fade": "ମଳିନ |",
+      "@effect:none": "କିଛି ନୁହେଁ",
+      "@effect:fade": "ମଳିନ",
       "@effect:slide": "ସ୍ଲାଇଡ୍",
       "@effect:scale": "ମାପ",
-      "@effect:dissolve": "ବିସର୍ଜନ କରନ୍ତୁ |",
+      "@effect:dissolve": "ବିସର୍ଜନ କରନ୍ତୁ",
       "@effect:crt": "CRT",
       "@effect:unfold": "ଅନାବଶ୍ୟକ",
-      "@overlay:none": "କିଛି ନୁହେଁ |",
+      "@overlay:none": "କିଛି ନୁହେଁ",
       "@overlay:noise": "କୋଳାହଳ",
       "@overlay:plasma": "ପ୍ଲାଜ୍ମା",
       "@overlay:hue": "ହୁ",
-      "@overlay:glow": "ଗ୍ଲୋ |",
-      "@overlay:scanlines": "ସ୍କାନଲାଇନ୍ସ |",
-      "@overlay:vignette": "ଭିଗ୍ନେଟ୍ |",
-      "Selection marker": "ଚୟନ ମାର୍କର"
+      "@overlay:glow": "ଗ୍ଲୋ",
+      "@overlay:scanlines": "ସ୍କାନଲାଇନ୍ସ",
+      "@overlay:vignette": "ଭିଗ୍ନେଟ୍",
+      "Selection marker": "ଚୟନ ମାର୍କର",
+      "New %s": "ନୂତନ %s",
+      "New folder": "ନୂତନ ଫୋଲ୍ଡର୍",
+      "New shortcut": "ନୂତନ ସର୍ଟକଟ୍"
     },
     "ta": {
       "New": "புதியது",
@@ -9384,7 +9489,10 @@
       "@overlay:glow": "ஒளிரும்",
       "@overlay:scanlines": "ஸ்கேன்லைன்கள்",
       "@overlay:vignette": "விக்னெட்",
-      "Selection marker": "தேர்வு குறிப்பான்"
+      "Selection marker": "தேர்வு குறிப்பான்",
+      "New %s": "புதிய %s",
+      "New folder": "புதிய கோப்புறை",
+      "New shortcut": "புதிய குறுக்குவழி"
     },
     "vi": {
       "New": "Mới",
@@ -9531,7 +9639,7 @@
       "Slide offset Y": "Trượt bù Y",
       "Scale from": "Quy mô từ",
       "Saturation / value": "Độ bão hòa / giá trị",
-      "Hue": "Huế",
+      "Hue": "Sắc thái",
       "Alpha": "Alpha",
       "Red": "màu đỏ",
       "Green": "màu xanh lá cây",
@@ -9554,9 +9662,9 @@
       "@meta:setting.theme.description": "Tải giao diện từ <storage>\\themes\\<name>.ini (được tạo từ cài đặt trước đi kèm trong lần sử dụng đầu tiên). menu.ini không bao giờ được sửa đổi.",
       "@meta:option.theme.Custom (menu.ini)": "Tùy chỉnh (menu.ini)",
       "@meta:option.theme.Windows 11 Dark": "Windows 11 Tối",
-      "@meta:option.theme.Windows 11 Light": "Đèn Windows 11",
+      "@meta:option.theme.Windows 11 Light": "Windows 11 Sáng",
       "@meta:option.theme.Windows 10 Dark": "Windows 10 Tối",
-      "@meta:option.theme.Windows 10 Light": "Đèn Windows 10",
+      "@meta:option.theme.Windows 10 Light": "Windows 10 Sáng",
       "@meta:option.theme.High Contrast": "Độ tương phản cao",
       "@meta:setting.menuMode.name": "Chế độ thực đơn",
       "@meta:setting.menuMode.description": "Custom rút menu tự hiển thị và quay lại menu cổ điển sau nhiều lần thất bại. Classic luôn sử dụng menu do chủ quán tự vẽ.",
@@ -9599,9 +9707,9 @@
       "@meta:language.auto": "Tự động (khớp với Windows)",
       "@theme:Custom (menu.ini)": "Tùy chỉnh (menu.ini)",
       "@theme:Windows 11 Dark": "Windows 11 Tối",
-      "@theme:Windows 11 Light": "Đèn Windows 11",
+      "@theme:Windows 11 Light": "Windows 11 Sáng",
       "@theme:Windows 10 Dark": "Windows 10 Tối",
-      "@theme:Windows 10 Light": "Đèn Windows 10",
+      "@theme:Windows 10 Light": "Windows 10 Sáng",
       "@theme:High Contrast": "Độ tương phản cao",
       "@option:fontWeight:normal": "Bình thường",
       "@option:fontWeight:semibold": "nửa đậm",
@@ -9637,7 +9745,10 @@
       "@overlay:glow": "phát sáng",
       "@overlay:scanlines": "Dòng quét",
       "@overlay:vignette": "họa tiết",
-      "Selection marker": "Điểm đánh dấu lựa chọn"
+      "Selection marker": "Điểm đánh dấu lựa chọn",
+      "New %s": "%s mới",
+      "New folder": "Thư mục mới",
+      "New shortcut": "Phím tắt mới"
     },
     "id": {
       "New": "Baru",
@@ -9807,9 +9918,9 @@
       "@meta:setting.theme.description": "Memuat tampilan dari <storage>\\themes\\<name>.ini (dibuat dari paket preset saat pertama kali digunakan). menu.ini tidak pernah dimodifikasi.",
       "@meta:option.theme.Custom (menu.ini)": "Kustom (menu.ini)",
       "@meta:option.theme.Windows 11 Dark": "Windows 11 Gelap",
-      "@meta:option.theme.Windows 11 Light": "Lampu Windows 11",
+      "@meta:option.theme.Windows 11 Light": "Windows 11 Terang",
       "@meta:option.theme.Windows 10 Dark": "Windows 10 Gelap",
-      "@meta:option.theme.Windows 10 Light": "Lampu Windows 10",
+      "@meta:option.theme.Windows 10 Light": "Windows 10 Terang",
       "@meta:option.theme.High Contrast": "Kontras Tinggi",
       "@meta:setting.menuMode.name": "Modus menu",
       "@meta:setting.menuMode.description": "Custom menggambar menu yang dirender sendiri dan kembali ke menu klasik setelah kegagalan berulang kali. Klasik selalu menggunakan menu yang dibuat oleh pemilik.",
@@ -9852,9 +9963,9 @@
       "@meta:language.auto": "Otomatis (cocok dengan Windows)",
       "@theme:Custom (menu.ini)": "Kustom (menu.ini)",
       "@theme:Windows 11 Dark": "Windows 11 Gelap",
-      "@theme:Windows 11 Light": "Lampu Windows 11",
+      "@theme:Windows 11 Light": "Windows 11 Terang",
       "@theme:Windows 10 Dark": "Windows 10 Gelap",
-      "@theme:Windows 10 Light": "Lampu Windows 10",
+      "@theme:Windows 10 Light": "Windows 10 Terang",
       "@theme:High Contrast": "Kontras Tinggi",
       "@option:fontWeight:normal": "Biasa",
       "@option:fontWeight:semibold": "Setengah tebal",
@@ -9890,7 +10001,10 @@
       "@overlay:glow": "Bersinar",
       "@overlay:scanlines": "Garis pindaian",
       "@overlay:vignette": "sketsa",
-      "Selection marker": "Penanda seleksi"
+      "Selection marker": "Penanda seleksi",
+      "New %s": "%s baru",
+      "New folder": "Folder baru",
+      "New shortcut": "Jalan pintas baru"
     },
     "ht": {
       "New": "Nouvo",
@@ -10143,7 +10257,10 @@
       "@overlay:glow": "Ekla",
       "@overlay:scanlines": "Scanlines",
       "@overlay:vignette": "Viyèt",
-      "Selection marker": "Makè seleksyon"
+      "Selection marker": "Makè seleksyon",
+      "New %s": "Nouvo %s",
+      "New folder": "Nouvo katab",
+      "New shortcut": "Nouvo chemen kout"
     }
   }
 }

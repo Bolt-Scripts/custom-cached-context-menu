@@ -251,10 +251,14 @@ static void TestLocalizationDedup() {
     // The same detection must work when the override language differs from
     // the cached shell language: match against the OS-language type names.
     std::vector<cmo::MenuItem> osChildren;
-    for (const cmo::NewTemplate& tmpl : cmo::g_newTemplates) {
-        if (!tmpl.osDisplayName.empty() && osChildren.size() < 3) {
-            osChildren.push_back(cmo::MakeCommandForTesting(
-                tmpl.osDisplayName.c_str()));
+    const auto templates = cmo::NewTemplatesSnapshot();
+    CHECK(templates != nullptr);
+    if (templates) {
+        for (const cmo::NewTemplate& tmpl : *templates) {
+            if (!tmpl.osDisplayName.empty() && osChildren.size() < 3) {
+                osChildren.push_back(cmo::MakeCommandForTesting(
+                    tmpl.osDisplayName.c_str()));
+            }
         }
     }
     CHECK(osChildren.size() == 3);
@@ -415,16 +419,37 @@ static void TestLocalizationSettingsAndCache() {
     cmo::EnsureNewTemplates();
     CHECK(cmo::g_newTemplatesReady.load());
     cmo::SelectLanguage(L"fr");
+    auto frDesktop = cmo::BuildCoreMenuForTesting(
+        cmo::Scope::Desktop, {}, cmo::Shape::Single);
+    auto frNew = cmo::FindItemByRole(frDesktop, cmo::BuiltinRole::New);
+    CHECK(frNew != nullptr);
+    if (frNew) {
+        CHECK(cmo::FindItemByLabelInItem(*frNew, L"Dossier") != nullptr);
+    }
+    cmo::SelectLanguage(L"de");
+    auto deDesktop = cmo::BuildCoreMenuForTesting(
+        cmo::Scope::Desktop, {}, cmo::Shape::Single);
+    auto deNew = cmo::FindItemByRole(deDesktop, cmo::BuiltinRole::New);
+    CHECK(deNew != nullptr);
+    if (deNew) {
+        const std::wstring germanFolder =
+            cmo::TranslateForTesting(L"de", L"Folder");
+        CHECK(cmo::FindItemByLabelInItem(*deNew, germanFolder.c_str()) !=
+              nullptr);
+    }
+
     cmo::ResetNewTemplates();
     CHECK(!cmo::g_newTemplatesReady.load());
+    cmo::EnsureNewTemplates();
+    CHECK(cmo::NewTemplatesSnapshot() != nullptr);
 
     cmo::SelectLanguage(L"en");
 }
 
 static void TestLocalizationRtlLayout() {
     cmo::SelectLanguage(L"ar");
-    CHECK(cmo::LeadingTextAlignment() == DWRITE_TEXT_ALIGNMENT_TRAILING);
-    CHECK(cmo::TrailingTextAlignment() == DWRITE_TEXT_ALIGNMENT_LEADING);
+    CHECK(cmo::LeadingTextAlignment() == DWRITE_TEXT_ALIGNMENT_LEADING);
+    CHECK(cmo::TrailingTextAlignment() == DWRITE_TEXT_ALIGNMENT_TRAILING);
 
     cmo::LayoutMetrics metrics;
     std::vector<cmo::MenuItem> items;
@@ -561,7 +586,7 @@ static void TestLocalizationSettingsChangedCallback() {
     Wh_ModSettingsChanged();
     CHECK(cmo::g_settings->language == L"fr");
     CHECK(cmo::Tr(L"Open") == L"Ouvrir");
-    CHECK(!cmo::g_newTemplatesReady.load());
+    CHECK(cmo::NewTemplatesSnapshot() != nullptr);
 
     WhStubValues()[L"language"] = L"en";
     Wh_ModSettingsChanged();
@@ -2808,9 +2833,13 @@ int main() {
 
         cmo::ResetNewTemplatesForTesting();
         cmo::EnsureNewTemplates();
-        CHECK(cmo::g_newTemplates.size() >= 2);
-        CHECK(cmo::g_newTemplates[0].kind == cmo::NewTemplate::Kind::Folder);
-        CHECK(cmo::g_newTemplates[1].kind == cmo::NewTemplate::Kind::Shortcut);
+        const auto templates = cmo::NewTemplatesSnapshot();
+        CHECK(templates != nullptr);
+        if (templates) {
+            CHECK(templates->size() >= 2);
+            CHECK((*templates)[0].kind == cmo::NewTemplate::Kind::Folder);
+            CHECK((*templates)[1].kind == cmo::NewTemplate::Kind::Shortcut);
+        }
         bool foundNull = false;
         bool foundData = false;
         bool foundShadow = false;
@@ -2821,7 +2850,9 @@ int main() {
         bool foundTxt = false;
         bool foundBmp = false;
         bool foundRtf = false;
-        for (const cmo::NewTemplate& tmpl : cmo::g_newTemplates) {
+        const auto publishedTemplates = cmo::NewTemplatesSnapshot();
+        for (const cmo::NewTemplate& tmpl :
+             publishedTemplates ? *publishedTemplates : cmo::NewTemplateList{}) {
             if (tmpl.extension == L".cmonull" &&
                 tmpl.kind == cmo::NewTemplate::Kind::NullFile) {
                 foundNull = true;
@@ -2897,8 +2928,9 @@ int main() {
             if (child.label == L"Shortcut") {
                 CHECK(child.iconRef == L"@ext:.lnk");
             }
-            if (child.newIndex < cmo::g_newTemplates.size()) {
-                const cmo::NewTemplate& tmpl = cmo::g_newTemplates[child.newIndex];
+            const auto templates = cmo::NewTemplatesSnapshot();
+            if (templates && child.newIndex < templates->size()) {
+                const cmo::NewTemplate& tmpl = (*templates)[child.newIndex];
                 if (tmpl.kind != cmo::NewTemplate::Kind::Folder &&
                     tmpl.kind != cmo::NewTemplate::Kind::Shortcut) {
                     CHECK(child.iconRef == L"@ext:" + tmpl.extension);

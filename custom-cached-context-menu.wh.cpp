@@ -1183,8 +1183,8 @@ MIT
   $description:uk-UA: Мова для меню та налаштувань у меню. Автоматично дотримується мови відображення Windows і повертається до англійської, якщо вона не є однією з підтримуваних мов; сама ця сторінка відповідає мовним налаштуванням Windhawk.
   $description:uz: Menyu va menyu ichidagi sozlamalar uchun til. Avtomatik Windows displey tiliga amal qiladi va qo'llab-quvvatlanadigan tillardan biri bo'lmaganda ingliz tiliga qaytadi; bu sahifaning o'zi Windhawk til sozlamalariga amal qiladi.
   $description:vi-VN: Ngôn ngữ cho menu và cài đặt trong menu. Tự động tuân theo ngôn ngữ hiển thị của Windows và quay lại tiếng Anh khi nó không phải là một trong những ngôn ngữ được hỗ trợ; trang này tuân theo cài đặt ngôn ngữ của Windhawk.
-  $description:zh-CN: 菜单和菜单内设置的语言。自动遵循 Windows 显示语言，当英语不是受支持的语言之一时，会回退到英语；该页面本身遵循Windhawk的语言设置。
-  $description:zh-TW: 選單和選單內設定的語言。自動遵循 Windows 顯示語言，當英文不是受支援的語言之一時，會回退到英文；該頁面本身遵循Windhawk的語言設定。
+  $description:zh-CN: 菜单和菜单内设置的语言。自动模式跟随 Windows 显示语言；如果该语言不在支持列表中，则回退到英语。此页面本身跟随 Windhawk 的语言设置。
+  $description:zh-TW: 選單與選單內設定的語言。自動模式跟隨 Windows 顯示語言；若該語言不在支援清單中，則回退到英文。此頁面本身跟隨 Windhawk 的語言設定。
   $options:
   - auto: Automatic (match Windows)
   - ar: العربية
